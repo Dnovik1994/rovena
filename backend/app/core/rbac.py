@@ -1,0 +1,42 @@
+from collections.abc import Callable
+
+from fastapi import Depends
+
+from app.api.deps import get_current_active_user
+from app.core.errors import forbidden
+from app.models.user import User
+
+POLICY: dict[str, dict[str, list[str]]] = {
+    "proxies": {
+        "list": ["admin", "superadmin"],
+        "create": ["admin", "superadmin"],
+        "update": ["admin", "superadmin"],
+        "delete": ["admin", "superadmin"],
+        "validate": ["admin", "superadmin"],
+    },
+    "accounts": {
+        "list": ["user", "admin", "superadmin"],
+        "create": ["user", "admin", "superadmin"],
+        "update": ["user", "admin", "superadmin"],
+        "delete": ["user", "admin", "superadmin"],
+        "start_warming": ["user", "admin", "superadmin"],
+        "verify": ["user", "admin", "superadmin"],
+    },
+    "users": {
+        "list": ["admin", "superadmin"],
+    },
+}
+
+
+def require_permission(resource: str, action: str) -> Callable:
+    allowed_roles = POLICY.get(resource, {}).get(action, [])
+
+    def _dependency(current_user: User = Depends(get_current_active_user)) -> User:
+        role = current_user.role
+        if current_user.is_admin and role == "user":
+            role = "admin"
+        if role not in allowed_roles:
+            raise forbidden("Access denied")
+        return current_user
+
+    return _dependency

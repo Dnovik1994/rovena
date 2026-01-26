@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+  --tg-theme-bg: #0f172a;
+  --tg-theme-text: #e2e8f0;
+  --tg-theme-hint: #94a3b8;
+  --tg-theme-link: #6366f1;
+  --tg-theme-button: #6366f1;
+  --tg-theme-button-text: #ffffff;
+  --tg-theme-secondary-bg: #111827;
+  --tg-theme-accent: #818cf8;
+  --tg-theme-danger: #f87171;
+}
+
+body {
+  background-color: var(--tg-theme-bg);
+  color: var(--tg-theme-text);
+}
+
+a {
+  color: var(--tg-theme-link);
+}

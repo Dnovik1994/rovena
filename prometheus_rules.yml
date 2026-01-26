@@ -1,0 +1,20 @@
+groups:
+  - name: rovena-alerts
+    rules:
+      - alert: HighQueue
+        expr: celery_queue_length > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery queue length is high"
+          description: "celery_queue_length is above 1000 for 5 minutes."
+
+      - alert: ManyBlockedAccounts
+        expr: accounts_by_status{status="blocked"} / ignoring(status) accounts_total > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many accounts are blocked"
+          description: "More than 20% of accounts are in blocked status."
