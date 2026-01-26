@@ -1,0 +1,27 @@
+from fastapi import APIRouter
+
+from app.api.v1 import (
+    accounts,
+    admin,
+    auth,
+    campaigns,
+    contacts,
+    projects,
+    proxies,
+    sources,
+    targets,
+    users,
+)
+
+router = APIRouter()
+
+router.include_router(auth.router)
+router.include_router(users.router)
+router.include_router(projects.router)
+router.include_router(sources.router)
+router.include_router(targets.router)
+router.include_router(contacts.router)
+router.include_router(campaigns.router)
+router.include_router(accounts.router)
+router.include_router(proxies.router)
+router.include_router(admin.router, prefix="/admin")

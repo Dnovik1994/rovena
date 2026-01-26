@@ -1,0 +1,284 @@
+# Техническое задание: FreeCRM Inviter (kass.freecrm.biz)
+
+## 1. Цель и контекст
+
+**Цель:** создать Telegram Mini App для управления пулом Telegram-аккаунтов с парсингом аудитории и контролируемым инвайтингом в целевые группы/каналы. Каждый аккаунт работает через уникальный резидентский прокси и уникальный device fingerprint.
+
+**Архитектура:**
+
+```
+User -> Nginx (kass.freecrm.biz) -> Backend API -> Workers -> [Pyrogram/Telethon + Proxy] -> Telegram
+```
+
+## 2. Управление доступом и админ-панель
+
+### 2.1. Доступ
+- Админ-панель доступна по отдельному URL: `/admin`.
+- Авторизация по IP whitelist и мастер-паролю.
+
+### 2.2. Функциональность админ-панели
+- **Дашборд:** общее количество пользователей, активных аккаунтов, кампаний, нагрузка.
+- **Управление пользователями:** просмотр, фильтрация по тарифу, одобрение/блокировка, смена тарифа, лимиты, логи действий.
+- **Управление прокси:**
+  - Ввод `host:port:login:pass` или загрузка batch.
+  - Парсинг/валидация (доступность, тип, геолокация).
+  - Назначение прокси: ручное или авто.
+  - Мониторинг: online/offline, uptime, история проверок.
+  - Ротация: массовая смена прокси у группы аккаунтов.
+- **Системные настройки:** лимиты безопасности, параметры генератора Device Config, параметры БД/Redis, настройки уведомлений.
+- **Логи:** фильтруемые таблицы системных логов, логов воркеров, ошибок API.
+
+### 2.3. Доступ для пользователей
+- Пользователь не может добавлять аккаунты самостоятельно.
+- Пользователь видит раздел **"Мои аккаунты"** со списком назначенных аккаунтов и их статусом.
+
+## 3. Инфраструктура и системные настройки
+
+### 3.1. Собственный прокси-сервер (3proxy/Dante)
+- Контейнер на основном сервере.
+- Конфигурация генерируется на основе таблицы `proxies`.
+- Для каждого прокси создаётся порт `10000 + i` и уникальные логин/пароль.
+- Скрипт синхронизации пересобирает `3proxy.cfg` и перезапускает сервис.
+- Обязательная валидация резидентности IP при добавлении.
+
+### 3.2. Генератор Device Config
+- Интеграция `device_config_generator.py` в поток инициализации аккаунта.
+- Сохранение данных в таблицу `accounts`:
+  - `device_model`, `system_version`, `app_version`, `lang_code`, `device_fingerprint` (JSON).
+- Возможность перегенерации Device Config в админ-панели.
+- В `device_fingerprint` сохраняются правдоподобные параметры для мимикрии под реальное устройство: `app_build_id`, `device_brand`, `android_sdk_version`, `lang_pack` и другие согласованные поля.
+
+### 3.3. Логика прогрева (Warming) и восстановления
+- **Период прогрева:** аккаунт в статусе `warming` выполняет низкорисковые действия (чтение/просмотр чатов, вступление в 1–2 небольшие группы, настройка профиля).
+- **Контроль прогрева:** лимиты на число действий в сутки, тайм-ауты между событиями и автоматический переход в `active` после достижения целевого набора действий.
+- **FloodWait/бан:** при FloodWait аккаунт ставится в `cooldown`, инвайты откладываются; при бане аккаунт переводится в `blocked` и снимается с активных кампаний.
+- **Ротация и восстановление:** при падении прокси — поиск свободного прокси из пула, пересвязка аккаунта и перезапуск воркера; при дефиците — ожидание или перевод кампании на резервные аккаунты.
+
+### 3.4. SSL и Nginx
+- Домен: `kass.freecrm.biz`.
+- SSL через Let’s Encrypt, команда:
+
+```
+certbot certonly --nginx -d kass.freecrm.biz
+```
+
+- Пример конфига Nginx:
+
+```nginx
+server {
+    listen 80;
+    server_name kass.freecrm.biz;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name kass.freecrm.biz;
+
+    ssl_certificate /etc/letsencrypt/live/kass.freecrm.biz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kass.freecrm.biz/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location / {
+        root /var/www/kass.freecrm.biz/html;
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /ws/ {
+        proxy_pass http://127.0.0.1:8000/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /admin/ {
+        allow 192.168.1.100;
+        allow 10.0.0.0/24;
+        deny all;
+
+        proxy_pass http://127.0.0.1:8000/admin/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    access_log /var/log/nginx/kass.freecrm.biz.access.log;
+    error_log /var/log/nginx/kass.freecrm.biz.error.log;
+}
+```
+
+### 3.5. Требования к серверу и мониторингу
+- **MVP минимум:** 8 vCPU, 16 ГБ RAM, 100 ГБ SSD.
+- **Рекомендация для масштабирования:** 16 vCPU, 32–64 ГБ RAM, NVMe SSD.
+- **Docker Compose:** сервисы `postgres`, `redis`, `backend`, `worker`, `3proxy`, `nginx`.
+- **Ключевые переменные окружения:** `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `PROXY_POOL_ENABLED`.
+- **Метрики (Prometheus):**
+  - `accounts_status{state="active|warming|blocked"}`
+  - `proxy_health` и `proxy_uptime_seconds`
+  - `invite_success_rate`, `invite_error_rate`
+  - `celery_queue_length`, `celery_task_duration_seconds`
+- **Алерты:** более 20% аккаунтов неактивны, очередь Celery > 1000, падение 3proxy, рост ошибок API 5xx.
+
+## 4. Технологический стек и архитектура
+
+### 4.1. Backend
+- **FastAPI** (async API/WebSocket).
+- **Pyrogram 2.x** — основная библиотека для парсинга/инвайтинга.
+- **Telethon 1.x** — дополнительные методы и статистика.
+- **PostgreSQL**, **Redis**.
+- **Celery + Redis** — фоновые задачи.
+- **Workers** — поддержание 100-150 параллельных соединений.
+
+### 4.2. Infrastructure as Code
+- Сервер: Ubuntu 22.04 / Debian 11.
+- Docker + Docker Compose: Postgres, Redis, 3proxy, backend.
+- Nginx: SSL + reverse proxy.
+- CI/CD: GitHub Actions/GitLab CI.
+- Мониторинг: Prometheus + Grafana, Sentry.
+
+## 5. Roadmap
+
+**Этап 0 (Неделя 1):** инфраструктура, DNS, SSL, Nginx, Postgres, Redis.
+
+**Этап 1 (Недели 2-4):** FastAPI, модель ролей, админ-панель, CRUD для пользователей/прокси, синхронизация 3proxy.
+
+**Этап 2 (Недели 5-6):** интеграция Pyrogram/Telethon, Device Config, воркеры, health checks.
+
+**Этап 3 (Недели 7-9):** Mini App фронтенд, API для "Мои аккаунты", парсинг, инвайтинг, кампании, Celery.
+
+**Этап 4 (Недели 10-12):** лимиты, прогрев, мониторинг, нагрузочное тестирование.
+
+## 6. Риски и ограничения
+- Требуются резидентские прокси (4G/ISP) из-за высокого риска банов.
+- Пул 150 аккаунтов требует устойчивых воркеров, авто-перезапуска и логирования.
+- Масштабирование потребует нескольких процессов или серверов.
+
+## 7. Требования к фронтенду (Mini App)
+
+### 7.1. Технологии
+- React 18 + TypeScript (строгая типизация).
+- Vite, React Router 6.
+- Zustand, React Query.
+- TailwindCSS 3 + Flowbite React.
+- Socket.io Client, Axios.
+- React Hook Form + Zod.
+
+### 7.2. Структура проекта
+```
+src/
+├── main.tsx
+├── App.tsx
+├── layouts/
+├── pages/
+├── components/
+├── hooks/
+├── stores/
+├── services/
+├── utils/
+├── types/
+└── styles/
+```
+
+### 7.3. Telegram WebApp SDK
+- Инициализация при загрузке.
+- Авто-авторизация через `initData`.
+- Поддержка тем и компонентов SDK (MainButton, BackButton, SettingsButton, HapticFeedback, CloudStorage, BiometricManager).
+
+### 7.4. Навигация
+Нижнее меню:
+```
+[🏠] Главная  [📱] Аккаунты  [🔍] Парсинг  [🚀] Инвайтинг  [📊] Статистика
+```
+
+### 7.5. Основные страницы
+- **Главная (Dashboard):** быстрые действия, статус системы, кампании, уведомления, мини-статистика.
+- **Мои аккаунты:** фильтры, карточки, детальный просмотр, массовые операции.
+- **Парсинг:** источники, добавление групп, результаты, фильтры.
+- **Целевые группы:** список, настройки, статистика.
+- **Инвайтинг:** кампании, создание по шагам, прогресс, логи.
+- **Статистика:** метрики, графики, экспорт.
+- **Настройки:** профиль, уведомления, whitelist/blacklist, безопасность, API доступ.
+
+### 7.6. UI/UX
+- Mobile-first дизайн.
+- Цветовая палитра: индиго (#4F46E5), успех (#10B981), ошибка (#EF4444), предупреждение (#F59E0B), инфо (#3B82F6).
+- Типографика: Inter или system-ui, базовый размер 14px.
+- Компоненты: кнопки, карточки, формы, таблицы, модалки, тултипы, скелетоны.
+
+### 7.7. Производительность и доступность
+- Core Web Vitals: LCP < 2.5s, FID < 100ms, CLS < 0.1.
+- Code splitting, lazy loading, кеширование.
+- Контрастность текста минимум 4.5:1.
+
+### 7.8. Real-time
+- WebSocket события: `campaign.progress`, `account.status_change`, `system.notification`, `invite.completed`.
+- Авто-reconnect с backoff, heartbeat.
+
+### 7.9. Безопасность
+- JWT токены только в памяти.
+- Валидация форм и sanitization данных.
+- Верификация `initData` Telegram.
+### 7.10. UI состояния и обработка ошибок
+- **Skeleton screens:** скелетоны для списка аккаунтов, кампаний и источников парсинга.
+- **Empty states:** информативные экраны для отсутствия аккаунтов, кампаний, спарсенных данных.
+- **Офлайн-режим:** баннер потери соединения, деградация функций до чтения кешированных данных, повторная синхронизация при восстановлении.
+- **Ошибки клиента:** 403 (истекшая сессия), 429 (лимиты), ошибки валидации — показывать alert, предлагать повторить, логировать в Sentry.
+- **Валидация форм:** формат номера телефона (E.164), лимиты кампаний (инвайтов в час/день), запрет пустых источников.
+
+## 8. Детальная архитектура ключевых сервисов
+
+### 8.1. Жизненный цикл аккаунта
+1. Админ добавляет аккаунт.
+2. Назначается свободный прокси из пула.
+3. Генерируется Device Config и сохраняется в `accounts`.
+4. Статус `warming`: прогрев с ограниченными действиями.
+5. Переход в `active` после успешного прогрева.
+6. Регулярный health check (сессия, прокси, лимиты).
+7. При бане/лимитах — перевод в `blocked` или `cooldown` с автоматической реакцией. Например, при FloodWaitError на 2 часа аккаунт переводится в `cooldown` на это время, исключается из распределения новых задач, а событие пишется в лог.
+
+### 8.2. Поток инвайтинга
+1. Пользователь создаёт кампанию.
+2. Создаётся Celery task.
+3. Account Worker (Pyrogram) запускает инвайты через назначенный прокси.
+4. Telegram API возвращает результат: success/FloodWait/ошибка.
+5. Результат записывается в `invite_logs`.
+6. WebSocket отправляет событие на фронтенд (`campaign.progress`).
+
+### 8.3. Схема работы с прокси
+- Админ добавляет прокси в БД.
+- Генератор конфигурации собирает `3proxy.cfg` из таблицы `proxies`.
+- 3proxy перезапускается и публикует порты `10000 + i` с уникальными кредами.
+- Воркеры получают актуальные параметры подключения из БД при старте/переподключении.
+
+## 9. Тестирование
+- Unit (Jest + Testing Library), покрытие > 80% критичного кода.
+- Component tests со snapshot.
+- Integration/E2E (Cypress) для ключевых сценариев:
+  - "Новая кампания".
+  - "Парсинг группы".
+  - "Управление аккаунтами".
+
+## 10. Критерии завершения этапов (Definition of Done)
+- **MVP (Этап 3):** админ может добавить прокси и аккаунт; пользователь может запустить кампанию на 5 аккаунтов; соблюдается лимит 1 инвайт/час/аккаунт.
+- **v1.0:** система стабильно поддерживает пул из 50 аккаунтов (все статусы, health checks, ротация). Реализован real-time дашборд с WebSocket-обновлением прогресса кампаний и статусов аккаунтов (задержка < 3 сек). Интегрирована система подписок минимум с двумя тарифами (Free/Pro), автоматическим учётом лимитов и страницами управления в профиле.
