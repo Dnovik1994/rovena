@@ -9,7 +9,7 @@
 **Environment:** local/staging/prod  
 **Test command:**
 ```
-locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost:8000
+locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost
 ```
 
 ### Results
@@ -23,6 +23,6 @@ locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost:8
 - Redis CPU/IO:
 
 ## Optimization Checklist
-- Apply Alembic index migration `0015_add_performance_indexes`.
-- Verify cache hits in logs (`Cache hit for user` / `tariff`).
+- Apply Alembic index migration `0017_add_performance_indexes`.
+- Verify cache hits in logs (`Cache hit for key user:` / `tariff:`).
 - Monitor worker concurrency and queue length.

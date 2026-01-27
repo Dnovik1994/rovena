@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from typing import List
 
 from pydantic import Field
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
 
     cors_origins: List[str] = Field(default_factory=list)
+    cors_allow_credentials: bool = True
 
     database_url: str = "mysql+pymysql://rovena:rovena@db:3306/rovena"
     redis_url: str = "redis://redis:6379/0"
@@ -29,6 +31,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
+    telegram_auth_ttl_seconds: int = 0
     sentry_dsn: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
@@ -42,4 +45,16 @@ class Settings(BaseSettings):
 @lru_cache
 
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if settings.production and settings.jwt_secret == "change-me":
+        raise ValueError("Change JWT_SECRET!")
+
+    if settings.production:
+        raw_origins = os.getenv("CORS_ORIGINS", "")
+        parsed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+        settings.cors_origins = parsed_origins
+    else:
+        settings.cors_origins = ["*"]
+
+    settings.cors_allow_credentials = settings.cors_origins != ["*"]
+    return settings

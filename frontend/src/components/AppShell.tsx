@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
+import Toast from "./Toast";
 const navItems = [
   { to: "/", label: "Dashboard" },
   { to: "/accounts", label: "Accounts" },
@@ -19,6 +20,7 @@ interface AppShellProps {
 
 const AppShell = ({ children, isAdmin = false }: AppShellProps): JSX.Element => {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -31,8 +33,24 @@ const AppShell = ({ children, isAdmin = false }: AppShellProps): JSX.Element => 
     };
   }, []);
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      if (!detail?.message) {
+        return;
+      }
+      setToastMessage(detail.message);
+      window.setTimeout(() => setToastMessage(null), 3000);
+    };
+    window.addEventListener("app:toast", handler as EventListener);
+    return () => {
+      window.removeEventListener("app:toast", handler as EventListener);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-[var(--tg-theme-bg)] text-[var(--tg-theme-text)]">
+      {toastMessage && <Toast message={toastMessage} />}
       <header className="border-b border-slate-800/60">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <div>

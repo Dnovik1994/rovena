@@ -1,9 +1,8 @@
-import React, { useEffect } from "react";
+import React, { Suspense, useEffect, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import AppShell from "./components/AppShell";
 import Accounts from "./pages/Accounts";
-import Admin from "./pages/Admin";
 import Campaigns from "./pages/Campaigns";
 import Contacts from "./pages/Contacts";
 import Dashboard from "./pages/Dashboard";
@@ -12,12 +11,15 @@ import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
 import Projects from "./pages/Projects";
 import Sources from "./pages/Sources";
-import Subscription from "./pages/Subscription";
 import Targets from "./pages/Targets";
 import { apiFetch } from "./services/api";
 import { AuthProvider, useAuth } from "./stores/auth";
 import { UserProfile } from "./types/user";
 import { applyTelegramTheme } from "./utils/telegramTheme";
+
+const Admin = lazy(() => import("./pages/Admin"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Subscription = lazy(() => import("./pages/Subscription"));
 
 const AppRoutes = (): JSX.Element => {
   const { token, user, setUser, onboardingNeeded, setOnboardingNeeded } = useAuth();
@@ -50,19 +52,22 @@ const AppRoutes = (): JSX.Element => {
 
   return (
     <AppShell isAdmin={user?.is_admin ?? false}>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/accounts" element={<Accounts />} />
-        <Route path="/projects" element={<Projects />} />
-        <Route path="/sources" element={<Sources />} />
-        <Route path="/targets" element={<Targets />} />
-        <Route path="/contacts" element={<Contacts />} />
-        <Route path="/campaigns" element={<Campaigns />} />
-        <Route path="/subscription" element={<Subscription />} />
-        <Route path="/admin" element={<Admin />} />
-        <Route path="/onboarding" element={<Onboarding />} />
-        <Route path="/error/:code" element={<ErrorPage />} />
-      </Routes>
+      <Suspense fallback={<div className="rounded-2xl bg-slate-900/60 p-4 text-sm text-slate-300">Загрузка...</div>}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/accounts" element={<Accounts />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/sources" element={<Sources />} />
+          <Route path="/targets" element={<Targets />} />
+          <Route path="/contacts" element={<Contacts />} />
+          <Route path="/campaigns" element={<Campaigns />} />
+          <Route path="/subscription" element={<Subscription />} />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/error/:code" element={<ErrorPage />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </AppShell>
   );
 };

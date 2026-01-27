@@ -39,7 +39,12 @@ def get_client(account: Account, proxy: Proxy | None = None) -> Client:
         if device_config.get(key)
     }
 
-    logger.info("Initializing Pyrogram client", extra={"account_id": account.id})
+    proxy_status = "enabled" if proxy_config else "none"
+    logger.info(
+        "Pyrogram client init | account_id=%s | proxy=%s",
+        account.id,
+        proxy_status,
+    )
 
     try:
         return Client(

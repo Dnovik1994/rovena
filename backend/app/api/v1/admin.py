@@ -5,6 +5,7 @@ from sqlalchemy import or_, cast, String
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
+from app.core.cache import delete_key, get_json, set_json
 from app.core.database import get_db
 from app.core.settings import get_settings
 from app.models.account import Account, AccountStatus
@@ -16,6 +17,8 @@ from app.schemas.tariff import TariffCreate, TariffResponse, TariffUpdate, UserT
 
 router = APIRouter(tags=["admin"])
 settings = get_settings()
+
+TARIFFS_CACHE_KEY = "tariffs:all"
 
 
 class AdminUserUpdate(BaseModel):
@@ -154,6 +157,7 @@ async def admin_user_update(
             ) from exc
     db.commit()
     db.refresh(user)
+    await delete_key(f"user:{user.id}")
     return {
         "id": user.id,
         "telegram_id": user.telegram_id,
@@ -195,6 +199,7 @@ async def admin_user_tariff_update(
     user.tariff_id = tariff.id
     db.commit()
     db.refresh(user)
+    await delete_key(f"user:{user.id}")
     return {
         "id": user.id,
         "telegram_id": user.telegram_id,
@@ -221,8 +226,13 @@ async def admin_tariffs(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> list[TariffResponse]:
+    cached = await get_json(TARIFFS_CACHE_KEY)
+    if cached:
+        return [TariffResponse(**item) for item in cached.get("items", [])]
     tariffs = db.query(Tariff).order_by(Tariff.id.asc()).all()
-    return [TariffResponse.model_validate(tariff) for tariff in tariffs]
+    payload = [TariffResponse.model_validate(tariff).model_dump() for tariff in tariffs]
+    await set_json(TARIFFS_CACHE_KEY, {"items": payload}, ttl_seconds=60)
+    return [TariffResponse(**item) for item in payload]
 
 
 @router.post(
@@ -248,6 +258,8 @@ async def admin_tariff_create(
     db.add(tariff)
     db.commit()
     db.refresh(tariff)
+    await delete_key(TARIFFS_CACHE_KEY)
+    await delete_key(f"tariff_limits:{tariff.id}")
     return TariffResponse.model_validate(tariff)
 
 
@@ -266,6 +278,9 @@ async def admin_tariff_update(
         setattr(tariff, field, value)
     db.commit()
     db.refresh(tariff)
+    await delete_key(TARIFFS_CACHE_KEY)
+    await delete_key(f"tariff:{tariff.id}")
+    await delete_key(f"tariff_limits:{tariff.id}")
     return TariffResponse.model_validate(tariff)
 
 
@@ -288,6 +303,9 @@ async def admin_tariff_delete(
 
     db.delete(tariff)
     db.commit()
+    await delete_key(TARIFFS_CACHE_KEY)
+    await delete_key(f"tariff:{tariff.id}")
+    await delete_key(f"tariff_limits:{tariff.id}")
     return None
 
 

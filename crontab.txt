@@ -1,1 +1,2 @@
-0 3 * * * pg_dump -h db -U rovena rovena > /backups/db-$(date +\%Y\%m\%d).sql; redis-dump -h redis > /backups/redis-$(date +\%Y\%m\%d).rdb
+0 3 * * * mysqldump -h db -u${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE} > /backups/db-$(date +\%Y\%m\%d).sql && gzip /backups/db-$(date +\%Y\%m\%d).sql && find /backups -name "db-*.sql.gz" -mtime +7 -delete
+0 4 * * * redis-cli -u ${REDIS_URL} --rdb /backups/redis-$(date +\%Y\%m\%d).rdb && gzip /backups/redis-$(date +\%Y\%m\%d).rdb && find /backups -name "redis-*.rdb.gz" -mtime +7 -delete

@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_tariff_limits
+from app.api.deps import get_current_active_user, get_tariff_limits
 from app.core.database import get_db
 from app.core.limits import get_daily_invites
 from app.core.rate_limit import limiter, tariff_rate_limit
@@ -21,7 +21,7 @@ router = APIRouter(tags=["campaigns"])
 
 @router.get("/campaigns", response_model=list[CampaignResponse])
 async def list_campaigns(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> list[CampaignResponse]:
     campaigns = (
@@ -36,7 +36,7 @@ async def list_campaigns(
 @router.post("/campaigns", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     payload: CampaignCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> CampaignResponse:
     project = (
@@ -69,7 +69,7 @@ async def create_campaign(
 async def update_campaign(
     campaign_id: int,
     payload: CampaignUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> CampaignResponse:
     campaign = (
@@ -110,7 +110,7 @@ async def update_campaign(
 @router.delete("/campaigns/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_campaign(
     campaign_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> None:
     campaign = (
@@ -137,7 +137,7 @@ async def delete_campaign(
 async def start_campaign(
     campaign_id: int,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     tariff_limits: dict[str, int] = Depends(get_tariff_limits),
     db: Session = Depends(get_db),
 ) -> CampaignResponse:
@@ -187,7 +187,7 @@ async def start_campaign(
 @router.post("/campaigns/{campaign_id}/stop", response_model=CampaignResponse)
 async def stop_campaign(
     campaign_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> CampaignResponse:
     campaign = (

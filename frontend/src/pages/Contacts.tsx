@@ -4,7 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import EmptyState from "../components/EmptyState";
-import SkeletonList from "../components/SkeletonList";
+import ErrorState from "../components/ErrorState";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import { createContact, fetchContacts } from "../services/resources";
 import { useAuth } from "../stores/auth";
 import { Contact } from "../types/contact";
@@ -145,13 +146,11 @@ const Contacts = (): JSX.Element => {
       </form>
 
       {error && !loading && (
-        <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">
-          {error}
-        </div>
+        <ErrorState title="Ошибка загрузки" description={error} />
       )}
 
       {loading ? (
-        <SkeletonList rows={4} />
+        <LoadingSkeleton rows={4} label="Загрузка контактов" />
       ) : contacts.length === 0 ? (
         <EmptyState
           title="Контактов нет"

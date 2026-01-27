@@ -19,6 +19,7 @@ const errorCopy: Record<string, { title: string; description: string }> = {
 const ErrorPage = (): JSX.Element => {
   const { code } = useParams();
   const error = errorCopy[code ?? "500"] ?? errorCopy["500"];
+  const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
 
   return (
     <section className="flex min-h-[50vh] items-center justify-center">
@@ -26,7 +27,25 @@ const ErrorPage = (): JSX.Element => {
         <p className="text-xs uppercase tracking-[0.3em] text-rose-200">Error {code}</p>
         <h2 className="mt-3 text-2xl font-semibold">{error.title}</h2>
         <p className="mt-2 text-sm text-rose-200/80">{error.description}</p>
-        <p className="mt-6 text-xs text-rose-200/70">Если ошибка повторяется, обратитесь к администратору.</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-full border border-rose-300/50 px-4 py-2 text-xs text-rose-100"
+          >
+            Повторить
+          </button>
+          {sentryDsn && (
+            <button
+              type="button"
+              onClick={() => window.open(sentryDsn, "_blank")}
+              className="rounded-full border border-rose-300/50 px-4 py-2 text-xs text-rose-100"
+            >
+              Отправить feedback
+            </button>
+          )}
+        </div>
+        <p className="mt-4 text-xs text-rose-200/70">Если ошибка повторяется, обратитесь к администратору.</p>
       </div>
     </section>
   );

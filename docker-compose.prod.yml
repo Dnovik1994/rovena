@@ -1,9 +1,16 @@
 version: "3.9"
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: mysql:8.4
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MYSQL_DATABASE: rovena
       MYSQL_USER: rovena
@@ -20,6 +27,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - redis-data:/data
     healthcheck:
@@ -31,6 +39,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -44,10 +53,15 @@ services:
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      com.prometheus.scrape: "true"
+      com.prometheus.port: "8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -55,6 +69,7 @@ services:
   worker:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -68,9 +83,20 @@ services:
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     command: celery -A app.workers worker --loglevel=info
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+      memlock:
+        soft: -1
+        hard: -1
     depends_on:
-      - db
-      - redis
+      backend:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers inspect ping -d celery@$$HOSTNAME"]
       interval: 30s
@@ -81,6 +107,7 @@ services:
     image: vimagick/3proxy:latest
     container_name: 3proxy
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "10000-11000:10000-11000"
     volumes:
@@ -101,6 +128,7 @@ services:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://backend:8000/api/v1}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     depends_on:
@@ -109,12 +137,16 @@ services:
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt
+    labels:
+      com.prometheus.scrape: "true"
+      com.prometheus.port: "80"
     depends_on:
       - backend
       - frontend
@@ -127,6 +159,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "9090:9090"
     volumes:
@@ -141,6 +174,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "3000:3000"
     volumes:
@@ -151,6 +185,7 @@ services:
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:latest
     restart: unless-stopped
+    logging: *default-logging
     command:
       - -nginx.scrape-uri=http://nginx/nginx_status
     depends_on:
@@ -159,6 +194,7 @@ services:
   blackbox-exporter:
     image: prom/blackbox-exporter:latest
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "9115:9115"
     volumes:
@@ -167,15 +203,26 @@ services:
       - --config.file=/etc/blackbox_exporter/config.yml
 
   cron:
-    image: busybox:1.36
+    image: alpine/cron:latest
     restart: unless-stopped
+    logging: *default-logging
+    environment:
+      MYSQL_DATABASE: rovena
+      MYSQL_USER: rovena
+      MYSQL_PASSWORD: rovena
+      REDIS_URL: redis://redis:6379/0
     volumes:
-      - ./crontab.txt:/crontab.txt:ro
+      - ./crontab.txt:/etc/crontabs/root:ro
       - backups:/backups
-    command: sh -c "crontab /crontab.txt && crond -f -l 8"
+    command: sh -c "apk add --no-cache mysql-client redis && crond -f -l 2"
     depends_on:
       - db
       - redis
+    healthcheck:
+      test: ["CMD", "crond", "-l", "2"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres-data:

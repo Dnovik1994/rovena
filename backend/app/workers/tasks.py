@@ -3,6 +3,8 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
+from celery import current_task
+
 from app.clients.telegram_client import get_client
 from app.core.database import SessionLocal
 from app.models.account import Account, AccountStatus
@@ -21,6 +23,16 @@ from pyrogram.errors import FloodWait, PeerIdInvalid, UserAlreadyParticipant, Us
 import sentry_sdk
 
 logger = logging.getLogger(__name__)
+
+def _log_task_started(campaign_id: int | None = None, account_id: int | None = None) -> None:
+    task = current_task
+    task_name = task.name if task else "unknown"
+    logger.info(
+        "Task %s started | campaign_id=%s | account_id=%s",
+        task_name,
+        campaign_id,
+        account_id,
+    )
 
 
 def _log_dispatch_error(
@@ -232,14 +244,22 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
         db.commit()
 
 
-@celery_app.task(rate_limit="2/s")
+@celery_app.task(
+    rate_limit="2/s",
+    autoretry_for=(FloodWait,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    retry_jitter=True,
+)
 def campaign_dispatch(campaign_id: int) -> None:
+    _log_task_started(campaign_id=campaign_id)
     asyncio.run(_run_campaign_dispatch(campaign_id))
 
 
 @celery_app.task
 
 def account_health_check(account_id: int) -> None:
+    _log_task_started(account_id=account_id)
     logger.info("Checking account", extra={"account_id": account_id})
 
 
@@ -345,18 +365,26 @@ async def _run_warming_cycle(account_id: int) -> None:
         )
 
 
-@celery_app.task
+@celery_app.task(
+    autoretry_for=(FloodWait,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    retry_jitter=True,
+)
 def start_warming(account_id: int) -> None:
+    _log_task_started(account_id=account_id)
     asyncio.run(_run_warming_cycle(account_id))
 
 
 @celery_app.task
 def perform_warming_action(account_id: int) -> None:
+    _log_task_started(account_id=account_id)
     logger.info("Perform warming action", extra={"account_id": account_id})
 
 
 @celery_app.task
 def check_cooldowns() -> None:
+    _log_task_started()
     now = datetime.now(timezone.utc)
     with SessionLocal() as db:
         accounts = (
@@ -383,9 +411,11 @@ def check_cooldowns() -> None:
 
 @celery_app.task
 def sync_3proxy_config() -> None:
+    _log_task_started()
     sync_3proxy()
 
 
 @celery_app.task
 def validate_proxy_task(proxy_id: int) -> None:
+    _log_task_started()
     asyncio.run(validate_proxy(proxy_id))

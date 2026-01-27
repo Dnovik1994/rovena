@@ -1,3 +1,4 @@
+import subprocess
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
@@ -10,6 +11,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import sentry_sdk
+from redis import Redis
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 import stripe
@@ -27,8 +29,9 @@ from app.core.metrics import accounts_by_status, accounts_total, celery_queue_le
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+APP_VERSION = "1.0.0"
 
-configure_logging()
+configure_logging(production=settings.production)
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -42,12 +45,29 @@ app.state.limiter = limiter
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins or ["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_origins,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(SlowAPIMiddleware)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    commit = _get_git_commit()
+    logger.info(
+        "App starting | version=%s | commit=%s | env=PRODUCTION=%s",
+        APP_VERSION,
+        commit,
+        settings.production,
+    )
+    try:
+        redis_client = Redis.from_url(settings.redis_url)
+        redis_client.ping()
+        logger.info("Redis connected")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Redis connection failed", extra={"error": str(exc)})
 
 
 @app.middleware("http")
@@ -119,13 +139,32 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc), "type": "internal_error"},
+        content={"error": {"code": "500", "message": "Internal error"}},
     )
 
 
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _get_git_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return result.stdout.strip()
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    return {"version": APP_VERSION, "commit": _get_git_commit()}
 
 
 @app.get("/metrics")
@@ -138,8 +177,6 @@ async def metrics() -> Response:
             accounts_by_status.labels(status=status.value).set(count)
 
     try:
-        from redis import Redis
-
         redis_client = Redis.from_url(settings.redis_url)
         celery_queue_length.set(redis_client.llen("celery"))
     except Exception:  # noqa: BLE001

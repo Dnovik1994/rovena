@@ -27,6 +27,14 @@ export const connectStatusSocket = (
 
   const socket = new WebSocket(url.toString());
 
+  socket.onopen = () => {
+    console.log("Status WebSocket connected");
+  };
+
+  socket.onclose = () => {
+    console.log("Status WebSocket disconnected");
+  };
+
   socket.onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data) as StatusMessage;

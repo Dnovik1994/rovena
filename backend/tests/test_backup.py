@@ -1,16 +1,9 @@
 from pathlib import Path
 
 
-def test_backup_crontab_configured():
-    root = Path(__file__).resolve().parents[2]
-    crontab = root / "crontab.txt"
-    compose = root / "docker-compose.prod.yml"
-
-    assert crontab.exists()
-    crontab_content = crontab.read_text(encoding="utf-8")
-    assert "pg_dump" in crontab_content
-    assert "redis-dump" in crontab_content
-
-    compose_content = compose.read_text(encoding="utf-8")
-    assert "cron:" in compose_content
-    assert "backups:" in compose_content
+def test_backup_crontab_entries_present():
+    crontab = Path("crontab.txt").read_text()
+    assert "mysqldump -h db" in crontab
+    assert "redis-cli -u ${REDIS_URL}" in crontab
+    assert "find /backups -name \"db-*.sql.gz\" -mtime +7 -delete" in crontab
+    assert "find /backups -name \"redis-*.rdb.gz\" -mtime +7 -delete" in crontab
