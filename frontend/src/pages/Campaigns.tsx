@@ -254,6 +254,12 @@ const Campaigns = (): JSX.Element => {
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </form>
 
+      {error && !loading && (
+        <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
+
       {loading ? (
         <SkeletonList rows={4} />
       ) : campaigns.length === 0 ? (

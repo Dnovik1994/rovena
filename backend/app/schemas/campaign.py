@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
+
 
 class CampaignStatus(str, Enum):
     draft = "draft"
@@ -11,7 +13,7 @@ class CampaignStatus(str, Enum):
     completed = "completed"
 
 
-class CampaignCreate(BaseModel):
+class CampaignCreate(SanitizedModel):
     project_id: int
     name: str = Field(min_length=2, max_length=255)
     source_id: int | None = None
@@ -22,7 +24,7 @@ class CampaignCreate(BaseModel):
     end_at: datetime | None = None
 
 
-class CampaignUpdate(BaseModel):
+class CampaignUpdate(SanitizedModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     status: CampaignStatus | None = None
     source_id: int | None = None

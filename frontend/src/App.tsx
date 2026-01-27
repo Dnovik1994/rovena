@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import AppShell from "./components/AppShell";
 import Accounts from "./pages/Accounts";
@@ -9,6 +9,7 @@ import Contacts from "./pages/Contacts";
 import Dashboard from "./pages/Dashboard";
 import ErrorPage from "./pages/ErrorPage";
 import Login from "./pages/Login";
+import Onboarding from "./pages/Onboarding";
 import Projects from "./pages/Projects";
 import Sources from "./pages/Sources";
 import Subscription from "./pages/Subscription";
@@ -19,17 +20,29 @@ import { UserProfile } from "./types/user";
 import { applyTelegramTheme } from "./utils/telegramTheme";
 
 const AppRoutes = (): JSX.Element => {
-  const { token, user, setUser } = useAuth();
+  const { token, user, setUser, onboardingNeeded, setOnboardingNeeded } = useAuth();
+  const location = useLocation();
 
   useEffect(() => {
     if (!token) {
       setUser(null);
+      setOnboardingNeeded(false);
       return;
     }
     apiFetch<UserProfile>("/me", {}, token)
-      .then((data) => setUser(data))
-      .catch(() => setUser(null));
-  }, [token, setUser]);
+      .then((data) => {
+        setUser(data);
+        setOnboardingNeeded(!data.onboarding_completed);
+      })
+      .catch(() => {
+        setUser(null);
+        setOnboardingNeeded(false);
+      });
+  }, [token, setOnboardingNeeded, setUser]);
+
+  if (token && onboardingNeeded && location.pathname !== "/onboarding") {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   if (!token) {
     return <Login />;
@@ -47,6 +60,7 @@ const AppRoutes = (): JSX.Element => {
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/subscription" element={<Subscription />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/error/:code" element={<ErrorPage />} />
       </Routes>
     </AppShell>

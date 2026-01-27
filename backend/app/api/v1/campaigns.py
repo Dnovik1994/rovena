@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_tariff_limits
 from app.core.database import get_db
 from app.core.limits import get_daily_invites
 from app.core.rate_limit import limiter, tariff_rate_limit
@@ -138,6 +138,7 @@ async def start_campaign(
     campaign_id: int,
     request: Request,
     current_user: User = Depends(get_current_user),
+    tariff_limits: dict[str, int] = Depends(get_tariff_limits),
     db: Session = Depends(get_db),
 ) -> CampaignResponse:
     campaign = (
@@ -150,7 +151,7 @@ async def start_campaign(
             status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found"
         )
 
-    max_invites = current_user.tariff.max_invites_day if current_user.tariff else 50
+    max_invites = tariff_limits["max_invites_day"]
     used_invites = get_daily_invites(current_user.id)
     if used_invites >= max_invites:
         raise HTTPException(
@@ -158,12 +159,18 @@ async def start_campaign(
             detail="Daily invite limit reached",
         )
 
-    max_accounts = current_user.tariff.max_accounts if current_user.tariff else 1
+    max_accounts = tariff_limits["max_accounts"]
     account_count = db.query(Account).filter(Account.owner_id == current_user.id).count()
     if account_count > max_accounts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tariff account limit exceeded",
+        )
+
+    if campaign.status != CampaignStatus.draft:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Campaign can only be started from draft status",
         )
 
     campaign.status = CampaignStatus.active

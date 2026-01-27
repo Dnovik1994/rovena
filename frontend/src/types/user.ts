@@ -7,6 +7,7 @@ export interface UserProfile {
   is_admin: boolean;
   is_active?: boolean;
   role?: string | null;
+  onboarding_completed?: boolean;
   tariff?: {
     id: number;
     name: string;

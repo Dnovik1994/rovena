@@ -35,6 +35,17 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up --build
 docker compose exec backend alembic upgrade head
 ```
 
+## Quick Start (Production)
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+```
+
+Откройте:
+- Backend healthcheck: `http://localhost/health`
+- Frontend: `http://localhost/`
+
 ## Проверка
 
 - Backend healthcheck: `http://localhost:8000/health`
@@ -122,6 +133,51 @@ Prometheus endpoint:
 GET /metrics
 ```
 
+## MVP Usage Guide
+
+1. **Create a project**
+   - Go to Projects → Create.
+   - Provide a short name and optional description.
+2. **Add a proxy**
+   - Go to Admin → Proxies → Create.
+   - Validate the proxy to confirm connectivity.
+3. **Add an account**
+   - Go to Accounts → Create.
+   - Attach proxy if required.
+4. **Verify account**
+   - Use the verification flow and enter the phone code if prompted.
+5. **Start warming**
+   - Trigger warming to generate low-risk activity.
+6. **Create a campaign**
+   - Configure source/target and invite limits.
+7. **Start campaign**
+   - Click Start; monitor progress in Campaigns.
+
+## Load Test
+
+Быстрый запуск Locust (пример):
+
+```bash
+locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost:8000
+```
+
+Для сценариев используйте переменные окружения:
+
+- `LOCUST_INIT_DATA` — initData для `/auth/telegram`
+- `LOCUST_CAMPAIGN_ID` — ID кампании для `/campaigns/{id}/start`
+- `LOCUST_ADMIN_TOKEN` — токен администратора для `/admin/stats`
+
+Шаблон отчёта: `docs/load_test.md`.
+
+## Security Audit (OWASP basics)
+
+- Broken authentication: JWT access tokens (15 min) + refresh tokens (rotation) and server-side storage.
+- Injection: входные данные проходят Pydantic-валидацию/экранирование, SQL-инъекции отклоняются.
+- XSS: CSP + X-Content-Type-Options + X-XSS-Protection.
+- Security misconfiguration: HSTS/headers в nginx, CSRF проверка (опционально).
+- Sensitive data exposure: refresh token хранится хэшированным.
+- Access control: IP whitelist на `/admin/` и RBAC на API.
+
 ## Обход блокировок PyPI / npm в Украине
 
 Если доступ к PyPI или npm ограничен, можно задать альтернативные registry и прокси.
@@ -199,6 +255,14 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```bash
 certbot certonly --nginx -d kass.freecrm.biz
 ```
+
+## Production Checklist
+
+- DNS указывает на сервер и порты 80/443 открыты.
+- `PRODUCTION=true` и валидные secrets в `.env`.
+- Certbot сертификаты и автообновление.
+- Firewall: разрешены 80/443, админ IP whitelist.
+- Ротация бэкапов и мониторинг `/backups`.
 
 В `docker-compose.prod.yml` nginx использует volume `/etc/letsencrypt`, поэтому сертификаты автоматически доступны контейнеру nginx.
 

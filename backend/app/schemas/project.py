@@ -2,13 +2,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
 
-class ProjectCreate(BaseModel):
+
+class ProjectCreate(SanitizedModel):
     name: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
 
 
-class ProjectUpdate(BaseModel):
+class ProjectUpdate(SanitizedModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
 

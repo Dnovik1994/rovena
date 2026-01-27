@@ -1,3 +1,10 @@
+import {
+  clearStoredTokens,
+  getStoredTokens,
+  parseJwtExpiry,
+  setStoredTokens,
+} from "../utils/authStorage";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
 
 export interface ApiError {
@@ -20,12 +27,15 @@ export const parseApiError = async (response: Response): Promise<ApiError> => {
 export const apiFetch = async <T>(
   path: string,
   options: RequestInit = {},
-  token?: string | null
+  token?: string | null,
+  retryOnUnauthorized = true
 ): Promise<T> => {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  const stored = getStoredTokens();
+  const authToken = token ?? stored.accessToken;
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -33,9 +43,40 @@ export const apiFetch = async <T>(
     headers,
   });
 
+  if (response.status === 401 && retryOnUnauthorized && !path.includes("/auth/refresh")) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return apiFetch<T>(path, options, refreshed, false);
+    }
+  }
+
   if (!response.ok) {
     throw await parseApiError(response);
   }
 
   return (await response.json()) as T;
+};
+
+export const refreshAccessToken = async (): Promise<string | null> => {
+  const { refreshToken } = getStoredTokens();
+  if (!refreshToken) {
+    return null;
+  }
+  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!response.ok) {
+    clearStoredTokens();
+    return null;
+  }
+  const data = (await response.json()) as { access_token: string; refresh_token?: string };
+  const nextRefresh = data.refresh_token ?? refreshToken;
+  setStoredTokens({
+    accessToken: data.access_token,
+    refreshToken: nextRefresh,
+    accessTokenExpiresAt: parseJwtExpiry(data.access_token),
+  });
+  return data.access_token;
 };

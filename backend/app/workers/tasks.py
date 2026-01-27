@@ -232,7 +232,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
         db.commit()
 
 
-@celery_app.task
+@celery_app.task(rate_limit="2/s")
 def campaign_dispatch(campaign_id: int) -> None:
     asyncio.run(_run_campaign_dispatch(campaign_id))
 

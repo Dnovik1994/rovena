@@ -1,0 +1,1 @@
+0 3 * * * pg_dump -h db -U rovena rovena > /backups/db-$(date +\%Y\%m\%d).sql; redis-dump -h redis > /backups/redis-$(date +\%Y\%m\%d).rdb

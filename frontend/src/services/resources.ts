@@ -249,3 +249,11 @@ export const createAdminCheckoutSession = (
     token
   );
 };
+
+export const updateOnboarding = (token: string, completed: boolean): Promise<void> => {
+  return apiFetch<void>(
+    "/users/me/onboarding",
+    { method: "PATCH", body: JSON.stringify({ onboarding_completed: completed }) },
+    token
+  );
+};

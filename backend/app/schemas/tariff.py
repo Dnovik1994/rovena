@@ -1,7 +1,9 @@
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
 
-class TariffBase(BaseModel):
+
+class TariffBase(SanitizedModel):
     name: str = Field(min_length=1, max_length=64)
     max_accounts: int = Field(ge=1)
     max_invites_day: int = Field(ge=1)
@@ -12,7 +14,7 @@ class TariffCreate(TariffBase):
     pass
 
 
-class TariffUpdate(BaseModel):
+class TariffUpdate(SanitizedModel):
     name: str | None = Field(default=None, min_length=1, max_length=64)
     max_accounts: int | None = Field(default=None, ge=1)
     max_invites_day: int | None = Field(default=None, ge=1)
@@ -26,5 +28,5 @@ class TariffResponse(TariffBase):
         from_attributes = True
 
 
-class UserTariffUpdate(BaseModel):
+class UserTariffUpdate(SanitizedModel):
     tariff_id: int = Field(ge=1)

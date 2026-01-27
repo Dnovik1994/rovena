@@ -4,9 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import create_access_token
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    hash_token,
+)
 from app.models.user import User
-from app.schemas.auth import TelegramAuthRequest, TokenResponse
+from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
 router = APIRouter(tags=["auth"])
@@ -46,5 +51,40 @@ async def auth_via_telegram(
         db.commit()
         db.refresh(user)
 
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token)
+    access_token = create_access_token(str(user.id))
+    refresh_token = create_refresh_token(str(user.id))
+    user.refresh_token = hash_token(refresh_token)
+    db.commit()
+    onboarding_needed = not user.onboarding_completed
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        onboarding_needed=onboarding_needed,
+    )
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+async def refresh_access_token(
+    payload: RefreshTokenRequest, db: Session = Depends(get_db)
+) -> TokenResponse:
+    try:
+        token_payload = decode_refresh_token(payload.refresh_token)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
+
+    user_id = token_payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    user = db.get(User, int(user_id))
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    if not user.refresh_token or user.refresh_token != hash_token(payload.refresh_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token mismatch")
+
+    access_token = create_access_token(str(user.id))
+    new_refresh_token = create_refresh_token(str(user.id))
+    user.refresh_token = hash_token(new_refresh_token)
+    db.commit()
+    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)

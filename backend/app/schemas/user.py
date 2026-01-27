@@ -13,6 +13,7 @@ class UserBase(BaseModel):
     is_active: bool
     role: str | None
     tariff: TariffResponse | None
+    onboarding_completed: bool = False
 
     class Config:
         from_attributes = True
@@ -20,3 +21,7 @@ class UserBase(BaseModel):
 
 class UserResponse(UserBase):
     pass
+
+
+class UserOnboardingUpdate(BaseModel):
+    onboarding_completed: bool
