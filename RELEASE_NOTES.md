@@ -1,4 +1,4 @@
-# Release Notes — v1.0 MVP
+# Release Notes — v1.0.0 MVP
 
 ## Highlights
 - Telegram Mini App authentication with JWT access + refresh.
@@ -6,12 +6,14 @@
 - Admin dashboard with stats and user/tariff management.
 - Security headers, input sanitization, and rate limits.
 - Performance indexes and cache helpers for hot paths.
-- Onboarding wizard and global error handler for safer UX.
+- Onboarding wizard, global error handler, and 404/offline UX.
+- Backups (MySQL + Redis) with daily rotation and retention.
 
 ## Known Issues
 - Account verification may require manual phone code entry.
 - Load testing requires valid Telegram initData and admin token.
-- Backup cron assumes backup tools are available in the cron container.
+- 2FA login flow is not automated.
+- Proxy validation still requires manual action in admin.
 
 ## Upgrade Notes
 1. Apply migrations:

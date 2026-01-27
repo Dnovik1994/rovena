@@ -4,10 +4,19 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    include: ["@tanstack/react-query", "react-hook-form", "zod"],
+    include: [
+      "react",
+      "react-dom",
+      "react-router-dom",
+      "@tanstack/react-query",
+      "react-hook-form",
+      "zod",
+      "zustand",
+      "axios",
+    ],
   },
   build: {
-    chunkSizeWarningLimit: 1200,
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 5173,

@@ -1,60 +1,46 @@
-from sqlalchemy import event
+import asyncio
 
-from app.core.database import clear_local_cache, get_db
-from app.core.security import create_access_token
-from app.models.project import Project
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.core import cache
+from app.core.database import Base, get_cached_user
 from app.models.user import User
 
 
-def _create_user_and_project(client) -> User:
-    override = client.app.dependency_overrides[get_db]
-    db_gen = override()
-    db = next(db_gen)
-    try:
-        user = User(
-            telegram_id=777777,
-            username="perf",
-            first_name="Perf",
-            last_name="Test",
-            is_admin=False,
-            is_active=True,
-            role="user",
-            tariff_id=1,
-        )
+def test_cached_user_avoids_repeat_query(monkeypatch):
+    store: dict[str, dict] = {}
+
+    async def fake_get_json(key: str):
+        return store.get(key)
+
+    async def fake_set_json(key: str, payload: dict, ttl_seconds: int = 60):
+        store[key] = payload
+
+    monkeypatch.setattr(cache, "get_json", fake_get_json)
+    monkeypatch.setattr(cache, "set_json", fake_set_json)
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False})
+    SessionLocal = sessionmaker(bind=engine, class_=Session, autoflush=False)
+    Base.metadata.create_all(bind=engine)
+
+    query_count = {"count": 0}
+
+    def before_cursor_execute(*args, **kwargs):
+        query_count["count"] += 1
+
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+
+    with SessionLocal() as db:
+        user = User(telegram_id=999, username="perf", is_active=True)
         db.add(user)
         db.commit()
         db.refresh(user)
-        project = Project(owner_id=user.id, name="Perf project", description=None)
-        db.add(project)
-        db.commit()
-        return user
-    finally:
-        db_gen.close()
 
+        query_count["count"] = 0
+        asyncio.run(get_cached_user(db, user.id))
+        first_count = query_count["count"]
+        asyncio.run(get_cached_user(db, user.id))
+        second_count = query_count["count"]
 
-def test_user_cache_reduces_user_queries(client):
-    clear_local_cache()
-    user = _create_user_and_project(client)
-    token = create_access_token(str(user.id))
-
-    override = client.app.dependency_overrides[get_db]
-    db_gen = override()
-    db = next(db_gen)
-    engine = db.get_bind()
-    db_gen.close()
-
-    statements: list[str] = []
-
-    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
-        statements.append(statement)
-
-    event.listen(engine, "before_cursor_execute", before_cursor_execute)
-    try:
-        client.get("/api/v1/projects", headers={"Authorization": f"Bearer {token}"})
-        statements.clear()
-        client.get("/api/v1/projects", headers={"Authorization": f"Bearer {token}"})
-    finally:
-        event.remove(engine, "before_cursor_execute", before_cursor_execute)
-
-    user_queries = [stmt for stmt in statements if "FROM users" in stmt]
-    assert user_queries == []
+    assert second_count == first_count

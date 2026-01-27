@@ -8,6 +8,8 @@ Backend API, frontend Mini App, nginx proxy, and background workers.
 - **Input validation**: centralized sanitization and schema validation.
 - **Transport & headers**: CSP/HSTS/XSS/CTO headers at app + nginx.
 - **Access control**: RBAC and IP whitelist for admin.
+- **InitData replay protection**: Telegram initData TTL enforced.
+- **Strict CORS in production**: explicit origin list required in PROD.
 
 ## OWASP Checklist
 1. **Broken Access Control** — Roles enforced in API, admin routes whitelisted by IP.
@@ -25,6 +27,9 @@ Backend API, frontend Mini App, nginx proxy, and background workers.
 - Access/refresh token flow in `auth` handlers.
 - Sanitized schema models in `backend/app/schemas`.
 - Security headers in `main.py` and `nginx.conf`.
+- JWT secret validation in production settings.
+- initData TTL validation for Telegram WebApp auth.
+- Active-user enforcement on protected endpoints.
 
 ## Gaps / Follow-ups
 - Enable TLS termination in production (Certbot + nginx).

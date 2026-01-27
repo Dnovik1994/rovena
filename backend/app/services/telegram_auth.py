@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import time
 from typing import Any
 from urllib.parse import parse_qsl
 
@@ -37,5 +38,19 @@ def validate_init_data(init_data: str) -> dict[str, Any]:
 
     if not hmac.compare_digest(calculated_hash, hash_value):
         raise TelegramAuthError("Invalid initData signature")
+
+    if settings.telegram_auth_ttl_seconds > 0:
+        auth_date_raw = parsed.get("auth_date")
+        if not auth_date_raw:
+            raise TelegramAuthError("Missing auth_date in initData")
+        try:
+            auth_date = int(auth_date_raw)
+        except ValueError as exc:
+            raise TelegramAuthError("Invalid auth_date in initData") from exc
+        now = int(time.time())
+        if auth_date > now + 60:
+            raise TelegramAuthError("auth_date is in the future")
+        if now - auth_date > settings.telegram_auth_ttl_seconds:
+            raise TelegramAuthError("initData is expired")
 
     return parsed

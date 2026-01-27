@@ -4,6 +4,12 @@
 
 ## Быстрый старт
 
+```bash
+git clone https://github.com/your-org/rovena.git
+cd rovena
+cp .env.example .env
+```
+
 1. Скопируйте переменные окружения:
 
 ```bash
@@ -12,15 +18,17 @@ cp .env.example .env
 
 2. Заполните `.env`:
 - `TELEGRAM_BOT_TOKEN` — токен бота для проверки initData.
+- `TELEGRAM_AUTH_TTL_SECONDS` — TTL initData (секунды). Установите `0`, чтобы отключить проверку при локальной разработке.
 - `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` — данные приложения Telegram (my.telegram.org).
 - `SENTRY_DSN` — DSN для Sentry (опционально, если используете мониторинг).
 - `STRIPE_SECRET_KEY` и `STRIPE_WEBHOOK_SECRET` — ключи Stripe для подписок.
 - `VITE_TG_INIT_DATA` — initData для локального входа (если запускаете не в Telegram).
+- Production: сгенерируйте сильный `JWT_SECRET` командой `openssl rand -hex 32`.
 
 3. Запустите сервисы:
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Для режима разработки (hot-reload) можно использовать override:
@@ -50,6 +58,51 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 - Backend healthcheck: `http://localhost:8000/health`
 - Frontend: `http://localhost:5173`
+
+## Testing in Production
+
+Перед реальным запуском выполните user testing checklist и зафиксируйте найденные проблемы:
+
+- Checklist: `docs/user-testing.md`.
+- Bug report template: `docs/bug-hunt.md`.
+- Сообщайте о найденных ошибках через GitHub Issues и прикладывайте логи/скриншоты.
+
+## First Production Run
+
+Перед первым запуском используйте deploy checklist и скрипт валидации:
+
+- Deploy checklist: `docs/deploy-checklist.md`.
+- Validation script: `scripts/validate-deploy.sh`.
+- После деплоя мониторьте логи 10 минут и выполните тестовую кампанию из `docs/user-testing.md`.
+- First monitoring check: `curl http://localhost:9090/targets` → все targets в статусе UP.
+- Grafana: `http://localhost:3000` → логин и добавление Prometheus datasource, затем проверьте дашборды.
+
+### Server deploy commands (Ubuntu)
+
+```bash
+ssh user@server
+sudo apt update && sudo apt install docker.io docker-compose-plugin git certbot python3-certbot-nginx ufw -y
+sudo usermod -aG docker $USER
+git clone https://github.com/your-org/rovena.git && cd rovena
+cp .env.example .env && nano .env  # fill secrets
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d --build
+sudo certbot certonly --nginx -d kass.freecrm.biz --email your@email.com --agree-tos --non-interactive
+sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
+docker compose logs -f cron  # check backups
+curl https://kass.freecrm.biz/health  # must 200
+```
+
+## Log Collection & Debug
+
+```bash
+docker compose logs -f backend > backend.log
+docker compose logs -f worker > worker.log
+docker compose logs -f cron > cron-backup.log
+docker compose exec backend tail -n 200 /app/logs/app.log
+```
+
+Grafana Explore → query `{job="backend"}` to find error spikes.
 
 ## Dev-скрипты
 
@@ -158,7 +211,7 @@ GET /metrics
 Быстрый запуск Locust (пример):
 
 ```bash
-locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost:8000
+locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost
 ```
 
 Для сценариев используйте переменные окружения:
@@ -263,6 +316,8 @@ certbot certonly --nginx -d kass.freecrm.biz
 - Certbot сертификаты и автообновление.
 - Firewall: разрешены 80/443, админ IP whitelist.
 - Ротация бэкапов и мониторинг `/backups`.
+- UFW: `ufw allow 80` + `ufw allow 443` + `ufw allow OpenSSH`.
+- Monitoring: Grafana доступна по 3000, Prometheus по 9090.
 
 В `docker-compose.prod.yml` nginx использует volume `/etc/letsencrypt`, поэтому сертификаты автоматически доступны контейнеру nginx.
 
@@ -285,3 +340,23 @@ certbot certonly --nginx -d kass.freecrm.biz
 ```bash
 locust -f locustfile.py --users 100
 ```
+
+## Backups
+
+- Backups сохраняются в volume `/backups`.
+- Расписание: ежедневно в 03:00 (MySQL dump) и 04:00 (Redis dump).
+- Retention: 7 дней (cleanup через `find -mtime +7`).
+
+Восстановление:
+
+```bash
+gunzip /backups/db-YYYYMMDD.sql.gz
+mysql -h db -u$MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < /backups/db-YYYYMMDD.sql
+gunzip /backups/redis-YYYYMMDD.rdb.gz
+redis-cli -u $REDIS_URL --rdb /backups/redis-YYYYMMDD.rdb
+```
+
+## Troubleshooting
+
+- npm 403: задайте `NPM_REGISTRY` и proxy (см. раздел выше).
+- Docker Hub rate limit: `docker login` перед `docker compose pull`.

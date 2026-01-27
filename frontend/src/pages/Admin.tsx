@@ -4,7 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import SkeletonList from "../components/SkeletonList";
+import ErrorState from "../components/ErrorState";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import {
   createAdminTariff,
   deleteAdminTariff,
@@ -142,6 +143,20 @@ const Admin = (): JSX.Element => {
     }
   }, [activeTab, enabled, queryClient, search, tariffFilter, token]);
 
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    queryClient.prefetchQuery({
+      queryKey: ["admin-users", "", ""],
+      queryFn: () => fetchAdminUsers(token ?? "", "", ""),
+    });
+    queryClient.prefetchQuery({
+      queryKey: ["admin-proxies"],
+      queryFn: () => fetchAdminProxies(token ?? ""),
+    });
+  }, [enabled, queryClient, token]);
+
   const updateUserMutation = useMutation({
     mutationFn: (payload: { id: number; is_active?: boolean; role?: string | null }) =>
       updateAdminUser(token ?? "", payload.id, payload),
@@ -194,11 +209,11 @@ const Admin = (): JSX.Element => {
   }
 
   if (statsQuery.isLoading && activeTab === "stats") {
-    return <SkeletonList rows={3} />;
+    return <LoadingSkeleton rows={3} label="Загрузка метрик" />;
   }
 
   if (statsQuery.isError && activeTab === "stats") {
-    return <p className="text-sm text-rose-400">Нет доступа к админ-статистике.</p>;
+    return <ErrorState title="Ошибка" description="Нет доступа к админ-статистике." />;
   }
 
   const stats = statsQuery.data;
@@ -284,7 +299,7 @@ const Admin = (): JSX.Element => {
             </select>
           </div>
           {usersQuery.isLoading ? (
-            <SkeletonList rows={3} />
+            <LoadingSkeleton rows={3} label="Загрузка пользователей" />
           ) : (
             <div className="space-y-2 text-sm">
               {usersQuery.data?.items.map((user) => (
@@ -409,7 +424,7 @@ const Admin = (): JSX.Element => {
           </form>
 
           {tariffsQuery.isLoading ? (
-            <SkeletonList rows={3} />
+            <LoadingSkeleton rows={3} label="Загрузка тарифов" />
           ) : (
             <div className="space-y-2">
               {tariffs.map((tariff) => (
@@ -452,7 +467,7 @@ const Admin = (): JSX.Element => {
       {activeTab === "proxies" && (
         <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
           {proxiesQuery.isLoading ? (
-            <SkeletonList rows={3} />
+            <LoadingSkeleton rows={3} label="Загрузка прокси" />
           ) : (
             proxiesQuery.data?.items.map((proxy) => (
               <div
@@ -490,7 +505,7 @@ const Admin = (): JSX.Element => {
       {activeTab === "accounts" && (
         <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
           {accountsQuery.isLoading ? (
-            <SkeletonList rows={3} />
+            <LoadingSkeleton rows={3} label="Загрузка аккаунтов" />
           ) : (
             accountsQuery.data?.items.map((account) => (
               <div

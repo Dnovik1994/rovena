@@ -50,6 +50,23 @@ export const apiFetch = async <T>(
     }
   }
 
+  if (response.status === 403) {
+    clearStoredTokens();
+    if (window.location.pathname !== "/") {
+      window.location.href = "/";
+    }
+  }
+
+  if (response.status === 429) {
+    window.dispatchEvent(new CustomEvent("app:toast", { detail: { message: "Rate limit exceeded" } }));
+  }
+
+  if (response.status >= 500) {
+    if (!window.location.pathname.startsWith("/error")) {
+      window.location.href = `/error/${response.status}`;
+    }
+  }
+
   if (!response.ok) {
     throw await parseApiError(response);
   }

@@ -15,6 +15,7 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket, user_id: int) -> None:
         await websocket.accept()
         self._connections[websocket] = user_id
+        logger.info("WS connected | user_id=%s", user_id)
 
     def disconnect(self, websocket: WebSocket) -> None:
         self._connections.pop(websocket, None)

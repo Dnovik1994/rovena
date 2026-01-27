@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_active_user
 from app.core.database import get_db
 from app.models.contact import Contact
 from app.models.project import Project
@@ -13,7 +13,7 @@ router = APIRouter(tags=["contacts"])
 
 @router.get("/contacts", response_model=list[ContactResponse])
 async def list_contacts(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> list[ContactResponse]:
     contacts = (
@@ -28,7 +28,7 @@ async def list_contacts(
 @router.post("/contacts", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
 async def create_contact(
     payload: ContactCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> ContactResponse:
     project = (
@@ -60,7 +60,7 @@ async def create_contact(
 async def update_contact(
     contact_id: int,
     payload: ContactUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> ContactResponse:
     contact = (
@@ -93,7 +93,7 @@ async def update_contact(
 @router.delete("/contacts/{contact_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_contact(
     contact_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> None:
     contact = (

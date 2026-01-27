@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_active_user
 from app.core.database import get_db
 from app.models.project import Project
 from app.models.target import Target
@@ -13,7 +13,7 @@ router = APIRouter(tags=["targets"])
 
 @router.get("/targets", response_model=list[TargetResponse])
 async def list_targets(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> list[TargetResponse]:
     targets = (
@@ -28,7 +28,7 @@ async def list_targets(
 @router.post("/targets", response_model=TargetResponse, status_code=status.HTTP_201_CREATED)
 async def create_target(
     payload: TargetCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> TargetResponse:
     project = (
@@ -56,7 +56,7 @@ async def create_target(
 async def update_target(
     target_id: int,
     payload: TargetUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> TargetResponse:
     target = (
@@ -85,7 +85,7 @@ async def update_target(
 @router.delete("/targets/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_target(
     target_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> None:
     target = (
