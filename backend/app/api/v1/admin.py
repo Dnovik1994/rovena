@@ -5,7 +5,7 @@ from sqlalchemy import or_, cast, String
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
-from app.core.cache import delete_key, get_json, set_json
+from app.core.cache import delete, get_json, set_json
 from app.core.database import get_db
 from app.core.settings import get_settings
 from app.models.account import Account, AccountStatus
@@ -157,7 +157,7 @@ async def admin_user_update(
             ) from exc
     db.commit()
     db.refresh(user)
-    await delete_key(f"user:{user.id}")
+    await delete(f"user:{user.id}")
     return {
         "id": user.id,
         "telegram_id": user.telegram_id,
@@ -199,7 +199,7 @@ async def admin_user_tariff_update(
     user.tariff_id = tariff.id
     db.commit()
     db.refresh(user)
-    await delete_key(f"user:{user.id}")
+    await delete(f"user:{user.id}")
     return {
         "id": user.id,
         "telegram_id": user.telegram_id,
@@ -258,8 +258,8 @@ async def admin_tariff_create(
     db.add(tariff)
     db.commit()
     db.refresh(tariff)
-    await delete_key(TARIFFS_CACHE_KEY)
-    await delete_key(f"tariff_limits:{tariff.id}")
+    await delete(TARIFFS_CACHE_KEY)
+    await delete(f"tariff_limits:{tariff.id}")
     return TariffResponse.model_validate(tariff)
 
 
@@ -278,9 +278,9 @@ async def admin_tariff_update(
         setattr(tariff, field, value)
     db.commit()
     db.refresh(tariff)
-    await delete_key(TARIFFS_CACHE_KEY)
-    await delete_key(f"tariff:{tariff.id}")
-    await delete_key(f"tariff_limits:{tariff.id}")
+    await delete(TARIFFS_CACHE_KEY)
+    await delete(f"tariff:{tariff.id}")
+    await delete(f"tariff_limits:{tariff.id}")
     return TariffResponse.model_validate(tariff)
 
 
@@ -303,9 +303,9 @@ async def admin_tariff_delete(
 
     db.delete(tariff)
     db.commit()
-    await delete_key(TARIFFS_CACHE_KEY)
-    await delete_key(f"tariff:{tariff.id}")
-    await delete_key(f"tariff_limits:{tariff.id}")
+    await delete(TARIFFS_CACHE_KEY)
+    await delete(f"tariff:{tariff.id}")
+    await delete(f"tariff_limits:{tariff.id}")
     return None
 
 

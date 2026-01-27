@@ -1,8 +1,8 @@
 from functools import lru_cache
-import os
+import json
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,27 @@ class Settings(BaseSettings):
     proxy_base_port: int = 10000
     proxy_reload_cmd: str = ""
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: object) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(origin).strip() for origin in value if str(origin).strip()]
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return [origin.strip() for origin in raw.split(",") if origin.strip()]
+            if isinstance(parsed, list):
+                return [str(origin).strip() for origin in parsed if str(origin).strip()]
+            if isinstance(parsed, str):
+                return [parsed.strip()] if parsed.strip() else []
+        return []
+
 
 @lru_cache
 
@@ -50,11 +71,9 @@ def get_settings() -> Settings:
         raise ValueError("Change JWT_SECRET!")
 
     if settings.production:
-        raw_origins = os.getenv("CORS_ORIGINS", "")
-        parsed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
-        settings.cors_origins = parsed_origins
+        settings.cors_origins = settings.cors_origins or []
     else:
         settings.cors_origins = ["*"]
 
-    settings.cors_allow_credentials = settings.cors_origins != ["*"]
+    settings.cors_allow_credentials = bool(settings.cors_origins) and settings.cors_origins != ["*"]
     return settings

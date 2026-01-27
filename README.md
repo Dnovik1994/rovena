@@ -56,7 +56,7 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 ## Проверка
 
-- Backend healthcheck: `http://localhost:8000/health`
+- Backend healthcheck: `http://localhost:8020/health`
 - Frontend: `http://localhost:5173`
 
 ## Testing in Production
@@ -161,7 +161,7 @@ POST /api/v1/accounts/{id}/regenerate-device
 Канал для статусов аккаунтов:
 
 ```
-ws://localhost:8000/ws/status?token=JWT_TOKEN
+ws://localhost:8020/ws/status?token=JWT_TOKEN
 ```
 
 События:

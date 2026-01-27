@@ -32,7 +32,7 @@ def test_cors_prod_restricts_origin(monkeypatch):
     client = _build_client(
         monkeypatch,
         production=True,
-        origins="https://kass.freecrm.biz,https://web.telegram.org",
+        origins='["https://kass.freecrm.biz","https://web.telegram.org"]',
     )
     response = client.options(
         "/health",

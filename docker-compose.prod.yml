@@ -59,9 +59,9 @@ services:
         condition: service_healthy
     labels:
       com.prometheus.scrape: "true"
-      com.prometheus.port: "8000"
+      com.prometheus.port: "8020"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8020/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -126,7 +126,7 @@ services:
       context: ./frontend
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://backend:8000/api/v1}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://backend:8020/api/v1}
     restart: unless-stopped
     logging: *default-logging
     environment:
