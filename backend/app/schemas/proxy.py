@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
+
 
 class ProxyType(str, Enum):
     http = "http"
@@ -16,7 +18,7 @@ class ProxyStatus(str, Enum):
     error = "error"
 
 
-class ProxyCreate(BaseModel):
+class ProxyCreate(SanitizedModel):
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(ge=1, le=65535)
     login: str | None = Field(default=None, max_length=255)
@@ -25,7 +27,7 @@ class ProxyCreate(BaseModel):
     country: str | None = Field(default=None, max_length=64)
 
 
-class ProxyUpdate(BaseModel):
+class ProxyUpdate(SanitizedModel):
     host: str | None = Field(default=None, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)
     login: str | None = Field(default=None, max_length=255)
@@ -42,7 +44,6 @@ class ProxyResponse(BaseModel):
     host: str
     port: int
     login: str | None
-    password: str | None
     type: ProxyType
     country: str | None
     status: ProxyStatus

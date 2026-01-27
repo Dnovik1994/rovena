@@ -2,8 +2,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
 
-class ContactCreate(BaseModel):
+
+class ContactCreate(SanitizedModel):
     project_id: int
     telegram_id: int
     first_name: str = Field(min_length=1, max_length=255)
@@ -14,7 +16,7 @@ class ContactCreate(BaseModel):
     source_id: int | None = None
 
 
-class ContactUpdate(BaseModel):
+class ContactUpdate(SanitizedModel):
     first_name: str | None = Field(default=None, min_length=1, max_length=255)
     last_name: str | None = Field(default=None, max_length=255)
     username: str | None = Field(default=None, max_length=255)

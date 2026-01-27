@@ -2,9 +2,10 @@ import React, { useState } from "react";
 
 import { apiFetch } from "../services/api";
 import { useAuth } from "../stores/auth";
+import { parseJwtExpiry } from "../utils/authStorage";
 
 const Login = (): JSX.Element => {
-  const { setToken } = useAuth();
+  const { setToken, setOnboardingNeeded } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -25,14 +26,19 @@ const Login = (): JSX.Element => {
         setError("Нет initData. Укажите VITE_TG_INIT_DATA для локального запуска.");
         return;
       }
-      const response = await apiFetch<{ access_token: string }>(
+      const response = await apiFetch<{
+        access_token: string;
+        refresh_token: string;
+        onboarding_needed?: boolean;
+      }>(
         "/auth/telegram",
         {
           method: "POST",
           body: JSON.stringify({ init_data: initData }),
         }
       );
-      setToken(response.access_token);
+      setToken(response.access_token, response.refresh_token, parseJwtExpiry(response.access_token));
+      setOnboardingNeeded(Boolean(response.onboarding_needed));
     } catch (err) {
       setError("Не удалось войти через Telegram.");
     } finally {

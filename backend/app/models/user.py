@@ -25,6 +25,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     role: Mapped[UserRole] = mapped_column(SqlEnum(UserRole), default=UserRole.user)
     tariff_id: Mapped[int] = mapped_column(ForeignKey("tariffs.id"), default=1)
+    refresh_token: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

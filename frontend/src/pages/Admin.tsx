@@ -108,6 +108,40 @@ const Admin = (): JSX.Element => {
     enabled: enabled && activeTab === "accounts",
   });
 
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    if (activeTab === "stats") {
+      queryClient.prefetchQuery({
+        queryKey: ["admin-users", search, tariffFilter],
+        queryFn: () => fetchAdminUsers(token ?? "", search, tariffFilter),
+      });
+      queryClient.prefetchQuery({
+        queryKey: ["admin-tariffs"],
+        queryFn: () => fetchAdminTariffs(token ?? ""),
+      });
+    }
+    if (activeTab === "users") {
+      queryClient.prefetchQuery({
+        queryKey: ["admin-tariffs"],
+        queryFn: () => fetchAdminTariffs(token ?? ""),
+      });
+    }
+    if (activeTab === "tariffs") {
+      queryClient.prefetchQuery({
+        queryKey: ["admin-users", search, tariffFilter],
+        queryFn: () => fetchAdminUsers(token ?? "", search, tariffFilter),
+      });
+    }
+    if (activeTab === "proxies") {
+      queryClient.prefetchQuery({
+        queryKey: ["admin-accounts"],
+        queryFn: () => fetchAdminAccounts(token ?? ""),
+      });
+    }
+  }, [activeTab, enabled, queryClient, search, tariffFilter, token]);
+
   const updateUserMutation = useMutation({
     mutationFn: (payload: { id: number; is_active?: boolean; role?: string | null }) =>
       updateAdminUser(token ?? "", payload.id, payload),

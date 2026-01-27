@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 const navItems = [
@@ -18,6 +18,19 @@ interface AppShellProps {
 }
 
 const AppShell = ({ children, isAdmin = false }: AppShellProps): JSX.Element => {
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-[var(--tg-theme-bg)] text-[var(--tg-theme-text)]">
       <header className="border-b border-slate-800/60">
@@ -37,6 +50,11 @@ const AppShell = ({ children, isAdmin = false }: AppShellProps): JSX.Element => 
             </NavLink>
           )}
         </div>
+        {!isOnline && (
+          <div className="bg-rose-500/10 px-4 py-2 text-center text-xs text-rose-200">
+            Offline mode: некоторые данные могут быть недоступны.
+          </div>
+        )}
         <nav className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 pb-4">
           {navItems.map((item) => (
             <NavLink

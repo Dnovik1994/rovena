@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     app_name: str = "FreeCRM Inviter API"
     environment: str = "development"
+    production: bool = False
     api_v1_prefix: str = "/api/v1"
 
     cors_origins: List[str] = Field(default_factory=list)
@@ -19,7 +20,11 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
-    jwt_expiration_minutes: int = 60 * 24
+    jwt_expiration_minutes: int = 15
+    jwt_refresh_expiration_days: int = 30
+    csrf_token: str = ""
+    csrf_enabled: bool = False
+    cache_ttl_seconds: int = 60
 
     telegram_bot_token: str = ""
     telegram_api_id: str = ""

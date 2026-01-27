@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
+
 
 class AccountStatus(str, Enum):
     new = "new"
@@ -13,7 +15,7 @@ class AccountStatus(str, Enum):
     verified = "verified"
 
 
-class AccountCreate(BaseModel):
+class AccountCreate(SanitizedModel):
     telegram_id: int
     user_id: int
     phone: str | None = Field(default=None, max_length=32)
@@ -24,7 +26,7 @@ class AccountCreate(BaseModel):
     device_config: dict | None = None
 
 
-class AccountUpdate(BaseModel):
+class AccountUpdate(SanitizedModel):
     phone: str | None = Field(default=None, max_length=32)
     username: str | None = Field(default=None, max_length=255)
     first_name: str | None = Field(default=None, max_length=255)

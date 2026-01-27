@@ -3,20 +3,22 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.sanitization import SanitizedModel
+
 
 class TargetType(str, Enum):
     group = "group"
     channel = "channel"
 
 
-class TargetCreate(BaseModel):
+class TargetCreate(SanitizedModel):
     project_id: int
     name: str = Field(min_length=2, max_length=255)
     link: str = Field(min_length=5, max_length=255)
     type: TargetType
 
 
-class TargetUpdate(BaseModel):
+class TargetUpdate(SanitizedModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     link: str | None = Field(default=None, min_length=5, max_length=255)
     type: TargetType | None = None

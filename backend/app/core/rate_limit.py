@@ -1,12 +1,11 @@
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 
 def _rate_limit_key(request) -> str:
     user_id = getattr(request.state, "user_id", None)
     if user_id:
         return f"user:{user_id}"
-    return get_remote_address(request)
+    return "anonymous"
 
 
 def tariff_rate_limit(request) -> str:

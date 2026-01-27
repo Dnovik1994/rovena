@@ -325,13 +325,15 @@ const Accounts = (): JSX.Element => {
                   >
                     {account.status === "warming" ? "Warming..." : "Start Warming"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleVerify(account.id)}
-                    className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-200"
-                  >
-                    Verify Telegram
-                  </button>
+                  {(account.status === "new" || account.status === "blocked") && (
+                    <button
+                      type="button"
+                      onClick={() => handleVerify(account.id)}
+                      className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-200"
+                    >
+                      Verify Telegram
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleRegenerateDevice(account.id)}
