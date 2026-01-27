@@ -7,7 +7,6 @@
 ```bash
 git clone https://github.com/your-org/rovena.git
 cd rovena
-cp .env.example .env
 ```
 
 1. Скопируйте переменные окружения:

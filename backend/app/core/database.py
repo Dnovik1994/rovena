@@ -10,18 +10,30 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 connect_args = {}
+engine_kwargs: dict[str, Any] = {"pool_pre_ping": True}
 if settings.database_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
+else:
+    engine_kwargs.update(
+        {
+            "pool_size": 20,
+            "max_overflow": 5,
+            "pool_recycle": 3600,
+        }
+    )
 
 engine = create_engine(
     settings.database_url,
-    pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=5,
-    pool_recycle=3600,
     connect_args=connect_args,
+    **engine_kwargs,
 )
-SessionLocal = sessionmaker(bind=engine, class_=Session, autoflush=False, autocommit=False)
+SessionLocal = sessionmaker(
+    bind=engine,
+    class_=Session,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+)
 
 
 class Base(DeclarativeBase):

@@ -69,7 +69,7 @@ class AdminStatsTask(TaskSet):
         )
 
 
-class User(HttpUser):
+class ApiUser(HttpUser):
     wait_time = between(1, 3)
     tasks = [AuthTask, CreateCampaignTask, StartCampaignTask, AdminStatsTask]
     access_token: str | None = None

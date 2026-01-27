@@ -4,7 +4,11 @@ from app.schemas.sanitization import SanitizedModel
 
 
 class TelegramAuthRequest(SanitizedModel):
-    init_data: str = Field(min_length=1, max_length=4096, skip_sanitize=True)
+    init_data: str = Field(
+        min_length=1,
+        max_length=4096,
+        json_schema_extra={"skip_sanitize": True},
+    )
 
 
 class RefreshTokenRequest(SanitizedModel):

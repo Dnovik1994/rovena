@@ -1,5 +1,6 @@
 import json
 import logging
+from functools import wraps
 from typing import Any, Awaitable, Callable
 
 import redis.asyncio as redis
@@ -85,6 +86,7 @@ def cache(
     on_hit: Callable[..., None] | None = None,
 ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
     def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        @wraps(func)
         async def wrapper(*args, **kwargs):
             key = key_builder(*args, **kwargs) if key_builder else None
             if key:
