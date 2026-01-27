@@ -106,14 +106,6 @@ async def get_current_user(
     return user
 
 
-async def get_current_admin(
-    current_user: User = Depends(get_current_active_user),
-) -> User:
-    if not current_user.is_admin:
-        raise forbidden("Admin access required")
-    return current_user
-
-
 @cache(
     ttl_seconds=60,
     key_builder=lambda current_user: _user_cache_key(current_user.id),
@@ -124,6 +116,14 @@ async def get_current_admin(
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_active:
         raise forbidden("User inactive")
+    return current_user
+
+
+async def get_current_admin(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    if not current_user.is_admin:
+        raise forbidden("Admin access required")
     return current_user
 
 
