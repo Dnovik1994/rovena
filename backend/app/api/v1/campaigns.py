@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_active_user, get_tariff_limits
 from app.core.database import get_db
 from app.core.limits import get_daily_invites
+import logging
+
 from app.core.rate_limit import limiter, tariff_rate_limit
 from app.models.account import Account
 from app.models.campaign import Campaign, CampaignStatus
@@ -17,6 +19,7 @@ from app.workers.tasks import campaign_dispatch
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["campaigns"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/campaigns", response_model=list[CampaignResponse])
@@ -167,6 +170,8 @@ async def start_campaign(
             detail="Tariff account limit exceeded",
         )
 
+    if campaign.status == CampaignStatus.active:
+        return CampaignResponse.model_validate(campaign)
     if campaign.status != CampaignStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,7 +184,10 @@ async def start_campaign(
     db.refresh(campaign)
 
     logger.info("Campaign started", extra={"campaign_id": campaign.id})
-    campaign_dispatch.delay(campaign.id)
+    try:
+        campaign_dispatch.delay(campaign.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Campaign dispatch enqueue failed", extra={"error": str(exc)})
 
     return CampaignResponse.model_validate(campaign)
 
