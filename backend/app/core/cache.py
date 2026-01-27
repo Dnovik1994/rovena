@@ -2,22 +2,22 @@ import json
 import logging
 from typing import Any, Awaitable, Callable
 
-import aioredis
+import redis.asyncio as redis
 
 from app.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_redis_client: aioredis.Redis | None = None
+_redis_client: redis.Redis | None = None
 
 
-async def _get_redis_client() -> aioredis.Redis | None:
+async def _get_redis_client() -> redis.Redis | None:
     global _redis_client
     settings = get_settings()
     if not settings.redis_url:
         return None
     if _redis_client is None:
-        _redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
     return _redis_client
 
 
@@ -52,7 +52,7 @@ async def set_json(key: str, payload: dict[str, Any], ttl_seconds: int = 60) -> 
         logger.exception("Cache write failed for key %s", key)
 
 
-async def delete_key(key: str) -> None:
+async def delete(key: str) -> None:
     client = await _get_redis_client()
     if not client:
         return
@@ -60,6 +60,20 @@ async def delete_key(key: str) -> None:
         await client.delete(key)
     except Exception:  # noqa: BLE001
         logger.exception("Cache delete failed for key %s", key)
+
+
+async def ping() -> bool:
+    client = await _get_redis_client()
+    if not client:
+        return False
+    try:
+        return bool(await client.ping())
+    except Exception:  # noqa: BLE001
+        logger.exception("Cache ping failed")
+        return False
+
+
+delete_key = delete
 
 
 def cache(

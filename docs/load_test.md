@@ -11,7 +11,7 @@
 
 ## Command
 ```
-locust -f locustfile.py -u 50 -r 5 --headless -t 1m --host http://localhost:8000
+locust -f locustfile.py -u 50 -r 5 --headless -t 1m --host http://localhost:8020
 ```
 
 ## Results

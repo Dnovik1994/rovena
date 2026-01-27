@@ -2,13 +2,13 @@ version: "3.9"
 
 services:
   backend:
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8020 --reload
     volumes:
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
       - ./backend/alembic.ini:/app/alembic.ini
     environment:
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
 
   worker:
     command: celery -A app.workers worker --loglevel=info --pool=solo
@@ -28,7 +28,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8020/api/v1}
       NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}

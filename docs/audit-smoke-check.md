@@ -118,14 +118,14 @@ work
 /bin/sh: 1: docker: not found
 ```
 
-## $ curl -i http://localhost:8000/health
+## $ curl -i http://localhost:8020/health
 ```
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
 
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-curl: (7) Failed to connect to localhost port 8000 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to localhost port 8020 after 0 ms: Couldn't connect to server
 ```
 
 ## $ docker compose logs --tail=200 frontend

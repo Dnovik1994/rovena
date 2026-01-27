@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 ARG NPM_REGISTRY=https://registry.npmjs.org/
-ARG VITE_API_BASE_URL=http://backend:8000/api/v1
+ARG VITE_API_BASE_URL=http://backend:8020/api/v1
 ENV NPM_REGISTRY=${NPM_REGISTRY}
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 

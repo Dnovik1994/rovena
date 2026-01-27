@@ -17,7 +17,7 @@ echo "== Frontend health =="
 curl -fsS http://localhost:5173 || true
 
 echo "== Backend health =="
-curl -fsS http://localhost:8000/health || true
+curl -fsS http://localhost:8020/health || true
 
 echo "== 3proxy config =="
 docker exec 3proxy cat /etc/3proxy/3proxy.cfg || true
