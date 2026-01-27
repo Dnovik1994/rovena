@@ -8,7 +8,9 @@ def _rate_limit_key(request) -> str:
     return "anonymous"
 
 
-def tariff_rate_limit(request) -> str:
+def tariff_rate_limit(request=None) -> str:
+    if request is None:
+        return "50/day"
     user = getattr(request.state, "user", None)
     max_invites = 50
     if user and getattr(user, "tariff", None):

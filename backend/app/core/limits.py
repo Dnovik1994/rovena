@@ -10,8 +10,10 @@ from app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 
-def get_redis_client() -> Redis:
+def get_redis_client() -> Redis | None:
     settings = get_settings()
+    if not settings.redis_url:
+        return None
     return Redis.from_url(settings.redis_url, decode_responses=True)
 
 
@@ -22,6 +24,8 @@ def _invite_key(user_id: int, now: datetime) -> str:
 def get_daily_invites(user_id: int, client: Redis | None = None) -> int:
     now = datetime.now(timezone.utc)
     client = client or get_redis_client()
+    if client is None:
+        return 0
     try:
         value = client.get(_invite_key(user_id, now))
     except Exception:  # noqa: BLE001
@@ -33,6 +37,8 @@ def get_daily_invites(user_id: int, client: Redis | None = None) -> int:
 def increment_daily_invites(user_id: int, amount: int = 1, client: Redis | None = None) -> None:
     now = datetime.now(timezone.utc)
     client = client or get_redis_client()
+    if client is None:
+        return
     key = _invite_key(user_id, now)
     try:
         client.incrby(key, amount)

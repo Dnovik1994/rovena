@@ -1,6 +1,7 @@
 import subprocess
 import uuid
 
+from exceptiongroup import ExceptionGroup
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import sentry_sdk
@@ -53,6 +55,51 @@ app.add_middleware(
 app.add_middleware(SlowAPIMiddleware)
 
 
+async def _internal_error_response(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled exception", extra={"path": str(request.url.path)})
+    sentry_sdk.capture_exception(exc)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(
+            status_code=500,
+            content={"type": "internal_error"},
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "500", "message": "Internal error"}},
+    )
+
+
+class ExceptionGroupMiddleware:
+    def __init__(self, app_instance: FastAPI):
+        self.app = app_instance
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        except ExceptionGroup as exc:
+            if scope.get("type") != "http":
+                raise
+            request = Request(scope, receive=receive)
+            response = await _internal_error_response(request, exc)
+            await response(scope, receive, send)
+        except Exception as exc:
+            if scope.get("type") != "http":
+                raise
+            if isinstance(
+                exc,
+                (
+                    HTTPException,
+                    StarletteHTTPException,
+                    RequestValidationError,
+                    RateLimitExceeded,
+                ),
+            ):
+                raise
+            request = Request(scope, receive=receive)
+            response = await _internal_error_response(request, exc)
+            await response(scope, receive, send)
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     commit = _get_git_commit()
@@ -70,26 +117,59 @@ async def on_startup() -> None:
         logger.warning("Redis connection failed", extra={"error": str(exc)})
 
 
-@app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    token = request_id_ctx_var.set(request_id)
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    request_id_ctx_var.reset(token)
-    return response
+class RequestIdMiddleware:
+    def __init__(self, app_instance: FastAPI):
+        self.app = app_instance
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        request_id = headers.get("x-request-id") or str(uuid.uuid4())
+        token = request_id_ctx_var.set(request_id)
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                mutable = MutableHeaders(scope=message)
+                mutable["X-Request-ID"] = request_id
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            request_id_ctx_var.reset(token)
 
 
-@app.middleware("http")
-async def security_headers_middleware(request: Request, call_next):
-    response = await call_next(request)
-    csp = "default-src 'self'; frame-ancestors 'self'; base-uri 'self';"
-    if settings.production:
-        csp = f"{csp} upgrade-insecure-requests;"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Content-Security-Policy"] = csp
-    return response
+class SecurityHeadersMiddleware:
+    def __init__(self, app_instance: FastAPI):
+        self.app = app_instance
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                mutable = MutableHeaders(scope=message)
+                csp = "default-src 'self'; frame-ancestors 'self'; base-uri 'self';"
+                if settings.production:
+                    csp = f"{csp} upgrade-insecure-requests;"
+                mutable["X-Content-Type-Options"] = "nosniff"
+                mutable["X-XSS-Protection"] = "1; mode=block"
+                mutable["Content-Security-Policy"] = csp
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ExceptionGroupMiddleware)
+
+
 
 
 @app.exception_handler(HTTPException)
@@ -135,12 +215,14 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled exception", extra={"path": str(request.url.path)})
-    sentry_sdk.capture_exception(exc)
-    return JSONResponse(
-        status_code=500,
-        content={"error": {"code": "500", "message": "Internal error"}},
-    )
+    return await _internal_error_response(request, exc)
+
+
+@app.exception_handler(ExceptionGroup)
+async def unhandled_exception_group_handler(
+    request: Request, exc: ExceptionGroup
+) -> JSONResponse:
+    return await _internal_error_response(request, exc)
 
 
 @app.get("/health")

@@ -1,5 +1,12 @@
 import logging
 
+import pytest
+
+try:
+    import httpx  # noqa: F401
+except ModuleNotFoundError:
+    pytest.skip("httpx is required for TestClient-based tests", allow_module_level=True)
+
 from fastapi.testclient import TestClient
 
 from app.main import APP_VERSION, app

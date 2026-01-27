@@ -14,6 +14,7 @@ from app.models.proxy import Proxy, ProxyStatus
 from app.models.tariff import Tariff
 from app.models.user import User, UserRole
 from app.schemas.tariff import TariffCreate, TariffResponse, TariffUpdate, UserTariffUpdate
+from app.schemas.user import UserResponse
 
 router = APIRouter(tags=["admin"])
 settings = get_settings()
@@ -116,8 +117,8 @@ async def admin_user_detail(
         "id": user.id,
         "telegram_id": user.telegram_id,
         "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
         "is_admin": user.is_admin,
         "is_active": user.is_active,
         "role": user.role.value if user.role else None,
@@ -181,13 +182,13 @@ async def admin_user_update(
     }
 
 
-@router.patch("/users/{user_id}/tariff")
+@router.patch("/users/{user_id}/tariff", response_model=UserResponse)
 async def admin_user_tariff_update(
     user_id: int,
     payload: UserTariffUpdate,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-) -> TariffResponse:
+) -> UserResponse:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -204,9 +205,12 @@ async def admin_user_tariff_update(
         "id": user.id,
         "telegram_id": user.telegram_id,
         "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
         "is_admin": user.is_admin,
         "is_active": user.is_active,
         "role": user.role.value if user.role else None,
+        "onboarding_completed": user.onboarding_completed,
         "tariff": (
             {
                 "id": tariff.id,

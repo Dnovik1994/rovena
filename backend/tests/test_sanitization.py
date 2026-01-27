@@ -1,6 +1,10 @@
+import pytest
+from pydantic import Field, ValidationError
+
 from app.core.database import get_db
 from app.core.security import create_access_token
 from app.models.user import User
+from app.schemas.sanitization import SanitizedModel
 
 
 def _create_user(client) -> User:
@@ -48,3 +52,34 @@ def test_sql_injection_rejected(client):
         json={"name": "Project'; DROP TABLE users; --", "description": "bad"},
     )
     assert response.status_code == 422
+
+
+class _SanitizedPayload(SanitizedModel):
+    name: str
+    tags: list[str]
+    optional: str | None = None
+
+
+def test_sanitized_model_trims_and_escapes_strings():
+    payload = _SanitizedPayload(name="  <b>ok</b>  ", tags=[" one ", "two"])
+    assert payload.name == "&lt;b&gt;ok&lt;/b&gt;"
+    assert payload.tags == ["one", "two"]
+
+
+def test_sanitized_model_allows_none():
+    payload = _SanitizedPayload(name="value", tags=["tag"], optional=None)
+    assert payload.optional is None
+
+
+def test_sanitized_model_enforces_length_limit():
+    with pytest.raises(ValidationError):
+        _SanitizedPayload(name="x" * 3000, tags=["tag"])
+
+
+class _SkipSanitizePayload(SanitizedModel):
+    init_data: str = Field(json_schema_extra={"skip_sanitize": True})
+
+
+def test_skip_sanitize_bypasses_sanitization():
+    payload = _SkipSanitizePayload(init_data="  <b>keep</b>  ")
+    assert payload.init_data == "  <b>keep</b>  "
