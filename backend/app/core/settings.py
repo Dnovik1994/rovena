@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     production: bool = False
     api_v1_prefix: str = "/api/v1"
 
-    cors_origins: List[str] = Field(default_factory=list)
+    cors_origins: List[str] | str = Field(default_factory=list)
     cors_allow_credentials: bool = True
 
     database_url: str = "mysql+pymysql://rovena:rovena@db:3306/rovena"
