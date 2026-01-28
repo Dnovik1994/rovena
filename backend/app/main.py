@@ -1,4 +1,4 @@
-import subprocess
+import os
 import uuid
 
 from exceptiongroup import ExceptionGroup
@@ -231,17 +231,7 @@ async def health_check() -> dict[str, str]:
 
 
 def _get_git_commit() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        return result.stdout.strip()
-    except Exception:  # noqa: BLE001
-        return "unknown"
+    return os.getenv("COMMIT_SHA", "unknown")
 
 
 @app.get("/version")
