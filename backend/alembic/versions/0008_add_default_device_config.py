@@ -25,7 +25,13 @@ def upgrade() -> None:
             '{"app_version":"10.5.0","system_version":"Android 13",'
             '"device_model":"Pixel 6","lang_code":"en"}'
         )
-        op.alter_column("accounts", "device_config", server_default=sa.text(f"'{default_config}'"))
+        op.execute(
+            sa.text(
+                "UPDATE accounts SET device_config = :default_config "
+                "WHERE device_config IS NULL"
+            ),
+            {"default_config": default_config},
+        )
 
 
 def downgrade() -> None:
@@ -34,4 +40,14 @@ def downgrade() -> None:
     columns = {column["name"] for column in inspector.get_columns("accounts")}
 
     if "device_config" in columns:
-        op.alter_column("accounts", "device_config", server_default=None)
+        default_config = (
+            '{"app_version":"10.5.0","system_version":"Android 13",'
+            '"device_model":"Pixel 6","lang_code":"en"}'
+        )
+        op.execute(
+            sa.text(
+                "UPDATE accounts SET device_config = NULL "
+                "WHERE device_config = :default_config"
+            ),
+            {"default_config": default_config},
+        )
