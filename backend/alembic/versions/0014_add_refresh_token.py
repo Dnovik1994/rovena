@@ -1,7 +1,7 @@
 """add refresh token to users
 
 Revision ID: 0014_add_refresh_token
-Revises: 0013_add_tariff_system
+Revises: 0013
 Create Date: 2025-09-20 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "0014_add_refresh_token"
-down_revision = "0013_add_tariff_system"
+down_revision = "0013"
 branch_labels = None
 depends_on = None
 

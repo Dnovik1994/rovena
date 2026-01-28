@@ -45,7 +45,7 @@ docker compose exec backend alembic upgrade head
 ## Quick Start (Production)
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
@@ -86,7 +86,7 @@ git clone https://github.com/your-org/rovena.git && cd rovena
 cp .env.example .env && nano .env  # fill secrets
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml down -v  # first run or after old volumes
-docker compose -f docker-compose.prod.yml up -d --build
+COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
 sudo certbot certonly --nginx -d kass.freecrm.biz --email your@email.com --agree-tos --non-interactive
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
 docker compose logs -f cron  # check backups
