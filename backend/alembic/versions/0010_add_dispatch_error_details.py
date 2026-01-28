@@ -5,7 +5,7 @@ Revises: 0009
 Create Date: 2024-10-12 02:40:00
 """
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -16,10 +16,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        contact_columns = set()
+        log_columns = set()
+    else:
+        bind = op.get_bind()
+        inspector = inspect(bind)
+        contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
+        log_columns = {column["name"] for column in inspector.get_columns("campaign_dispatch_logs")}
 
-    contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
     if "is_blocked" not in contact_columns:
         op.add_column(
             "contacts",
@@ -27,7 +32,6 @@ def upgrade() -> None:
         )
         op.alter_column("contacts", "is_blocked", server_default=None)
 
-    log_columns = {column["name"] for column in inspector.get_columns("campaign_dispatch_logs")}
     if "error_type" not in log_columns:
         op.add_column(
             "campaign_dispatch_logs",
@@ -61,10 +65,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        log_columns = {"timestamp", "error_message", "error_type"}
+        contact_columns = {"is_blocked"}
+    else:
+        bind = op.get_bind()
+        inspector = inspect(bind)
+        log_columns = {column["name"] for column in inspector.get_columns("campaign_dispatch_logs")}
+        contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
 
-    log_columns = {column["name"] for column in inspector.get_columns("campaign_dispatch_logs")}
     if "timestamp" in log_columns:
         op.drop_column("campaign_dispatch_logs", "timestamp")
     if "error_message" in log_columns:
@@ -73,6 +82,5 @@ def downgrade() -> None:
         op.drop_column("campaign_dispatch_logs", "error_type")
         op.execute("DROP TYPE IF EXISTS dispatcherrortype")
 
-    contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
     if "is_blocked" in contact_columns:
         op.drop_column("contacts", "is_blocked")

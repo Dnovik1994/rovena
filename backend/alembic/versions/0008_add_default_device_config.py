@@ -5,7 +5,7 @@ Revises: 0007
 Create Date: 2024-10-11 02:20:00
 """
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -17,8 +17,11 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {column["name"] for column in inspector.get_columns("accounts")}
+    if context.is_offline_mode():
+        columns = set()
+    else:
+        inspector = inspect(bind)
+        columns = {column["name"] for column in inspector.get_columns("accounts")}
 
     if "device_config" in columns:
         default_config = (
@@ -36,8 +39,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {column["name"] for column in inspector.get_columns("accounts")}
+    if context.is_offline_mode():
+        columns = {"device_config"}
+    else:
+        inspector = inspect(bind)
+        columns = {column["name"] for column in inspector.get_columns("accounts")}
 
     if "device_config" in columns:
         default_config = (

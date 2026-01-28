@@ -5,7 +5,7 @@ Revises: 0011
 Create Date: 2024-10-12 04:10:00
 """
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -16,10 +16,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-
-    contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
+    if context.is_offline_mode():
+        contact_columns = set()
+    else:
+        bind = op.get_bind()
+        inspector = inspect(bind)
+        contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
 
     if "blocked" not in contact_columns:
         op.add_column(
@@ -37,10 +39,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-
-    contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
+    if context.is_offline_mode():
+        contact_columns = {"blocked", "blocked_reason"}
+    else:
+        bind = op.get_bind()
+        inspector = inspect(bind)
+        contact_columns = {column["name"] for column in inspector.get_columns("contacts")}
 
     if "is_blocked" not in contact_columns:
         op.add_column(
