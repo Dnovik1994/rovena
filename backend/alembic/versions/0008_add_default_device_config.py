@@ -28,14 +28,13 @@ def upgrade() -> None:
             '{"app_version":"10.5.0","system_version":"Android 13",'
             '"device_model":"Pixel 6","lang_code":"en"}'
         )
-        statement = sa.text(
-            "UPDATE accounts SET device_config = :default_config "
-            "WHERE device_config IS NULL"
-        ).bindparams(default_config=default_config)
-        if context.is_offline_mode():
-            op.execute(statement)
-        else:
-            bind.execute(statement)
+        op.execute(
+            sa.text(
+                "UPDATE accounts SET device_config = :default_config "
+                "WHERE device_config IS NULL"
+            ),
+            {"default_config": default_config},
+        )
 
 
 def downgrade() -> None:
@@ -51,11 +50,10 @@ def downgrade() -> None:
             '{"app_version":"10.5.0","system_version":"Android 13",'
             '"device_model":"Pixel 6","lang_code":"en"}'
         )
-        statement = sa.text(
-            "UPDATE accounts SET device_config = NULL "
-            "WHERE device_config = :default_config"
-        ).bindparams(default_config=default_config)
-        if context.is_offline_mode():
-            op.execute(statement)
-        else:
-            bind.execute(statement)
+        op.execute(
+            sa.text(
+                "UPDATE accounts SET device_config = NULL "
+                "WHERE device_config = :default_config"
+            ),
+            {"default_config": default_config},
+        )
