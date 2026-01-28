@@ -5,7 +5,7 @@ Revises: 0007
 Create Date: 2024-10-11 02:20:00
 """
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -17,21 +17,45 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {column["name"] for column in inspector.get_columns("accounts")}
+    if context.is_offline_mode():
+        columns = set()
+    else:
+        inspector = inspect(bind)
+        columns = {column["name"] for column in inspector.get_columns("accounts")}
 
     if "device_config" in columns:
         default_config = (
             '{"app_version":"10.5.0","system_version":"Android 13",'
             '"device_model":"Pixel 6","lang_code":"en"}'
         )
-        op.alter_column("accounts", "device_config", server_default=sa.text(f"'{default_config}'"))
+        statement = sa.text(
+            "UPDATE accounts SET device_config = :default_config "
+            "WHERE device_config IS NULL"
+        ).bindparams(default_config=default_config)
+        if context.is_offline_mode():
+            op.execute(statement)
+        else:
+            bind.execute(statement)
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {column["name"] for column in inspector.get_columns("accounts")}
+    if context.is_offline_mode():
+        columns = {"device_config"}
+    else:
+        inspector = inspect(bind)
+        columns = {column["name"] for column in inspector.get_columns("accounts")}
 
     if "device_config" in columns:
-        op.alter_column("accounts", "device_config", server_default=None)
+        default_config = (
+            '{"app_version":"10.5.0","system_version":"Android 13",'
+            '"device_model":"Pixel 6","lang_code":"en"}'
+        )
+        statement = sa.text(
+            "UPDATE accounts SET device_config = NULL "
+            "WHERE device_config = :default_config"
+        ).bindparams(default_config=default_config)
+        if context.is_offline_mode():
+            op.execute(statement)
+        else:
+            bind.execute(statement)

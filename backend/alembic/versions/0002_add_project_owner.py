@@ -5,7 +5,7 @@ Revises: 0001
 Create Date: 2024-10-11 00:10:00
 """
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -16,9 +16,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {column["name"] for column in inspector.get_columns("projects")}
+    if context.is_offline_mode():
+        columns = set()
+    else:
+        bind = op.get_bind()
+        inspector = inspect(bind)
+        columns = {column["name"] for column in inspector.get_columns("projects")}
 
     if "owner_id" not in columns:
         op.add_column("projects", sa.Column("owner_id", sa.Integer(), nullable=False))
@@ -29,9 +32,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {column["name"] for column in inspector.get_columns("projects")}
+    if context.is_offline_mode():
+        columns = {"owner_id"}
+    else:
+        bind = op.get_bind()
+        inspector = inspect(bind)
+        columns = {column["name"] for column in inspector.get_columns("projects")}
 
     if "owner_id" in columns:
         op.drop_index("ix_projects_owner_id", table_name="projects")
