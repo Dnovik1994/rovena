@@ -6,6 +6,7 @@ settings = get_settings()
 
 celery_app = Celery("app", broker=settings.redis_url, backend=settings.redis_url)
 celery_app.conf.update(
+    broker_connection_retry_on_startup=True,
     broker_pool_limit=1,
     worker_concurrency=4,
     worker_prefetch_multiplier=1,
