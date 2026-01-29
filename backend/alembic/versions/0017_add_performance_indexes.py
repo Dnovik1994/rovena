@@ -16,8 +16,14 @@ branch_labels = None
 depends_on = None
 
 
-def _create_index_if_missing(index_name: str, table_name: str, columns: str) -> None:
+def _create_index_if_missing(
+    index_name: str,
+    table_name: str,
+    columns: str,
+    mysql_columns: str | None = None,
+) -> None:
     bind = op.get_bind()
+    mysql_target_columns = mysql_columns or columns
     if bind.dialect.name == "mysql":
         exists = bind.execute(
             sa.text(
@@ -34,7 +40,7 @@ def _create_index_if_missing(index_name: str, table_name: str, columns: str) -> 
         ).scalar()
         if exists:
             return
-        op.execute(f"CREATE INDEX {index_name} ON {table_name} ({columns})")
+        op.execute(f"CREATE INDEX {index_name} ON {table_name} ({mysql_target_columns})")
         return
 
     op.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})")
@@ -42,7 +48,12 @@ def _create_index_if_missing(index_name: str, table_name: str, columns: str) -> 
 
 def upgrade() -> None:
     _create_index_if_missing("ix_users_tariff_id", "users", "tariff_id")
-    _create_index_if_missing("ix_users_refresh_token", "users", "refresh_token")
+    _create_index_if_missing(
+        "ix_users_refresh_token",
+        "users",
+        "refresh_token",
+        mysql_columns="refresh_token(191)",
+    )
     _create_index_if_missing("ix_accounts_status", "accounts", "status")
     _create_index_if_missing("ix_accounts_status_proxy_id", "accounts", "status, proxy_id")
     _create_index_if_missing("ix_campaigns_status", "campaigns", "status")
