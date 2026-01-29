@@ -101,12 +101,6 @@ def check_tables(required_tables: Iterable[str] | None = None) -> bool:
     try:
         connection = _connect(database=config.database)
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_schema='mysql' AND table_name='user'"
-            )
-            if cursor.fetchone()[0] == 0:
-                return False
             for table in tables:
                 cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
