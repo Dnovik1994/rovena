@@ -67,6 +67,44 @@ def db_session(db_engine):
 
 
 @pytest.fixture()
+def mock_db(db_engine):
+    return db_engine
+
+
+@pytest.fixture()
+def mock_redis(monkeypatch):
+    class DummyRedis:
+        def ping(self):
+            return True
+
+        def llen(self, *_args, **_kwargs):
+            return 0
+
+    dummy = DummyRedis()
+
+    def fake_from_url(_url):
+        return dummy
+
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module.Redis, "from_url", staticmethod(fake_from_url))
+    return dummy
+
+
+@pytest.fixture()
+def mock_alembic(monkeypatch):
+    from alembic import command
+
+    calls = []
+
+    def fake_upgrade(config, revision):
+        calls.append((config, revision))
+
+    monkeypatch.setattr(command, "upgrade", fake_upgrade)
+    return calls
+
+
+@pytest.fixture()
 def client(db_session):
     try:
         import httpx  # noqa: F401

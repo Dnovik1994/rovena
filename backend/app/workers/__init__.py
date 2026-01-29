@@ -1,8 +1,11 @@
+import logging
+
 from celery import Celery
 
 from app.core.settings import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 celery_app = Celery("app", broker=settings.redis_url, backend=settings.redis_url)
 celery_app.conf.update(
@@ -13,5 +16,6 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
 )
+logger.info("Task queue ready")
 
 __all__ = ["celery_app"]
