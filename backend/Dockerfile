@@ -20,8 +20,11 @@ COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY entrypoint.sh /entrypoint.sh
+COPY scripts /app/scripts
 
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+RUN chmod +x /entrypoint.sh /app/scripts/*.sh \
+    && adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser /app
 
 USER appuser
 

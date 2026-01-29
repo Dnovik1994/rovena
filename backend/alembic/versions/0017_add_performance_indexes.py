@@ -5,6 +5,7 @@ Revises: 0016_add_onboarding_state
 Create Date: 2025-09-21 00:00:00.000000
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 
@@ -15,15 +16,39 @@ branch_labels = None
 depends_on = None
 
 
+def _create_index_if_missing(index_name: str, table_name: str, columns: str) -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "mysql":
+        exists = bind.execute(
+            sa.text(
+                """
+                SELECT 1
+                FROM information_schema.statistics
+                WHERE index_name = :index_name
+                  AND table_name = :table_name
+                  AND table_schema = DATABASE()
+                LIMIT 1
+                """
+            ),
+            {"index_name": index_name, "table_name": table_name},
+        ).scalar()
+        if exists:
+            return
+        op.execute(f"CREATE INDEX {index_name} ON {table_name} ({columns})")
+        return
+
+    op.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})")
+
+
 def upgrade() -> None:
-    op.create_index("ix_users_tariff_id", "users", ["tariff_id"])
-    op.create_index("ix_users_refresh_token", "users", ["refresh_token"])
-    op.create_index("ix_accounts_status", "accounts", ["status"])
-    op.create_index("ix_accounts_status_proxy_id", "accounts", ["status", "proxy_id"])
-    op.create_index("ix_campaigns_status", "campaigns", ["status"])
-    op.create_index("ix_campaigns_status_project_id", "campaigns", ["status", "project_id"])
-    op.create_index("ix_proxies_status", "proxies", ["status"])
-    op.create_index("ix_contacts_blocked", "contacts", ["blocked"])
+    _create_index_if_missing("ix_users_tariff_id", "users", "tariff_id")
+    _create_index_if_missing("ix_users_refresh_token", "users", "refresh_token")
+    _create_index_if_missing("ix_accounts_status", "accounts", "status")
+    _create_index_if_missing("ix_accounts_status_proxy_id", "accounts", "status, proxy_id")
+    _create_index_if_missing("ix_campaigns_status", "campaigns", "status")
+    _create_index_if_missing("ix_campaigns_status_project_id", "campaigns", "status, project_id")
+    _create_index_if_missing("ix_proxies_status", "proxies", "status")
+    _create_index_if_missing("ix_contacts_blocked", "contacts", "blocked")
 
 
 def downgrade() -> None:
