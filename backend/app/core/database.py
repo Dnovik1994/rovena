@@ -10,7 +10,13 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 connect_args = {}
-engine_kwargs: dict[str, Any] = {"pool_pre_ping": True}
+engine_kwargs: dict[str, Any] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 1800,
+    "pool_timeout": 30,
+    "pool_reset_on_return": "rollback",
+    "pool_use_lifo": True,
+}
 if settings.database_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 else:
@@ -18,7 +24,6 @@ else:
         {
             "pool_size": 20,
             "max_overflow": 5,
-            "pool_recycle": 3600,
         }
     )
 
