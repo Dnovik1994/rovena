@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import importlib.util
+
 from alembic.config import Config
-from sqlalchemy import Column, MetaData, String, Table, create_engine, inspect
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import Boolean, Column, Integer, MetaData, String, Table, create_engine, inspect
 
 from app.core.settings import get_settings
 
@@ -27,6 +31,34 @@ def test_idempotent_migration(mock_alembic):
     command.upgrade(config, "head")
 
     assert [call[1] for call in mock_alembic] == ["head", "head"]
+
+
+def test_idempotent_0015(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata = MetaData()
+    Table("users", metadata, Column("id", Integer, primary_key=True), Column("tariff_id", Integer))
+    Table("accounts", metadata, Column("id", Integer, primary_key=True), Column("status", String(32)))
+    Table("campaigns", metadata, Column("id", Integer, primary_key=True), Column("status", String(32)))
+    Table("proxies", metadata, Column("id", Integer, primary_key=True), Column("status", String(32)))
+    Table("contacts", metadata, Column("id", Integer, primary_key=True), Column("blocked", Boolean))
+    metadata.create_all(engine)
+
+    with engine.connect() as connection:
+        context = MigrationContext.configure(connection)
+        op_obj = Operations(context)
+        migration_path = BACKEND_ROOT / "alembic" / "versions" / "0015_add_performance_indexes.py"
+        spec = importlib.util.spec_from_file_location("migration_0015", migration_path)
+        assert spec and spec.loader
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        monkeypatch.setattr(migration, "op", op_obj)
+
+        migration.upgrade()
+        migration.upgrade()
+
+        inspector = inspect(connection)
+        users_indexes = {index["name"] for index in inspector.get_indexes("users")}
+        assert "ix_users_tariff_id" in users_indexes
 
 
 def test_database_exists(tmp_path, monkeypatch):
