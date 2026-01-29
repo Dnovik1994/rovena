@@ -58,4 +58,5 @@ def test_refresh_token_prefix_index(monkeypatch):
 
     assert fake_op.bind.last_query is not None
     assert "information_schema.statistics" in fake_op.bind.last_query
+    assert "table_schema = DATABASE()" in fake_op.bind.last_query
     assert any("refresh_token(191)" in sql for sql in fake_op.executed_sql)
