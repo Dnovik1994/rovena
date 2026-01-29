@@ -5,25 +5,32 @@ log() {
   echo "[migrations] $*"
 }
 
-max_retries="${MIGRATION_MAX_RETRIES:-10}"
-backoff_base="${MIGRATION_BACKOFF_BASE:-2}"
-backoff_max="${MIGRATION_BACKOFF_MAX:-30}"
 attempt=1
-delay="${MIGRATION_INITIAL_DELAY:-1}"
+max_retries=3
 
 log "Running Alembic migrations."
-until alembic upgrade head; do
-  if [[ "$attempt" -ge "$max_retries" ]]; then
-    log "Alembic upgrade failed after ${attempt} attempts."
+while [[ "$attempt" -le "$max_retries" ]]; do
+  log "Attempt ${attempt}: upgrading..."
+  upgrade_output=""
+  if upgrade_output="$(alembic upgrade head 2>&1)"; then
+    log "Alembic migrations complete."
+    exit 0
+  fi
+
+  if echo "$upgrade_output" | grep -Eqi "duplicate key name|1061"; then
+    log "Detected duplicate index, downgrading to 0014..."
+    if ! alembic downgrade 0014; then
+      log "Alembic downgrade to 0014 failed."
+      exit 1
+    fi
+  else
+    log "Alembic upgrade failed with unexpected error:"
+    echo "$upgrade_output"
     exit 1
   fi
-  log "Alembic upgrade failed (attempt ${attempt}/${max_retries}), retrying in ${delay}s."
-  sleep "$delay"
-  delay=$((delay * backoff_base))
-  if [[ "$delay" -gt "$backoff_max" ]]; then
-    delay="$backoff_max"
-  fi
+
   attempt=$((attempt + 1))
 done
 
-log "Alembic migrations complete."
+log "Migration failed after retries, manual fix required"
+exit 1

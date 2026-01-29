@@ -46,12 +46,8 @@ docker compose exec backend alembic upgrade head
 
 ## Troubleshooting
 
-Если получили ошибку duplicate index при миграциях, выполните:
-
-```bash
-docker compose exec backend alembic downgrade 0014
-docker compose exec backend alembic upgrade head
-```
+Если миграции падают, проверьте логи `backend` и найдите строку
+`Migration failed after retries` — после этого исправьте `0015.py` вручную.
 
 ## Quick Start (Production)
 
