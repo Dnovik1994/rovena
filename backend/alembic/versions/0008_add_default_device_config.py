@@ -28,7 +28,7 @@ def upgrade() -> None:
             '{"app_version":"10.5.0","system_version":"Android 13",'
             '"device_model":"Pixel 6","lang_code":"en"}'
         )
-        op.execute(
+        bind.execute(
             sa.text(
                 "UPDATE accounts SET device_config = :default_config "
                 "WHERE device_config IS NULL"
@@ -50,7 +50,7 @@ def downgrade() -> None:
             '{"app_version":"10.5.0","system_version":"Android 13",'
             '"device_model":"Pixel 6","lang_code":"en"}'
         )
-        op.execute(
+        bind.execute(
             sa.text(
                 "UPDATE accounts SET device_config = NULL "
                 "WHERE device_config = :default_config"
