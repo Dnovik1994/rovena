@@ -16,6 +16,7 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
 )
+celery_app.conf.broker_connection_retry_on_startup = True
 logger.info("Task queue ready")
 
 __all__ = ["celery_app"]
