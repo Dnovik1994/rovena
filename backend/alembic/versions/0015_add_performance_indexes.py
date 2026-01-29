@@ -5,6 +5,7 @@ Revises: 0014_add_refresh_token
 Create Date: 2025-09-20 00:00:00.000000
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 

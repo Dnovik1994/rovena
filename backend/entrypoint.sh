@@ -6,11 +6,12 @@ if [[ "${COMMIT_SHA:-unknown}" == "unknown" ]] && command -v git >/dev/null 2>&1
   export COMMIT_SHA
 fi
 
+max_retries=5
 attempts=0
 until alembic upgrade head; do
   attempts=$((attempts + 1))
-  if [[ $attempts -ge 30 ]]; then
-    echo "alembic upgrade failed after ${attempts} attempts" >&2
+  if [[ $attempts -ge $max_retries ]]; then
+    echo "Alembic upgrade failed after retries" >&2
     exit 1
   fi
   echo "alembic upgrade failed, retrying in 2s..." >&2
