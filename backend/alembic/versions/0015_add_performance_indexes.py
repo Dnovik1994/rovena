@@ -16,11 +16,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_index("ix_users_tariff_id", "users", ["tariff_id"])
-    op.create_index("ix_accounts_status", "accounts", ["status"])
-    op.create_index("ix_campaigns_status", "campaigns", ["status"])
-    op.create_index("ix_proxies_status", "proxies", ["status"])
-    op.create_index("ix_contacts_blocked", "contacts", ["blocked"])
+    op.execute("CREATE INDEX IF NOT EXISTS ix_users_tariff_id ON users (tariff_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_accounts_status ON accounts (status)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_campaigns_status ON campaigns (status)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_proxies_status ON proxies (status)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_contacts_blocked ON contacts (blocked)")
 
 
 def downgrade() -> None:

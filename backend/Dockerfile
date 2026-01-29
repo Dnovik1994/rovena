@@ -21,7 +21,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY entrypoint.sh /entrypoint.sh
 
-RUN useradd -m appuser && chown -R appuser /app
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
 
 USER appuser
 

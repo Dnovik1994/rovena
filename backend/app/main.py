@@ -237,7 +237,7 @@ def _get_git_commit() -> str:
 
 @app.get("/version")
 async def version() -> dict[str, str]:
-    return {"version": APP_VERSION, "commit": _get_git_commit()}
+    return {"version": APP_VERSION, "commit": os.environ.get("COMMIT_SHA", "unknown")}
 
 
 @app.get("/metrics")
