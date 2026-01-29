@@ -14,6 +14,12 @@ if [[ "${WAIT_FOR_DEPS:-1}" == "1" ]]; then
   /app/scripts/wait-for-deps.sh
 fi
 
+if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
+  /app/scripts/run-migrations.sh
+else
+  log "Skipping migrations (RUN_MIGRATIONS=${RUN_MIGRATIONS:-0})."
+fi
+
 if [[ "${WAIT_FOR_DB_TABLES:-1}" == "1" ]]; then
   /app/scripts/wait-for-db.sh
 fi
