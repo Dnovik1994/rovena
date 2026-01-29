@@ -6,8 +6,6 @@ from urllib.parse import parse_qsl
 
 from app.core.settings import get_settings
 
-settings = get_settings()
-
 
 class TelegramAuthError(ValueError):
     pass
@@ -19,6 +17,7 @@ def _build_data_check_string(data: dict[str, Any]) -> str:
 
 
 def validate_init_data(init_data: str) -> dict[str, Any]:
+    settings = get_settings()
     if not settings.telegram_bot_token:
         raise TelegramAuthError("Telegram bot token is not configured")
 
