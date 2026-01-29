@@ -16,12 +16,36 @@ branch_labels = None
 depends_on = None
 
 
+def _create_index_if_missing(index_name: str, table_name: str, columns: str) -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "mysql":
+        exists = bind.execute(
+            sa.text(
+                """
+                SELECT 1
+                FROM information_schema.statistics
+                WHERE index_name = :index_name
+                  AND table_name = :table_name
+                  AND table_schema = DATABASE()
+                LIMIT 1
+                """
+            ),
+            {"index_name": index_name, "table_name": table_name},
+        ).scalar()
+        if exists:
+            return
+        op.execute(f"CREATE INDEX {index_name} ON {table_name} ({columns})")
+        return
+
+    op.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})")
+
+
 def upgrade() -> None:
-    op.execute("CREATE INDEX IF NOT EXISTS ix_users_tariff_id ON users (tariff_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_accounts_status ON accounts (status)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_campaigns_status ON campaigns (status)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_proxies_status ON proxies (status)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_contacts_blocked ON contacts (blocked)")
+    _create_index_if_missing("ix_users_tariff_id", "users", "tariff_id")
+    _create_index_if_missing("ix_accounts_status", "accounts", "status")
+    _create_index_if_missing("ix_campaigns_status", "campaigns", "status")
+    _create_index_if_missing("ix_proxies_status", "proxies", "status")
+    _create_index_if_missing("ix_contacts_blocked", "contacts", "blocked")
 
 
 def downgrade() -> None:
