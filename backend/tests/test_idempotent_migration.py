@@ -16,6 +16,7 @@ class FakeResult:
 class FakeBind:
     def __init__(self, created_indexes: set[tuple[str, str]]):
         self.created_indexes = created_indexes
+        self.dialect = type("Dialect", (), {"name": "mysql"})()
 
     def execute(self, _sql, params):
         key = (params["index_name"], params["table_name"])

@@ -14,7 +14,7 @@ until alembic upgrade head; do
     echo "Alembic upgrade failed after retries" >&2
     exit 1
   fi
-  echo "alembic upgrade failed, retrying in 2s..." >&2
+  echo "alembic upgrade failed (attempt ${attempts}/${max_retries}), retrying in 2s..." >&2
   sleep 2
 done
 
