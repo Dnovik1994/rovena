@@ -23,7 +23,6 @@ def _create_index_if_missing(
     mysql_columns: str | None = None,
 ) -> None:
     bind = op.get_bind()
-    mysql_target_columns = mysql_columns or columns
     if bind.dialect.name == "mysql":
         exists = bind.execute(
             sa.text(
@@ -40,6 +39,7 @@ def _create_index_if_missing(
         ).scalar()
         if exists:
             return
+        mysql_target_columns = mysql_columns or columns
         op.execute(f"CREATE INDEX {index_name} ON {table_name} ({mysql_target_columns})")
         return
 
