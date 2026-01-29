@@ -1,9 +1,14 @@
-version: "3.9"
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   db:
     image: mysql:8.4
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MYSQL_DATABASE: rovena
       MYSQL_USER: rovena
@@ -15,14 +20,16 @@ services:
       - postgres-data:/var/lib/mysql
       - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "16379:6379"
     volumes:
@@ -32,6 +39,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
 
   backend:
     build:
@@ -39,6 +47,9 @@ services:
       args:
         COMMIT_SHA: ${COMMIT_SHA:-unknown}
     restart: unless-stopped
+    logging: *default-logging
+    init: true
+    stop_grace_period: 30s
     env_file:
       - .env
     environment:
@@ -49,18 +60,35 @@ services:
       PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy.cfg}
       PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
       PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-3306}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
+      WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
+      WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
+      WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
+      WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
+      WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
+      MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
+      MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
+      MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
     ports:
       - "8020:8020"
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8020/health"]
+      test: ["CMD", "/app/scripts/healthcheck-backend.sh"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   worker:
     build:
@@ -68,6 +96,9 @@ services:
       args:
         COMMIT_SHA: ${COMMIT_SHA:-unknown}
     restart: unless-stopped
+    logging: *default-logging
+    init: true
+    stop_grace_period: 30s
     env_file:
       - .env
     environment:
@@ -78,25 +109,52 @@ services:
       PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy.cfg}
       PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
       PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-3306}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
+      WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
+      WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
+      WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
+      WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
+      WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
+      MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
+      MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
+      MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
+      CELERY_APP: ${CELERY_APP:-app.workers}
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     command: celery -A app.workers worker --loglevel=info
     depends_on:
-      - backend
-      - redis
+      backend:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/scripts/healthcheck-worker.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   proxy:
     profiles: ["proxy"]
     image: vimagick/3proxy:latest
     container_name: 3proxy
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "10000-11000:10000-11000"
     volumes:
       - 3proxy-cfg:/etc/3proxy/3proxy.cfg
     command: ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "sh", "-c", "test -s /etc/3proxy/3proxy.cfg"]
       interval: 10s
@@ -107,6 +165,7 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
       HTTP_PROXY: ${HTTP_PROXY:-}
@@ -119,7 +178,14 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:5173/ >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres-data:
