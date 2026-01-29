@@ -115,6 +115,7 @@ async def on_startup() -> None:
         logger.info("Redis connected")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
+    logger.info("Application startup complete")
 
 
 class RequestIdMiddleware:

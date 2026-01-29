@@ -30,6 +30,8 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+MySQL init script автоматически создаёт базу rovena при первом запуске.
+
 Для режима разработки (hot-reload) можно использовать override:
 
 ```bash
@@ -65,6 +67,14 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 - Checklist: `docs/user-testing.md`.
 - Bug report template: `docs/bug-hunt.md`.
 - Сообщайте о найденных ошибках через GitHub Issues и прикладывайте логи/скриншоты.
+
+## Tests
+
+Run tests:
+
+```bash
+PYTHONPATH=backend pytest backend/tests
+```
 
 ## First Production Run
 

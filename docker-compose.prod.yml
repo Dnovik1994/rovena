@@ -18,8 +18,7 @@ services:
       MYSQL_ROOT_PASSWORD: rovena_root
     volumes:
       - postgres-data:/var/lib/mysql
-      - ./backend/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
-    command: ["--init-file=/docker-entrypoint-initdb.d/init-db.sh"]
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
