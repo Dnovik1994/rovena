@@ -4,6 +4,8 @@ set -euo pipefail
 COMMIT_SHA="$(git rev-parse --short HEAD)"
 export COMMIT_SHA
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/pre-deploy-clean.sh"
+
 docker compose -f docker-compose.prod.yml down -v
-docker volume rm rovena_postgres-data || true
 docker compose -f docker-compose.prod.yml up -d --build

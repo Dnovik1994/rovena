@@ -44,6 +44,15 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up --build
 docker compose exec backend alembic upgrade head
 ```
 
+## Troubleshooting
+
+Если получили ошибку duplicate index при миграциях, выполните:
+
+```bash
+docker compose exec backend alembic downgrade 0014
+docker compose exec backend alembic upgrade head
+```
+
 ## Quick Start (Production)
 
 ```bash

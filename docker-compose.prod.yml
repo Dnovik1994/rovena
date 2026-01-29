@@ -1,5 +1,7 @@
 version: "3.9"
 
+# Note: run ./scripts/pre-deploy-clean.sh before `docker compose up` on a new server
+# to remove legacy postgres/mysql volumes and ensure a clean MySQL initialization.
 x-logging: &default-logging
   driver: json-file
   options:
