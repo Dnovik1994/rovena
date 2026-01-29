@@ -21,7 +21,7 @@ else
 fi
 
 if [[ "${WAIT_FOR_DB_TABLES:-1}" == "1" ]]; then
-  /app/scripts/wait-for-db.sh --check-tables
+  /app/scripts/wait-for-db.sh
 fi
 
 if [[ "${WAIT_FOR_REDIS:-1}" == "1" ]]; then

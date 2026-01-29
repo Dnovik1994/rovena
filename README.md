@@ -49,6 +49,9 @@ docker compose exec backend alembic upgrade head
 Если миграции падают, проверьте логи `backend` и найдите строку
 `Migration failed after retries` — после этого исправьте `0015.py` вручную.
 
+Если базы `rovena` нет — проверьте, что `docker-entrypoint-initdb.d/init-rovena.sql`
+смонтирован в контейнер.
+
 ## Quick Start (Production)
 
 ```bash
