@@ -1,12 +1,15 @@
 import os
 import uuid
+from datetime import datetime, timezone
 
 from exceptiongroup import ExceptionGroup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.datastructures import Headers, MutableHeaders
@@ -24,7 +27,8 @@ from app.core.rate_limit import limiter
 from app.core.security import decode_access_token
 from app.core.settings import get_settings
 from app.services.websocket_manager import manager
-from app.core.database import SessionLocal
+from app.core.cache import ping as cache_ping
+from app.core.database import SessionLocal, get_db
 from app.models.account import Account, AccountStatus
 from app.models.user import User
 from app.core.metrics import accounts_by_status, accounts_total, celery_queue_length
@@ -227,8 +231,25 @@ async def unhandled_exception_group_handler(
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+async def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
+    try:
+        db.execute(text("SELECT 1"))
+        redis_status = "disabled"
+        if settings.redis_url:
+            redis_ok = await cache_ping()
+            if not redis_ok:
+                raise HTTPException(status_code=503, detail="Redis ping failed")
+            redis_status = "connected"
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "redis": redis_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 def _get_git_commit() -> str:
