@@ -51,16 +51,16 @@ def test_cors_prod_restricts_origin(monkeypatch):
     client = _build_client(
         monkeypatch,
         production=True,
-        origins='["https://kass.freecrm.biz","https://web.telegram.org"]',
+        origins='["https://kass.freestorms.top","https://web.telegram.org"]',
     )
     response = client.options(
         "/health",
         headers={
-            "Origin": "https://kass.freecrm.biz",
+            "Origin": "https://kass.freestorms.top",
             "Access-Control-Request-Method": "GET",
         },
     )
-    assert response.headers.get("access-control-allow-origin") == "https://kass.freecrm.biz"
+    assert response.headers.get("access-control-allow-origin") == "https://kass.freestorms.top"
 
 
 def test_cors_origins_accepts_json_list(monkeypatch):

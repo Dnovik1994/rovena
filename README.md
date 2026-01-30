@@ -22,6 +22,7 @@ cp .env.example .env
 - `SENTRY_DSN` — DSN для Sentry (опционально, если используете мониторинг).
 - `STRIPE_SECRET_KEY` и `STRIPE_WEBHOOK_SECRET` — ключи Stripe для подписок.
 - `VITE_TG_INIT_DATA` — initData для локального входа (если запускаете не в Telegram).
+- `DOMAIN` и `LE_EMAIL` — домен и email для автоматического выпуска сертификатов Traefik (Let’s Encrypt).
 - Production: сгенерируйте сильный `JWT_SECRET` командой `openssl rand -hex 32`.
 
 3. Запустите сервисы:
@@ -60,13 +61,13 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
 Откройте:
-- Frontend: `https://kass.freecrm.biz/`
-- Backend healthcheck: `https://kass.freecrm.biz/health`
+- Frontend: `https://YOUR_DOMAIN/`
+- Backend healthcheck: `https://YOUR_DOMAIN/health`
 
 ## Проверка
 
-- Backend healthcheck (через nginx): `https://kass.freecrm.biz/health`
-- Frontend (через nginx): `https://kass.freecrm.biz/`
+- Backend healthcheck (через Traefik): `https://YOUR_DOMAIN/health`
+- Frontend (через Traefik): `https://YOUR_DOMAIN/`
 
 ## Testing in Production
 
@@ -94,6 +95,34 @@ PYTHONPATH=backend pytest backend/tests
 - First monitoring check (из контейнера): `docker compose -f docker-compose.prod.yml exec prometheus wget -qO- http://localhost:9090/targets` → все targets в статусе UP.
 - Grafana (из контейнера): `docker compose -f docker-compose.prod.yml exec grafana wget -qO- http://localhost:3000/api/health` → статус ok.
 
+## Production deployment with Traefik
+
+**Требования:**
+- DNS A-запись `YOUR_DOMAIN` указывает на IP сервера.
+- Открыты входящие порты 80/443 (и 22 для SSH).
+
+**Подготовка:**
+```bash
+mkdir -p letsencrypt
+touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
+cp .env.example .env
+# Заполните .env (LE_EMAIL, DOMAIN, секреты)
+```
+
+**Запуск:**
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+**Проверки:**
+```bash
+curl -I http://YOUR_DOMAIN
+curl -I https://YOUR_DOMAIN/health
+curl -I https://YOUR_DOMAIN/api/v1/health
+```
+
+Traefik сам выпускает и обновляет сертификаты; certbot не требуется.
+
 ## Production deploy checklist
 
 1. Проверить конфигурацию compose:
@@ -111,14 +140,14 @@ COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.y
 3. Проверить доступность:
 
 ```bash
-curl -I https://kass.freecrm.biz/health
-curl -I https://kass.freecrm.biz/
+curl -I https://YOUR_DOMAIN/health
+curl -I https://YOUR_DOMAIN/
 ```
 
 4. (Опционально) Проверить API:
 
 ```bash
-curl -I https://kass.freecrm.biz/api/v1/health
+curl -I https://YOUR_DOMAIN/api/v1/health
 ```
 
 ### Server deploy commands (Ubuntu)
@@ -129,36 +158,39 @@ sudo apt update && sudo apt install docker.io docker-compose-plugin git ufw -y
 sudo usermod -aG docker $USER
 git clone https://github.com/your-org/rovena.git && cd rovena
 cp .env.example .env && nano .env  # fill secrets
+mkdir -p letsencrypt
+touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml down -v  # first run or after old volumes
 COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
-./scripts/certbot-init.sh kass.freecrm.biz your@email.com
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
 docker compose logs -f cron  # check backups
-curl https://kass.freecrm.biz/health  # must 200
+curl https://YOUR_DOMAIN/health  # must 200
 ```
 
-## Let's Encrypt (webroot)
+## Traefik + Let's Encrypt (HTTP-01)
 
-nginx работает в контейнере, поэтому выпуск и renew делаются через webroot challenge.
-Файлы challenge обслуживаются из `/var/www/certbot`, а сертификаты хранятся в `/etc/letsencrypt`.
+Traefik автоматически выпускает и обновляет сертификаты Let’s Encrypt через HTTP-01 challenge.
+Certbot больше не используется.
 
-Первичный выпуск сертификата:
+Подготовка:
 
 ```bash
-./scripts/certbot-init.sh kass.freecrm.biz your@email.com
+mkdir -p letsencrypt
+touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
 ```
 
-Renew сертификата (по cron или вручную):
+В `.env` должны быть указаны:
 
-```bash
-./scripts/certbot-renew.sh
-```
+- `LE_EMAIL=YOUR_EMAIL`
+- `DOMAIN=YOUR_DOMAIN`
+
+> Скрипты `scripts/certbot-init.sh` и `scripts/certbot-renew.sh` оставлены в репозитории как deprecated и больше не нужны для продакшн-деплоя.
 
 ## Security notes (production)
 
 - Не публикуйте наружу внутренние порты (5173/8020/9090/3000/9115/10000+). Снаружи должны быть только 22/80/443, а порты мониторинга открывайте только при явной необходимости.
-- API и фронт должны идти через один домен `https://kass.freecrm.biz` и same-origin `/api/v1`.
+- API и фронт должны идти через один домен `https://YOUR_DOMAIN` и same-origin `/api/v1`.
 
 ## Log Collection & Debug
 
@@ -294,7 +326,7 @@ locust -f locustfile.py -u 100 -r 10 --headless -t 10m --host http://localhost
 - Broken authentication: JWT access tokens (15 min) + refresh tokens (rotation) and server-side storage.
 - Injection: входные данные проходят Pydantic-валидацию/экранирование, SQL-инъекции отклоняются.
 - XSS: CSP + X-Content-Type-Options + X-XSS-Protection.
-- Security misconfiguration: HSTS/headers в nginx, CSRF проверка (опционально).
+- Security misconfiguration: HSTS/headers в Traefik или приложении, CSRF проверка (опционально).
 - Sensitive data exposure: refresh token хранится хэшированным.
 - Access control: IP whitelist на `/admin/` и RBAC на API.
 
@@ -370,36 +402,37 @@ docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
-4. Настройте SSL сертификаты (Certbot + nginx):
+4. Подготовьте хранилище сертификатов для Traefik:
 
 ```bash
-certbot certonly --nginx -d kass.freecrm.biz
+mkdir -p letsencrypt
+touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
 ```
 
 ## Production Checklist
 
 - DNS указывает на сервер и порты 80/443 открыты.
 - `PRODUCTION=true` и валидные secrets в `.env`.
-- Certbot сертификаты и автообновление.
+- Traefik выпускает и обновляет сертификаты Let’s Encrypt автоматически.
 - Firewall: разрешены 80/443, админ IP whitelist.
 - Ротация бэкапов и мониторинг `/backups`.
 - UFW: `ufw allow 80` + `ufw allow 443` + `ufw allow OpenSSH`.
 - Monitoring: Grafana доступна по 3000, Prometheus по 9090.
 
-В `docker-compose.prod.yml` nginx использует volume `/etc/letsencrypt`, поэтому сертификаты автоматически доступны контейнеру nginx.
+Traefik использует `./letsencrypt/acme.json` для хранения сертификатов.
 
 5. Проверьте доступность:
 
-- Frontend: `https://kass.freecrm.biz/`
-- Backend health: `https://kass.freecrm.biz/health`
+- Frontend: `https://YOUR_DOMAIN/`
+- Backend health: `https://YOUR_DOMAIN/health`
 
-> Для ограничения доступа к `/admin/` отредактируйте IP whitelist в `nginx.conf`.
+> Для ограничения доступа к `/admin/` используйте middleware на стороне Traefik или правила на уровне сети.
 
 ## Monitoring
 
 - Grafana: `http://<server>:3000` (default admin/admin)
 - Prometheus: `http://<server>:9090`
-- Targets: backend `/metrics`, nginx exporter, 3proxy health probe (blackbox)
+- Targets: backend `/metrics`, 3proxy health probe (blackbox)
 - Alerts: `prometheus_rules.yml` (HighQueue, ManyBlockedAccounts)
 
 ## Load testing

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOMAIN=${1:-kass.freecrm.biz}
+DOMAIN=${1:-kass.freestorms.top}
 BACKUP_DIR=${2:-/backups}
 
 health_url="https://${DOMAIN}/health"
@@ -11,8 +11,8 @@ ws_url="wss://${DOMAIN}/ws/status"
 echo "Checking health: ${health_url}"
 curl -fsS "${health_url}" > /dev/null
 
-echo "Checking HTTPS health: https://kass.freecrm.biz/health"
-curl -fsS "https://kass.freecrm.biz/health" > /dev/null
+echo "Checking HTTPS health: https://${DOMAIN}/health"
+curl -fsS "https://${DOMAIN}/health" > /dev/null
 
 echo "Checking metrics: ${metrics_url}"
 curl -fsS "${metrics_url}" > /dev/null

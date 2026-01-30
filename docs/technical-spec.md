@@ -1,4 +1,4 @@
-# Техническое задание: FreeCRM Inviter (kass.freecrm.biz)
+# Техническое задание: FreeCRM Inviter (kass.freestorms.top)
 
 ## 1. Цель и контекст
 
@@ -7,7 +7,7 @@
 **Архитектура:**
 
 ```
-User -> Nginx (kass.freecrm.biz) -> Backend API -> Workers -> [Pyrogram/Telethon + Proxy] -> Telegram
+User -> Traefik (kass.freestorms.top) -> Backend API -> Workers -> [Pyrogram/Telethon + Proxy] -> Telegram
 ```
 
 ## 2. Управление доступом и админ-панель
@@ -54,84 +54,15 @@ User -> Nginx (kass.freecrm.biz) -> Backend API -> Workers -> [Pyrogram/Telethon
 - **FloodWait/бан:** при FloodWait аккаунт ставится в `cooldown`, инвайты откладываются; при бане аккаунт переводится в `blocked` и снимается с активных кампаний.
 - **Ротация и восстановление:** при падении прокси — поиск свободного прокси из пула, пересвязка аккаунта и перезапуск воркера; при дефиците — ожидание или перевод кампании на резервные аккаунты.
 
-### 3.4. SSL и Nginx
-- Домен: `kass.freecrm.biz`.
-- SSL через Let’s Encrypt, команда:
-
-```
-certbot certonly --nginx -d kass.freecrm.biz
-```
-
-- Пример конфига Nginx:
-
-```nginx
-server {
-    listen 80;
-    server_name kass.freecrm.biz;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name kass.freecrm.biz;
-
-    ssl_certificate /etc/letsencrypt/live/kass.freecrm.biz/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/kass.freecrm.biz/privkey.pem;
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-
-    location / {
-        root /var/www/kass.freecrm.biz/html;
-        index index.html index.htm;
-        try_files $uri $uri/ /index.html;
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8020/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    location /ws/ {
-        proxy_pass http://127.0.0.1:8020/ws/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /admin/ {
-        allow 192.168.1.100;
-        allow 10.0.0.0/24;
-        deny all;
-
-        proxy_pass http://127.0.0.1:8020/admin/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    access_log /var/log/nginx/kass.freecrm.biz.access.log;
-    error_log /var/log/nginx/kass.freecrm.biz.error.log;
-}
-```
+### 3.4. SSL и Traefik
+- Домен: `kass.freestorms.top`.
+- SSL через Let’s Encrypt (HTTP-01) от Traefik.
+- Автоматический редирект HTTP → HTTPS и маршрутизация `/api/v1` → backend.
 
 ### 3.5. Требования к серверу и мониторингу
 - **MVP минимум:** 8 vCPU, 16 ГБ RAM, 100 ГБ SSD.
 - **Рекомендация для масштабирования:** 16 vCPU, 32–64 ГБ RAM, NVMe SSD.
-- **Docker Compose:** сервисы `postgres`, `redis`, `backend`, `worker`, `3proxy`, `nginx`.
+- **Docker Compose:** сервисы `postgres`, `redis`, `backend`, `worker`, `3proxy`, `traefik`.
 - **Ключевые переменные окружения:** `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `PROXY_POOL_ENABLED`.
 - **Метрики (Prometheus):**
   - `accounts_status{state="active|warming|blocked"}`
@@ -153,13 +84,13 @@ server {
 ### 4.2. Infrastructure as Code
 - Сервер: Ubuntu 22.04 / Debian 11.
 - Docker + Docker Compose: Postgres, Redis, 3proxy, backend.
-- Nginx: SSL + reverse proxy.
+- Traefik: SSL + reverse proxy.
 - CI/CD: GitHub Actions/GitLab CI.
 - Мониторинг: Prometheus + Grafana, Sentry.
 
 ## 5. Roadmap
 
-**Этап 0 (Неделя 1):** инфраструктура, DNS, SSL, Nginx, Postgres, Redis.
+**Этап 0 (Неделя 1):** инфраструктура, DNS, SSL, Traefik, Postgres, Redis.
 
 **Этап 1 (Недели 2-4):** FastAPI, модель ролей, админ-панель, CRUD для пользователей/прокси, синхронизация 3proxy.
 

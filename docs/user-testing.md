@@ -3,7 +3,7 @@
 Use this checklist to validate the end-to-end flow before a production rollout.
 
 1. **Open the app**
-   - Go to https://kass.freecrm.biz.
+   - Go to https://kass.freestorms.top.
    - Complete Telegram login.
    - Finish the onboarding wizard.
 
