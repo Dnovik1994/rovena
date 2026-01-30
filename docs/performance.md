@@ -1,7 +1,7 @@
 # Performance & Load Testing
 
 ## Baseline Setup
-- Stack: nginx + FastAPI + MySQL + Redis + Celery.
+- Stack: Traefik + FastAPI + MySQL + Redis + Celery.
 - Load test tool: Locust.
 
 ## Load Test Results (Template)

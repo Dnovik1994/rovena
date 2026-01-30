@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOMAIN=${1:-kass.freecrm.biz}
+DOMAIN=${1:-kass.freestorms.top}
 EMAIL=${2:-}
 
 if [[ -z "$EMAIL" ]]; then
