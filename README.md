@@ -60,13 +60,13 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
 Откройте:
-- Backend healthcheck: `http://localhost/health`
-- Frontend: `http://localhost/`
+- Frontend: `https://kass.freecrm.biz/`
+- Backend healthcheck: `https://kass.freecrm.biz/health`
 
 ## Проверка
 
-- Backend healthcheck: `http://localhost:8020/health`
-- Frontend: `http://localhost:5173`
+- Backend healthcheck (через nginx): `https://kass.freecrm.biz/health`
+- Frontend (через nginx): `https://kass.freecrm.biz/`
 
 ## Testing in Production
 
@@ -91,25 +91,74 @@ PYTHONPATH=backend pytest backend/tests
 - Deploy checklist: `docs/deploy-checklist.md`.
 - Validation script: `scripts/validate-deploy.sh`.
 - После деплоя мониторьте логи 10 минут и выполните тестовую кампанию из `docs/user-testing.md`.
-- First monitoring check: `curl http://localhost:9090/targets` → все targets в статусе UP.
-- Grafana: `http://localhost:3000` → логин и добавление Prometheus datasource, затем проверьте дашборды.
+- First monitoring check (из контейнера): `docker compose -f docker-compose.prod.yml exec prometheus wget -qO- http://localhost:9090/targets` → все targets в статусе UP.
+- Grafana (из контейнера): `docker compose -f docker-compose.prod.yml exec grafana wget -qO- http://localhost:3000/api/health` → статус ok.
+
+## Production deploy checklist
+
+1. Проверить конфигурацию compose:
+
+```bash
+docker compose -f docker-compose.prod.yml config
+```
+
+2. Собрать и запустить сервисы:
+
+```bash
+COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
+```
+
+3. Проверить доступность:
+
+```bash
+curl -I https://kass.freecrm.biz/health
+curl -I https://kass.freecrm.biz/
+```
+
+4. (Опционально) Проверить API:
+
+```bash
+curl -I https://kass.freecrm.biz/api/v1/health
+```
 
 ### Server deploy commands (Ubuntu)
 
 ```bash
 ssh user@server
-sudo apt update && sudo apt install docker.io docker-compose-plugin git certbot python3-certbot-nginx ufw -y
+sudo apt update && sudo apt install docker.io docker-compose-plugin git ufw -y
 sudo usermod -aG docker $USER
 git clone https://github.com/your-org/rovena.git && cd rovena
 cp .env.example .env && nano .env  # fill secrets
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml down -v  # first run or after old volumes
 COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
-sudo certbot certonly --nginx -d kass.freecrm.biz --email your@email.com --agree-tos --non-interactive
+./scripts/certbot-init.sh kass.freecrm.biz your@email.com
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
 docker compose logs -f cron  # check backups
 curl https://kass.freecrm.biz/health  # must 200
 ```
+
+## Let's Encrypt (webroot)
+
+nginx работает в контейнере, поэтому выпуск и renew делаются через webroot challenge.
+Файлы challenge обслуживаются из `/var/www/certbot`, а сертификаты хранятся в `/etc/letsencrypt`.
+
+Первичный выпуск сертификата:
+
+```bash
+./scripts/certbot-init.sh kass.freecrm.biz your@email.com
+```
+
+Renew сертификата (по cron или вручную):
+
+```bash
+./scripts/certbot-renew.sh
+```
+
+## Security notes (production)
+
+- Не публикуйте наружу внутренние порты (5173/8020/9090/3000/9115/10000+). Снаружи должны быть только 22/80/443, а порты мониторинга открывайте только при явной необходимости.
+- API и фронт должны идти через один домен `https://kass.freecrm.biz` и same-origin `/api/v1`.
 
 ## Log Collection & Debug
 

@@ -152,8 +152,6 @@ services:
     container_name: 3proxy
     restart: unless-stopped
     logging: *default-logging
-    ports:
-      - "10000-11000:10000-11000"
     volumes:
       - 3proxy-cfg:/etc/3proxy/3proxy.cfg
     command: ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
@@ -171,7 +169,7 @@ services:
       context: ./frontend
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://backend:8020/api/v1}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -196,6 +194,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot:ro
     labels:
       com.prometheus.scrape: "true"
       com.prometheus.port: "80"
@@ -214,8 +213,6 @@ services:
     image: prom/prometheus:latest
     restart: unless-stopped
     logging: *default-logging
-    ports:
-      - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus_rules.yml:/etc/prometheus/prometheus_rules.yml:ro
@@ -238,8 +235,6 @@ services:
     image: grafana/grafana:latest
     restart: unless-stopped
     logging: *default-logging
-    ports:
-      - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -272,8 +267,6 @@ services:
     image: prom/blackbox-exporter:latest
     restart: unless-stopped
     logging: *default-logging
-    ports:
-      - "9115:9115"
     volumes:
       - ./blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
@@ -308,6 +301,15 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  certbot:
+    image: certbot/certbot:latest
+    logging: *default-logging
+    profiles: ["certbot"]
+    entrypoint: certbot
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
 
 volumes:
   postgres-data:
