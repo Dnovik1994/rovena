@@ -177,7 +177,9 @@ services:
       start_period: 15s
 
   proxy:
-    image: vimagick/3proxy:latest
+    build:
+      context: ./proxy
+    image: rovena-3proxy:local
     container_name: 3proxy
     restart: unless-stopped
     logging: *default-logging
