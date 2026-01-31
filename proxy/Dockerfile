@@ -11,7 +11,8 @@ FROM alpine:3.20
 RUN apk add --no-cache openssl
 
 COPY --from=builder /tmp/3proxy/bin/3proxy /usr/local/bin/3proxy
-RUN mkdir -p /etc/3proxy && chmod 755 /etc/3proxy
-COPY 3proxy.cfg /etc/3proxy/3proxy.cfg
+COPY 3proxy.cfg /defaults/3proxy.cfg
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/3proxy"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
