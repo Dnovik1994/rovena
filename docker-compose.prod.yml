@@ -184,7 +184,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     volumes:
-      - 3proxy-cfg:/etc/3proxy/3proxy.cfg
+      - 3proxy-cfg:/etc/3proxy
     command: ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
     depends_on:
       backend:
