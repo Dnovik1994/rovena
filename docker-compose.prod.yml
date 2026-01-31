@@ -5,6 +5,8 @@ x-logging: &default-logging
   options:
     max-size: "10m"
     max-file: "5"
+x-3proxy-command: &proxy-command ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
+x-3proxy-healthcheck: &proxy-healthcheck ["CMD", "sh", "-lc", "test -s /etc/3proxy/3proxy.cfg && pgrep 3proxy >/dev/null"]
 
 services:
   traefik:
@@ -185,12 +187,12 @@ services:
     logging: *default-logging
     volumes:
       - 3proxy-cfg:/etc/3proxy
-    command: ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
+    command: *proxy-command
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-lc", "test -s /etc/3proxy/3proxy.cfg && pgrep 3proxy >/dev/null"]
+      test: *proxy-healthcheck
       interval: 10s
       timeout: 5s
       retries: 5
