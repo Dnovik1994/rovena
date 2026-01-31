@@ -190,7 +190,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "test -s /etc/3proxy/3proxy.cfg"]
+      test: ["CMD", "sh", "-lc", "test -s /etc/3proxy/3proxy.cfg && pgrep 3proxy >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
