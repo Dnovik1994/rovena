@@ -39,7 +39,7 @@ services:
       MYSQL_PASSWORD: rovena
       MYSQL_ROOT_PASSWORD: rovena_root
     volumes:
-      - postgres-data:/var/lib/mysql
+      - mysql-data:/var/lib/mysql
       - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD"]
@@ -296,7 +296,7 @@ services:
       retries: 3
 
 volumes:
-  postgres-data:
+  mysql-data:
   redis-data:
   3proxy-cfg:
   prometheus-data:
