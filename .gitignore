@@ -1,2 +1,5 @@
 .env
 letsencrypt/
+
+# local backups
+docker-compose.prod.yml.bak.*
