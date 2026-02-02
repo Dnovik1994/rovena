@@ -10,9 +10,11 @@ x-3proxy-healthcheck: &proxy-healthcheck ["CMD", "sh", "-lc", "test -s /etc/3pro
 
 services:
   traefik:
-    image: traefik:v3.0
+    image: traefik:v3.1
     restart: unless-stopped
     logging: *default-logging
+    environment:
+      - DOCKER_API_VERSION=1.44
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
