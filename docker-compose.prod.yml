@@ -14,6 +14,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
       - DOCKER_API_VERSION=1.44
     command:
       - --providers.docker=true
