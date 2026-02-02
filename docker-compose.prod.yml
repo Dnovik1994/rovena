@@ -13,12 +13,10 @@ services:
     image: traefik:v3.1
     restart: unless-stopped
     logging: *default-logging
-    environment:
-      - DOCKER_HOST=unix:///var/run/docker.sock
-      - DOCKER_API_VERSION=1.44
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
