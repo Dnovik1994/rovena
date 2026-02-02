@@ -123,6 +123,22 @@ curl -I https://YOUR_DOMAIN/api/v1/health
 
 Traefik сам выпускает и обновляет сертификаты; certbot не требуется.
 
+### Troubleshooting: Traefik Docker API incompatibility
+
+**Симптом:** `404` на `https://127.0.0.1/` (или `https://YOUR_DOMAIN/`) и в логах Traefik есть ошибка:
+`client version 1.24 is too old. Minimum supported API version is 1.44`.
+
+**Причина:** Traefik `v3.0` использует несовместимую версию Docker API клиента при работе с Docker Engine, у которого `MinAPIVersion` = `1.44`. В результате провайдер Docker не может читать `docker.sock`, и роутеры не обнаруживаются.
+
+**Исправление:** обновить образ Traefik до `v3.1` и (опционально) задать `DOCKER_API_VERSION=1.44` в окружении сервиса.
+
+**Проверка после фикса:**
+```bash
+docker compose --env-file .env -f docker-compose.prod.yml pull traefik
+docker compose --env-file .env -f docker-compose.prod.yml up -d --force-recreate --no-deps traefik
+bash scripts/verify-traefik-docker-provider.sh
+```
+
 ## Production deploy checklist
 
 1. Проверить конфигурацию compose:
