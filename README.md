@@ -128,15 +128,14 @@ Traefik сам выпускает и обновляет сертификаты; 
 **Симптом:** `404` на `https://127.0.0.1/` (или `https://YOUR_DOMAIN/`) и в логах Traefik есть ошибка:
 `client version 1.24 is too old. Minimum supported API version is 1.44`.
 
-**Причина:** Traefik `v3.0` использует несовместимую версию Docker API клиента при работе с Docker Engine, у которого `MinAPIVersion` = `1.44`. В результате провайдер Docker не может читать `docker.sock`, и роутеры не обнаруживаются.
+**Причина:** Traefik стартует без явного endpoint Docker API и уходит в несовместимый путь/клиент, из-за чего провайдер Docker не может читать `docker.sock`, и роутеры не обнаруживаются.
 
-**Исправление:** обновить образ Traefik до `v3.1` и явно задать `DOCKER_HOST` + `DOCKER_API_VERSION=1.44` в окружении сервиса.
+**Исправление:** задать endpoint Docker API для провайдера Traefik (предпочтительно через флаг `--providers.docker.endpoint=unix:///var/run/docker.sock`, либо через `DOCKER_HOST=unix:///var/run/docker.sock`). Псевдо-фикс через одиночный `DOCKER_API_VERSION` не решает проблему.
 
 **Проверка после фикса (пересоздать Traefik и проверить docker provider):**
 ```bash
-docker compose --env-file .env -f docker-compose.prod.yml config | sed -n '/^  traefik:/,/^  [A-Za-z0-9_-]\+:/p' | grep -nE 'image:|environment:|DOCKER_'
+docker compose --env-file .env -f docker-compose.prod.yml config | sed -n '/^  traefik:/,/^  [A-Za-z0-9_-]\+:/p' | grep -nE 'image:|command:|providers.docker.endpoint'
 docker compose --env-file .env -f docker-compose.prod.yml up -d --force-recreate --no-deps traefik
-docker compose --env-file .env -f docker-compose.prod.yml exec -T traefik sh -lc 'env | grep -E "^DOCKER_(HOST|API_VERSION)="'
 docker compose --env-file .env -f docker-compose.prod.yml logs --tail=200 traefik | grep -F "client version 1.24 is too old" && exit 1 || true
 bash scripts/verify-traefik-docker-provider.sh
 ```
