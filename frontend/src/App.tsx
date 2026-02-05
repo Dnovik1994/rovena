@@ -2,6 +2,7 @@ import React, { Suspense, useEffect, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import AppShell from "./components/AppShell";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Accounts from "./pages/Accounts";
 import Campaigns from "./pages/Campaigns";
 import Contacts from "./pages/Contacts";
@@ -90,11 +91,13 @@ const App = (): JSX.Element => {
   }, []);
 
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 };
 

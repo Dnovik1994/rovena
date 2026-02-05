@@ -483,10 +483,10 @@ redis-cli -u $REDIS_URL --rdb /backups/redis-YYYYMMDD.rdb
 
 ### Что осталось до production
 
-**Phase 1 — Frontend Hardening:**
-- [ ] WebSocket reconnection с exponential backoff
-- [ ] React Error Boundary
-- [ ] API fetch timeouts (AbortController)
+**Phase 1 — Frontend Hardening (DONE):**
+- [x] WebSocket reconnection с exponential backoff + jitter
+- [x] React Error Boundary (global)
+- [x] API fetch timeouts (AbortController)
 
 **Phase 2 — Infrastructure Hardening:**
 - [ ] Пиннинг Docker-образов (traefik, prometheus, grafana, blackbox)

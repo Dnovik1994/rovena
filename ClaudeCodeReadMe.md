@@ -172,85 +172,55 @@ rovena/
 
 ## 5. Оставшиеся проблемы и задачи
 
-### 5.1 High Priority
+### 5.1 High Priority — Frontend Reliability (DONE, PR#3)
 
-#### 5.1.1 WebSocket reconnection отсутствует
+#### 5.1.1 WebSocket reconnection — DONE
 **Файл:** `frontend/src/services/websocket.ts`
-При закрытии соединения (потеря сети, перезапуск сервера) нет автоматического переподключения. Есть ping/pong, но нет retry.
+Реализовано:
+- Exponential backoff 250ms → 30s cap с jitter ±30% (`computeBackoff()` — чистая функция, тестируема)
+- Auth failure (code 1008) → state `auth_failed`, retry прекращается
+- Network drop → автоматический retry с backoff
+- Singleton guard: один активный socket, повторный вызов `connectStatusSocket()` закрывает предыдущий
+- Ping timeout 45s: если сервер молчит, соединение принудительно закрывается
+- Connection states: `connecting | connected | disconnected | auth_failed` через `onStateChange` callback
+- `StatusSocketHandle.dispose()` для cleanup (используется в useEffect consumers)
 
-**Как реализовать:**
-- Добавить reconnection с exponential backoff (1s, 2s, 4s, 8s, max 30s)
-- Максимум попыток: 10, затем показать пользователю ошибку
-- При успешном reconnect — повторно отправить auth message
-- Добавить состояние соединения (connecting/connected/disconnected) в UI
+**Как проверить вручную:**
+1. Открыть Accounts или Campaigns, убедиться что `[ws] Status WebSocket connected` в console
+2. Остановить backend → console: reconnect attempts с нарастающими паузами
+3. Запустить backend → автоматическое переподключение + auth
+4. Передать невалидный токен → state `auth_failed`, retry прекращается
 
-```typescript
-// Псевдокод
-let reconnectAttempts = 0;
-const MAX_RECONNECT = 10;
+#### 5.1.2 React Error Boundary — DONE
+**Файл:** `frontend/src/components/ErrorBoundary.tsx`
+Реализовано:
+- Class component с `getDerivedStateFromError` + `componentDidCatch`
+- Обёртка вокруг `<AuthProvider>` / `<BrowserRouter>` в `App.tsx`
+- Fallback UI: "Произошла ошибка" + error message + "Перезагрузить" / "На главную"
+- `console.error` всегда; Sentry `captureException` если `window.Sentry` доступен
+- Стили Tailwind, консистентны с дизайном проекта (slate-950 palette)
 
-function connect() {
-  const socket = new WebSocket(url);
-  socket.onclose = () => {
-    if (reconnectAttempts < MAX_RECONNECT) {
-      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-      setTimeout(connect, delay);
-      reconnectAttempts++;
-    }
-  };
-  socket.onopen = () => {
-    reconnectAttempts = 0;
-    socket.send(JSON.stringify({ type: "auth", token }));
-  };
-}
-```
+**Как проверить вручную:**
+1. Временно добавить `throw new Error("test")` в любой компонент
+2. Приложение показывает fallback вместо белого экрана
+3. "Перезагрузить" вызывает `window.location.reload()`
+4. "На главную" сбрасывает state и редиректит на `/`
 
-#### 5.1.2 React Error Boundary отсутствует
-**Файлы для создания:** `frontend/src/components/ErrorBoundary.tsx`
-Ошибка рендеринга в любом компоненте крашит всё приложение. Есть `ErrorState` и `ErrorPage`, но нет class-based Error Boundary.
-
-**Как реализовать:**
-- Создать class component с `componentDidCatch` и `getDerivedStateFromError`
-- Обернуть `<App />` в `<ErrorBoundary>` в main.tsx
-- Показывать fallback UI с кнопкой "Перезагрузить"
-- Интегрировать с Sentry для отправки ошибок
-
-```tsx
-class ErrorBoundary extends React.Component<Props, State> {
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Sentry.captureException(error, { extra: errorInfo });
-  }
-  render() {
-    if (this.state.hasError) return <ErrorFallback onRetry={() => this.setState({ hasError: false })} />;
-    return this.props.children;
-  }
-}
-```
-
-#### 5.1.3 Нет таймаутов на API-запросы фронтенда
+#### 5.1.3 API fetch timeouts — DONE
 **Файл:** `frontend/src/services/api.ts`
-Fetch-запросы могут зависнуть навсегда. Нет AbortController.
+Реализовано:
+- AbortController с 15s timeout по умолчанию на `apiFetch()`
+- 10s timeout на `refreshAccessToken()`
+- `AbortError` → `{code: "TIMEOUT", message: "Запрос не отвечает..."}` (отличается от network error)
+- Network error → `{code: "NETWORK", message: "Ошибка сети..."}` (отличается от timeout)
+- Caller-provided signal поддерживается (chaining)
+- 5й параметр `timeoutMs` для override per-call
+- Backward-compatible: `resources.ts` не требует изменений
 
-**Как реализовать:**
-- Обернуть все fetch-вызовы в `apiFetch()` с AbortController
-- Дефолтный timeout: 15s для обычных запросов, 30s для загрузки файлов
-- Показывать пользователю ошибку при timeout
-
-```typescript
-async function apiFetch(url: string, options: RequestInit = {}, timeoutMs = 15000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    return response;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-```
+**Как проверить вручную:**
+1. Throttle network в DevTools → Offline → fetch бросает NETWORK ошибку
+2. Throttle → Very slow → через 15s бросает TIMEOUT ошибку
+3. Нормальная работа: все запросы проходят как раньше
 
 #### 5.1.4 Пиннинг Docker-образов (частично)
 **Файл:** `docker-compose.prod.yml`
