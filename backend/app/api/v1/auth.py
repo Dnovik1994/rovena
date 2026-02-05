@@ -1,9 +1,11 @@
 import json
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -14,12 +16,17 @@ from app.models.user import User
 from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["auth"])
 
 
 @router.post("/auth/telegram", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def auth_via_telegram(
-    payload: TelegramAuthRequest, db: Session = Depends(get_db)
+    request: Request,
+    payload: TelegramAuthRequest,
+    db: Session = Depends(get_db),
 ) -> TokenResponse:
     try:
         data = validate_init_data(payload.init_data)
@@ -64,8 +71,11 @@ async def auth_via_telegram(
 
 
 @router.post("/auth/refresh", response_model=TokenResponse)
+@limiter.limit("20/minute")
 async def refresh_access_token(
-    payload: RefreshTokenRequest, db: Session = Depends(get_db)
+    request: Request,
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db),
 ) -> TokenResponse:
     try:
         token_payload = decode_refresh_token(payload.refresh_token)
@@ -81,6 +91,13 @@ async def refresh_access_token(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     if not user.refresh_token or user.refresh_token != hash_token(payload.refresh_token):
+        # Possible token reuse attack — invalidate all refresh tokens for this user
+        user.refresh_token = None
+        db.commit()
+        logger.warning(
+            "Refresh token mismatch — possible reuse attack",
+            extra={"user_id": user.id},
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token mismatch")
 
     access_token = create_access_token(str(user.id))

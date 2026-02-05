@@ -1,3 +1,6 @@
+import logging
+import socket
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -7,6 +10,8 @@ from app.models.proxy import Proxy
 from app.schemas.proxy import ProxyCreate, ProxyResponse, ProxyUpdate
 from app.services.proxy_validation import validate_proxy
 from app.workers.tasks import sync_3proxy_config, validate_proxy_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["proxies"])
 
@@ -53,7 +58,13 @@ async def update_proxy(
     if not proxy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
 
+    _PROXY_UPDATE_FIELDS = {
+        "host", "port", "login", "password", "type", "country",
+        "status", "uptime_seconds", "latency_ms",
+    }
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field not in _PROXY_UPDATE_FIELDS:
+            continue
         setattr(proxy, field, value)
 
     db.commit()
@@ -79,11 +90,23 @@ async def delete_proxy(
 
 
 @router.post("/proxies/validate")
-async def validate_proxy_stub(
+async def validate_proxy_credentials(
     payload: ProxyCreate,
     current_user=Depends(require_permission("proxies", "validate")),
-) -> dict[str, bool]:
-    return {"valid": True}
+) -> dict[str, object]:
+    """Validate proxy connectivity by attempting a TCP connection."""
+    try:
+        sock = socket.create_connection(
+            (payload.host, payload.port), timeout=5
+        )
+        sock.close()
+        return {"valid": True, "error": None}
+    except (socket.timeout, OSError) as exc:
+        logger.info(
+            "Proxy validation failed",
+            extra={"host": payload.host, "port": payload.port, "error": str(exc)},
+        )
+        return {"valid": False, "error": "Connection failed"}
 
 
 @router.post("/proxies/{proxy_id}/validate", response_model=ProxyResponse)

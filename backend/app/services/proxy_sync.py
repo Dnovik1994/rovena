@@ -1,4 +1,6 @@
 import logging
+import shlex
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
@@ -46,6 +48,5 @@ def sync_3proxy() -> None:
     logger.info("3proxy config updated", extra={"count": len(proxies)})
 
     if settings.proxy_reload_cmd:
-        import subprocess
-
-        subprocess.check_call(settings.proxy_reload_cmd, shell=True)
+        cmd = shlex.split(settings.proxy_reload_cmd)
+        subprocess.check_call(cmd, shell=False)

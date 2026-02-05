@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
@@ -338,8 +339,26 @@ async def websocket_status(websocket: WebSocket) -> None:
             return
 
     await manager.connect(websocket, user_id)
+
+    async def _ping_loop() -> None:
+        """Send periodic pings to detect stale connections."""
+        try:
+            while True:
+                await asyncio.sleep(30)
+                await websocket.send_json({"type": "ping"})
+        except Exception:  # noqa: BLE001
+            pass
+
+    ping_task = asyncio.create_task(_ping_loop())
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            if data == "pong":
+                continue
     except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        ping_task.cancel()
         manager.disconnect(websocket)
