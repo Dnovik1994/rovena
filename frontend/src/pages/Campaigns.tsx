@@ -100,7 +100,7 @@ const Campaigns = (): JSX.Element => {
     if (!token) {
       return;
     }
-    const socket = connectStatusSocket(token, (message: StatusMessage) => {
+    const handle = connectStatusSocket(token, (message: StatusMessage) => {
       if (message.type === "campaign_progress") {
         setCampaigns((prev) =>
           prev.map((item) =>
@@ -126,7 +126,7 @@ const Campaigns = (): JSX.Element => {
     });
 
     return () => {
-      socket.close();
+      handle.dispose();
     };
   }, [token]);
 

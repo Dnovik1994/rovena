@@ -7,6 +7,11 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
+/** Default request timeout in milliseconds. */
+const DEFAULT_TIMEOUT_MS = 15_000;
+/** Timeout for token-refresh requests (shorter, should be fast). */
+const REFRESH_TIMEOUT_MS = 10_000;
+
 export interface ApiError {
   code: string;
   message: string;
@@ -18,17 +23,24 @@ export const parseApiError = async (response: Response): Promise<ApiError> => {
     if (data.error) {
       return data.error;
     }
-  } catch (error) {
+  } catch {
     return { code: String(response.status), message: "Unexpected error" };
   }
   return { code: String(response.status), message: response.statusText };
 };
 
+/**
+ * Perform an API request with automatic timeout, token injection,
+ * and 401-refresh retry.
+ *
+ * @param timeoutMs — override the default 15 s timeout per call.
+ */
 export const apiFetch = async <T>(
   path: string,
   options: RequestInit = {},
   token?: string | null,
-  retryOnUnauthorized = true
+  retryOnUnauthorized = true,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> => {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
@@ -38,15 +50,36 @@ export const apiFetch = async <T>(
     headers.set("Authorization", `Bearer ${authToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  // AbortController: timeout + caller-provided signal support.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  // If the caller already provided a signal, chain it.
+  if (options.signal) {
+    options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timer);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw { code: "TIMEOUT", message: "Запрос не отвечает. Проверьте соединение." } as ApiError;
+    }
+    throw { code: "NETWORK", message: "Ошибка сети. Проверьте подключение." } as ApiError;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (response.status === 401 && retryOnUnauthorized && !path.includes("/auth/refresh")) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
-      return apiFetch<T>(path, options, refreshed, false);
+      return apiFetch<T>(path, options, refreshed, false, timeoutMs);
     }
   }
 
@@ -79,11 +112,26 @@ export const refreshAccessToken = async (): Promise<string | null> => {
   if (!refreshToken) {
     return null;
   }
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: controller.signal,
+    });
+  } catch {
+    clearTimeout(timer);
+    clearStoredTokens();
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+
   if (!response.ok) {
     clearStoredTokens();
     return null;

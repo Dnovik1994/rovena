@@ -103,7 +103,7 @@ const Accounts = (): JSX.Element => {
     if (!token) {
       return;
     }
-    const socket = connectStatusSocket(token, (message: StatusMessage) => {
+    const handle = connectStatusSocket(token, (message: StatusMessage) => {
       if (message.type === "account_update") {
         setAccounts((prev) =>
           prev.map((item) =>
@@ -123,7 +123,7 @@ const Accounts = (): JSX.Element => {
     });
 
     return () => {
-      socket.close();
+      handle.dispose();
     };
   }, [token]);
 
