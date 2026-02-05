@@ -10,7 +10,7 @@ x-3proxy-healthcheck: &proxy-healthcheck ["CMD", "sh", "-lc", "test -s /etc/3pro
 
 services:
   traefik:
-    image: traefik:latest
+    image: traefik:2.11.8
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -228,7 +228,7 @@ services:
       traefik.http.services.kass.loadbalancer.server.port: "5173"
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:2.54.1
     restart: unless-stopped
     logging: *default-logging
     volumes:
@@ -248,7 +248,7 @@ services:
       start_period: 10s
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.4.3
     restart: unless-stopped
     logging: *default-logging
     volumes:
@@ -264,7 +264,7 @@ services:
       start_period: 15s
 
   blackbox-exporter:
-    image: prom/blackbox-exporter:latest
+    image: prom/blackbox-exporter:0.25.0
     restart: unless-stopped
     logging: *default-logging
     volumes:

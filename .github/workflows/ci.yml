@@ -6,6 +6,24 @@ on:
   workflow_dispatch:
 
 jobs:
+  compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml config
+          docker compose -f docker-compose.override.yml config
+          docker compose -f docker-compose.prod.yml config
+      - name: Ensure pinned images
+        run: |
+          set -euo pipefail
+          if docker compose -f docker-compose.prod.yml config | grep -nE '^[[:space:]]*image:[[:space:]]*(traefik|prom/prometheus|grafana/grafana|prom/blackbox-exporter):latest[[:space:]]*$'; then
+            echo "Found unpinned latest tags for monitored services."
+            exit 1
+          fi
+
   backend-test:
     runs-on: ubuntu-latest
     steps:

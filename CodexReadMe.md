@@ -108,3 +108,22 @@ pytest backend/tests/test_api.py backend/tests/test_analytics.py
 ```bash
 cd frontend && npx tsc --noEmit
 ```
+
+## 10) Docker image pinning
+
+### Что пиннули
+- `traefik`, `prometheus`, `grafana`, `blackbox-exporter` закреплены на точных patch-версиях, чтобы избежать дрейфа `latest` и обеспечить воспроизводимые деплои. 【F:docker-compose.prod.yml†L11-L279】
+
+### Правило обновления
+- Обновлять только в пределах текущего major (без major jump), фиксируя точную версию `x.y.z`.
+- Проверка `docker compose config` и `:latest` guard выполняется в CI job `compose-validate`.
+
+### Runbook проверки
+```bash
+docker compose -f docker-compose.yml config
+docker compose -f docker-compose.override.yml config
+docker compose -f docker-compose.prod.yml config
+docker compose -f docker-compose.prod.yml pull
+docker images | grep -E "traefik|prom/prometheus|grafana/grafana|prom/blackbox-exporter"
+docker compose -f docker-compose.prod.yml up -d
+```
