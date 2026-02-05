@@ -1,9 +1,11 @@
 import json
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -14,17 +16,23 @@ from app.models.user import User
 from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["auth"])
 
 
 @router.post("/auth/telegram", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def auth_via_telegram(
-    payload: TelegramAuthRequest, db: Session = Depends(get_db)
+    request: Request,
+    payload: TelegramAuthRequest,
+    db: Session = Depends(get_db),
 ) -> TokenResponse:
     try:
         data = validate_init_data(payload.init_data)
     except TelegramAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        logger.warning("Telegram auth failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed") from exc
 
     user_raw = data.get("user")
     if not user_raw:
@@ -33,8 +41,14 @@ async def auth_via_telegram(
             detail="Missing user in initData",
         )
 
-    user_payload = json.loads(user_raw)
-    telegram_id = int(user_payload["id"])
+    try:
+        user_payload = json.loads(user_raw)
+        telegram_id = int(user_payload["id"])
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid user data in initData",
+        ) from exc
 
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
@@ -64,8 +78,11 @@ async def auth_via_telegram(
 
 
 @router.post("/auth/refresh", response_model=TokenResponse)
+@limiter.limit("20/minute")
 async def refresh_access_token(
-    payload: RefreshTokenRequest, db: Session = Depends(get_db)
+    request: Request,
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db),
 ) -> TokenResponse:
     try:
         token_payload = decode_refresh_token(payload.refresh_token)
@@ -81,6 +98,13 @@ async def refresh_access_token(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     if not user.refresh_token or user.refresh_token != hash_token(payload.refresh_token):
+        # Possible token reuse attack — invalidate all refresh tokens for this user
+        user.refresh_token = None
+        db.commit()
+        logger.warning(
+            "Refresh token mismatch — possible reuse attack",
+            extra={"user_id": user.id},
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token mismatch")
 
     access_token = create_access_token(str(user.id))

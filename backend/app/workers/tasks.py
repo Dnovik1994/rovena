@@ -42,6 +42,7 @@ def _log_dispatch_error(
     contact_id: int | None,
     error_type: DispatchErrorType,
     error_message: str,
+    owner_id: int | None = None,
 ) -> None:
     db.add(
         CampaignDispatchLog(
@@ -59,6 +60,7 @@ def _log_dispatch_error(
     manager.broadcast_sync(
         {
             "type": "dispatch_error",
+            "user_id": owner_id,
             "campaign_id": campaign_id,
             "account_id": account_id,
             "contact_id": contact_id,
@@ -74,6 +76,7 @@ def _set_account_cooldown(db, account: Account, seconds: int) -> None:
     manager.broadcast_sync(
         {
             "type": "account_update",
+            "user_id": account.owner_id,
             "account_id": account.id,
             "status": account.status,
             "actions_completed": account.warming_actions_completed,
@@ -116,7 +119,8 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
         target = db.get(Target, campaign.target_id) if campaign.target_id else None
         if not target:
             _log_dispatch_error(
-                db, campaign.id, None, None, DispatchErrorType.other, "Target not found"
+                db, campaign.id, None, None, DispatchErrorType.other, "Target not found",
+                owner_id=campaign.owner_id,
             )
             return
 
@@ -146,6 +150,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                             manager.broadcast_sync(
                                 {
                                     "type": "campaign_progress",
+                                    "user_id": campaign.owner_id,
                                     "campaign_id": campaign.id,
                                     "progress": campaign.progress,
                                     "success": success,
@@ -162,6 +167,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                                 contact.id,
                                 DispatchErrorType.flood_wait,
                                 f"FloodWait {exc.value}",
+                                owner_id=campaign.owner_id,
                             )
                             break
                         except UserBlocked as exc:
@@ -172,6 +178,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                             manager.broadcast_sync(
                                 {
                                     "type": "contact_blocked",
+                                    "user_id": campaign.owner_id,
                                     "contact_id": contact.id,
                                     "reason": "UserBlocked",
                                 }
@@ -183,6 +190,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                                 contact.id,
                                 DispatchErrorType.user_blocked,
                                 str(exc),
+                                owner_id=campaign.owner_id,
                             )
                         except UserPrivacyRestricted as exc:
                             sentry_sdk.capture_exception(exc)
@@ -193,6 +201,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                                 contact.id,
                                 DispatchErrorType.user_privacy_restricted,
                                 str(exc),
+                                owner_id=campaign.owner_id,
                             )
                         except PeerIdInvalid as exc:
                             sentry_sdk.capture_exception(exc)
@@ -203,6 +212,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                                 contact.id,
                                 DispatchErrorType.peer_id_invalid,
                                 str(exc),
+                                owner_id=campaign.owner_id,
                             )
                         except UserAlreadyParticipant as exc:
                             sentry_sdk.capture_exception(exc)
@@ -213,6 +223,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                                 contact.id,
                                 DispatchErrorType.other,
                                 str(exc),
+                                owner_id=campaign.owner_id,
                             )
                         except Exception as exc:  # noqa: BLE001
                             sentry_sdk.capture_exception(exc)
@@ -223,6 +234,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                                 contact.id,
                                 DispatchErrorType.other,
                                 str(exc),
+                                owner_id=campaign.owner_id,
                             )
             except Exception as exc:  # noqa: BLE001
                 sentry_sdk.capture_exception(exc)
@@ -233,6 +245,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                     None,
                     DispatchErrorType.other,
                     str(exc),
+                    owner_id=campaign.owner_id,
                 )
 
             if success >= total_contacts:
@@ -305,6 +318,7 @@ async def _run_warming_cycle(account_id: int) -> None:
         manager.broadcast_sync(
             {
                 "type": "account_update",
+                "user_id": account.owner_id,
                 "account_id": account.id,
                 "status": account.status,
                 "actions_completed": account.warming_actions_completed,
@@ -325,6 +339,7 @@ async def _run_warming_cycle(account_id: int) -> None:
                     manager.broadcast_sync(
                         {
                             "type": "account_update",
+                            "user_id": account.owner_id,
                             "account_id": account.id,
                             "status": account.status,
                             "actions_completed": account.warming_actions_completed,
@@ -356,6 +371,7 @@ async def _run_warming_cycle(account_id: int) -> None:
         manager.broadcast_sync(
             {
                 "type": "account_update",
+                "user_id": account.owner_id,
                 "account_id": account.id,
                 "status": account.status,
                 "actions_completed": account.warming_actions_completed,
@@ -399,6 +415,7 @@ def check_cooldowns() -> None:
                 manager.broadcast_sync(
                     {
                         "type": "account_update",
+                        "user_id": account.owner_id,
                         "account_id": account.id,
                         "status": account.status,
                         "actions_completed": account.warming_actions_completed,

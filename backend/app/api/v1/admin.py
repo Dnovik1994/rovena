@@ -63,17 +63,20 @@ async def admin_stats(
 async def admin_users(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-    search: str | None = None,
-    tariff: str | None = None,
+    search: str | None = Query(default=None, max_length=100),
+    tariff: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     query = db.query(User, Tariff).outerjoin(Tariff, User.tariff_id == Tariff.id)
     if search:
+        # Escape LIKE-special characters to prevent wildcard injection
+        safe_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{safe_search}%"
         query = query.filter(
             or_(
-                User.username.ilike(f"%{search}%"),
-                cast(User.telegram_id, String).ilike(f"%{search}%"),
+                User.username.ilike(pattern),
+                cast(User.telegram_id, String).ilike(pattern),
             )
         )
     if tariff:
@@ -278,7 +281,10 @@ async def admin_tariff_update(
     if not tariff:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tariff not found")
 
+    _TARIFF_UPDATE_FIELDS = {"name", "max_accounts", "max_invites_day", "price"}
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field not in _TARIFF_UPDATE_FIELDS:
+            continue
         setattr(tariff, field, value)
     db.commit()
     db.refresh(tariff)
@@ -407,11 +413,23 @@ async def admin_proxy_detail(
     }
 
 
-@router.post("/proxies/validate")
+@router.post("/proxies/{proxy_id}/validate")
 async def admin_proxy_validate(
+    proxy_id: int,
     current_user: User = Depends(get_current_admin),
-) -> dict[str, bool]:
-    return {"valid": True}
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Trigger async proxy validation and return current status."""
+    proxy = db.get(Proxy, proxy_id)
+    if not proxy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
+    from app.workers.tasks import validate_proxy_task
+    validate_proxy_task.delay(proxy.id)
+    return {
+        "proxy_id": proxy.id,
+        "status": proxy.status.value if proxy.status else None,
+        "validation_queued": True,
+    }
 
 
 @router.get("/accounts")

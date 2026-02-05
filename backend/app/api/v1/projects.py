@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
@@ -14,11 +14,15 @@ router = APIRouter(tags=["projects"])
 async def list_projects(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[ProjectResponse]:
     projects = (
         db.query(Project)
         .filter(Project.owner_id == current_user.id)
         .order_by(Project.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return [ProjectResponse.model_validate(project) for project in projects]

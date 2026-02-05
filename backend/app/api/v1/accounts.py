@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.rbac import require_permission
 from app.core.database import get_db
+from app.api.deps import get_tariff_limits
 from app.clients.device_generator import generate_device_config
 from app.models.account import Account, AccountStatus
 from app.models.user import User
@@ -27,11 +28,13 @@ def _is_admin(user: User) -> bool:
 async def list_accounts(
     current_user: User = Depends(require_permission("accounts", "list")),
     db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[AccountResponse]:
     query = db.query(Account)
     if not _is_admin(current_user):
         query = query.filter(Account.owner_id == current_user.id)
-    accounts = query.order_by(Account.created_at.desc()).all()
+    accounts = query.order_by(Account.created_at.desc()).offset(offset).limit(limit).all()
     return [AccountResponse.model_validate(account) for account in accounts]
 
 
@@ -39,10 +42,21 @@ async def list_accounts(
 async def create_account(
     payload: AccountCreate,
     current_user: User = Depends(require_permission("accounts", "create")),
+    tariff_limits: dict[str, int] = Depends(get_tariff_limits),
     db: Session = Depends(get_db),
 ) -> AccountResponse:
     if not _is_admin(current_user) and payload.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Enforce tariff account limit at creation time (not just at campaign start)
+    if not _is_admin(current_user):
+        max_accounts = tariff_limits["max_accounts"]
+        current_count = db.query(Account).filter(Account.owner_id == current_user.id).count()
+        if current_count >= max_accounts:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account limit reached for your tariff plan",
+            )
 
     device_config = payload.device_config or generate_device_config()
 
@@ -82,7 +96,15 @@ async def update_account(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
+    _ACCOUNT_UPDATE_FIELDS = {
+        "phone", "username", "first_name", "status", "proxy_id",
+        "device_config", "warming_started_at", "last_activity_at",
+        "warming_actions_completed", "target_warming_actions",
+        "cooldown_until", "last_device_regenerated_at",
+    }
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field not in _ACCOUNT_UPDATE_FIELDS:
+            continue
         setattr(account, field, value)
 
     db.commit()
@@ -135,6 +157,7 @@ async def start_account_warming(
     manager.broadcast_sync(
         {
             "type": "account_update",
+            "user_id": current_user.id,
             "account_id": account.id,
             "status": account.status,
             "actions_completed": account.warming_actions_completed,
@@ -183,6 +206,7 @@ async def verify_account(
     manager.broadcast_sync(
         {
             "type": "account_update",
+            "user_id": current_user.id,
             "account_id": account.id,
             "status": account.status,
         }

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
@@ -249,7 +250,8 @@ async def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.error("Health check failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=503, detail="Service unavailable") from exc
 
 
 def _get_git_commit() -> str:
@@ -300,7 +302,8 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
             secret=settings.stripe_webhook_secret,
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        logger.warning("Stripe webhook signature verification failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature") from exc
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
@@ -308,10 +311,15 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
         user_id = metadata.get("user_id")
         tariff_id = metadata.get("tariff_id")
         if user_id and tariff_id:
+            try:
+                uid, tid = int(user_id), int(tariff_id)
+            except (ValueError, TypeError):
+                logger.warning("Invalid Stripe metadata", extra={"user_id": user_id, "tariff_id": tariff_id})
+                return {"status": "ok"}
             with SessionLocal() as db:
-                user = db.get(User, int(user_id))
+                user = db.get(User, uid)
                 if user:
-                    user.tariff_id = int(tariff_id)
+                    user.tariff_id = tid
                     db.commit()
 
     return {"status": "ok"}
@@ -338,8 +346,26 @@ async def websocket_status(websocket: WebSocket) -> None:
             return
 
     await manager.connect(websocket, user_id)
+
+    async def _ping_loop() -> None:
+        """Send periodic pings to detect stale connections."""
+        try:
+            while True:
+                await asyncio.sleep(30)
+                await websocket.send_json({"type": "ping"})
+        except Exception:  # noqa: BLE001
+            pass
+
+    ping_task = asyncio.create_task(_ping_loop())
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            if data == "pong":
+                continue
     except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        ping_task.cancel()
         manager.disconnect(websocket)

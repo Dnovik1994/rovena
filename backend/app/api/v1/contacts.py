@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
@@ -15,11 +15,15 @@ router = APIRouter(tags=["contacts"])
 async def list_contacts(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[ContactResponse]:
     contacts = (
         db.query(Contact)
         .filter(Contact.owner_id == current_user.id)
         .order_by(Contact.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return [ContactResponse.model_validate(contact) for contact in contacts]

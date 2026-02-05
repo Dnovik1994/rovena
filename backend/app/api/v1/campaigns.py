@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_tariff_limits
@@ -26,11 +26,15 @@ logger = logging.getLogger(__name__)
 async def list_campaigns(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[CampaignResponse]:
     campaigns = (
         db.query(Campaign)
         .filter(Campaign.owner_id == current_user.id)
         .order_by(Campaign.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return [CampaignResponse.model_validate(campaign) for campaign in campaigns]
