@@ -403,22 +403,24 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
 @app.websocket("/ws/status")
 async def websocket_status(websocket: WebSocket) -> None:
     await websocket.accept()
-    try:
-        raw_payload = await asyncio.wait_for(websocket.receive_text(), timeout=10)
-    except asyncio.TimeoutError:
-        await websocket.close(code=1008)
-        return
-
-    try:
-        auth_payload = json.loads(raw_payload)
-    except json.JSONDecodeError:
-        await websocket.close(code=1008)
-        return
-
-    token = auth_payload.get("token") if isinstance(auth_payload, dict) else None
+    token = websocket.query_params.get("token")
     if not token:
-        await websocket.close(code=1008)
-        return
+        try:
+            raw_payload = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        except asyncio.TimeoutError:
+            await websocket.close(code=1008)
+            return
+
+        try:
+            auth_payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            await websocket.close(code=1008)
+            return
+
+        token = auth_payload.get("token") if isinstance(auth_payload, dict) else None
+        if not token:
+            await websocket.close(code=1008)
+            return
 
     try:
         payload = decode_access_token(token)

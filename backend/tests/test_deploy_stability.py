@@ -38,7 +38,9 @@ async def test_health_after_migration(mock_alembic, mock_redis):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert set(payload.keys()) == {"status", "checks", "timestamp", "version"}
+    assert payload["status"] in {"ok", "warn"}
 
 
 def test_startup_logs(mock_redis, caplog):

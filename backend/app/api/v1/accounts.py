@@ -14,7 +14,7 @@ from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, A
 from app.services.websocket_manager import manager
 from app.workers.tasks import account_health_check, start_warming
 from pyrogram.errors import SessionPasswordNeeded
-from app.clients.telegram_client import get_client
+from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.models.proxy import Proxy
 
 router = APIRouter(tags=["accounts"])
@@ -188,7 +188,13 @@ async def verify_account(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
     proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-    client = get_client(account, proxy)
+    try:
+        client = get_client(account, proxy)
+    except TelegramClientDisabledError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Telegram client disabled",
+        ) from exc
     try:
         async with client:
             me = await client.get_me()
