@@ -172,24 +172,26 @@ rovena/
 
 ## 5. Оставшиеся проблемы и задачи
 
-### 5.1 High Priority — Frontend Reliability (DONE, PR#3)
+### 5.1 High Priority — Frontend Reliability (DONE, PR#3 + PR#4)
 
-#### 5.1.1 WebSocket reconnection — DONE
+#### 5.1.1 WebSocket reconnection — DONE (hardened in PR#4)
 **Файл:** `frontend/src/services/websocket.ts`
 Реализовано:
-- Exponential backoff 250ms → 30s cap с jitter ±30% (`computeBackoff()` — чистая функция, тестируема)
+- Exponential backoff 250ms → 30s cap с jitter ±30% (два export: `computeBackoff()` + `maybeJitter()`)
+- 5 connection states: `connecting | connected | disconnected | reconnecting | auth_failed`
 - Auth failure (code 1008) → state `auth_failed`, retry прекращается
-- Network drop → автоматический retry с backoff
-- Singleton guard: один активный socket, повторный вызов `connectStatusSocket()` закрывает предыдущий
-- Ping timeout 45s: если сервер молчит, соединение принудительно закрывается
-- Connection states: `connecting | connected | disconnected | auth_failed` через `onStateChange` callback
-- `StatusSocketHandle.dispose()` для cleanup (используется в useEffect consumers)
+- Network drop → state `reconnecting`, автоматический retry с backoff
+- Singleton guard: один активный socket, повторный вызов закрывает предыдущий
+- Ping watchdog 45s: если сервер молчит, force close → reconnect
+- Safe send: все `ws.send()` через `safeSend()` (проверяет readyState, ловит throw)
+- Safe dispose: idempotent, noop handlers вместо `null` assignment
+- Safe constructor: try-catch на `new WebSocket()` (SecurityError)
+- Reconnect logging: `[ws] Reconnect scheduled — attempt #N, delay X ms`
+- JSON parse errors: console.warn с data snippet (до 80 символов)
+- Handle API: `state`, `attempts`, `dispose()`
+- Нет duplicate timers: `clearReconnectTimer()` перед каждым `setTimeout`
 
-**Как проверить вручную:**
-1. Открыть Accounts или Campaigns, убедиться что `[ws] Status WebSocket connected` в console
-2. Остановить backend → console: reconnect attempts с нарастающими паузами
-3. Запустить backend → автоматическое переподключение + auth
-4. Передать невалидный токен → state `auth_failed`, retry прекращается
+**Подробный контракт и runbook:** [CodexReadMe.md, раздел 2](CodexReadMe.md)
 
 #### 5.1.2 React Error Boundary — DONE
 **Файл:** `frontend/src/components/ErrorBoundary.tsx`

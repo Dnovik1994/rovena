@@ -1,51 +1,104 @@
-# CodexReadMe — оценка готовности проекта Rovena
+# CodexReadMe — техническая документация проекта Rovena
 
-> Ручная проверка кода и сопоставление с ClaudeCodeReadMe.
+> Актуализировано: 2026-02-05.
+> Полный анализ и roadmap: [ClaudeCodeReadMe.md](ClaudeCodeReadMe.md) (основной документ).
 
-## 1) Общая оценка готовности
+---
 
-Проект выглядит как **поздний MVP**: ядро функционала присутствует, но заметны незавершённые элементы пользовательского интерфейса и отдельные заглушки/упрощения в бэкэнде. Основа для запуска и пилотного использования есть, однако перед продакшеном нужно закрыть блоки безопасности, устойчивости и полноты UX. Для ориентира я бы оценил готовность на **~60–70%**, с перекосом в пользу бэкэнда.
+## 1) Оценка готовности
 
-## 2) Что сделано
+Проект в стадии **pre-production (~80%)**. Все критические security-проблемы закрыты (PR #42). Все stub-эндпоинты реализованы. Dashboard, Subscription, Onboarding — рабочие. 45 тестовых файлов.
 
-- **Базовая структура full‑stack присутствует**: выделены backend/app с API, services, workers и frontend/src с pages и services. Это подтверждает полноценную архитектуру, описанную в ClaudeCodeReadMe. 【F:ClaudeCodeReadMe.md†L61-L109】
-- **Прокси‑валидация реализована не как заглушка** — эндпоинт `/proxies/validate` реально пытается установить TCP‑соединение и возвращает результат. 【F:backend/app/api/v1/proxies.py†L72-L118】
-- **Перезагрузка 3proxy уже без shell‑инъекции**: используется `shlex.split()` и `shell=False`, в отличие от старого утверждения в ClaudeCodeReadMe. 【F:backend/app/services/proxy_sync.py†L43-L54】
-- **Dashboard analytics v1** — добавлены метрики, последние кампании и спарклайны по аккаунтам/кампаниям. 【F:frontend/src/pages/Dashboard.tsx†L1-L255】
-- **Hardened /health** — единый контракт, non‑blocking I/O, timeout-ошибки и корректные HTTP‑коды. 【F:backend/app/main.py†L237-L316】
-- **Prod guards** — проверка критичных секретов/конфигов при production запуске. 【F:backend/app/core/settings.py†L70-L89】
+Оставшиеся задачи для production-релиза описаны в [ClaudeCodeReadMe.md, раздел 5-6](ClaudeCodeReadMe.md).
 
-## 3) Что не готово / требует доработки
+---
 
-- **Dashboard analytics v2** — требуется расширить метрики (успех/ошибки инвайтов, конверсии, ретеншн) и добавить детализацию по кампаниям. 【F:frontend/src/pages/Dashboard.tsx†L1-L255】
-- **Feature flags для prod guards** — часть проверок можно сделать конфигурируемыми для гибких деплоев. 【F:backend/app/core/settings.py†L70-L89】
-- **WebSocket token hardening** — рассмотреть передачу токена через subprotocol или одноразовые токены. 【F:frontend/src/services/websocket.ts†L1-L53】
+## 2) WebSocket reconnect — контракт и поведение
 
-## 4) Проблемы/риски, которые стоит учесть
+**Файл:** `frontend/src/services/websocket.ts`
 
-- **Секреты и дефолты**: в настройках присутствуют дефолтные значения для БД и JWT (`jwt_secret = "change-me"`), что требует обязательного переопределения в продакшене. 【F:backend/app/core/settings.py†L18-L39】
-- **Ограничения по готовности UX**: ключевые страницы (например, Dashboard) не дают пользователю реальной аналитики/состояния — это снижает ценность продукта на старте. 【F:frontend/src/pages/Dashboard.tsx†L1-L20】
+### Протокол (server-side: `backend/app/main.py`)
 
-## 5) Сопоставление с ClaudeCodeReadMe
+1. Клиент открывает `ws://<origin>/ws/status`
+2. Клиент отправляет first-message: `{"type":"auth","token":"<JWT>"}`
+3. Сервер валидирует токен (JWT decode + проверка user.is_active в БД)
+   - OK → регистрирует соединение, запускает ping loop (30 с)
+   - Fail → закрывает с кодом **1008**
+4. Сервер шлёт `{"type":"ping"}` каждые 30 с; клиент отвечает `"pong"`
+5. Сервер пушит `StatusMessage` в любой момент
 
-Ниже кратко — что из отчёта Claude совпадает, а что уже отличается:
+### Состояния клиента (`WsConnectionState`)
 
-### Совпадает
-- **Dashboard как placeholder** — действительно пустой. 【F:ClaudeCodeReadMe.md†L146-L152】【F:frontend/src/pages/Dashboard.tsx†L1-L20】
-- **Account health check как заглушка** — подтверждено. 【F:ClaudeCodeReadMe.md†L152-L155】【F:backend/app/workers/tasks.py†L262-L269】
-- **WebSocket токен в URL** — подтверждено. 【F:ClaudeCodeReadMe.md†L214-L220】【F:frontend/src/services/websocket.ts†L17-L23】
+| State | Описание | Auto-retry |
+|-------|----------|------------|
+| `connecting` | Первая попытка подключения | — |
+| `connected` | Аутентифицирован, получает данные | — |
+| `disconnected` | Не подключён (initial / после dispose) | Нет |
+| `reconnecting` | Потеря связи, backoff retry | Да |
+| `auth_failed` | Сервер отклонил токен (code 1008) | **Нет** |
 
-### Не совпадает / устарело
-- **Proxy validation**: в ClaudeCodeReadMe написано, что эндпоинт возвращает hardcoded `{"valid": true}`. В текущем коде выполняется реальная TCP‑проверка. 【F:ClaudeCodeReadMe.md†L149-L151】【F:backend/app/api/v1/proxies.py†L90-L118】
-- **proxy_sync shell‑инъекция**: в актуальной версии используется `shell=False`, поэтому риск снижен. 【F:ClaudeCodeReadMe.md†L176-L183】【F:backend/app/services/proxy_sync.py†L43-L54】
+### Backoff параметры
 
-## 6) Итог
+- Base delay: **250 ms**
+- Factor: **2** (exponential)
+- Cap: **30 000 ms**
+- Jitter: **±30%** (через `maybeJitter(ms)`)
+- Формула: `min(250 * 2^attempt, 30000)` + jitter
 
-Проект технически неплохо структурирован и уже работает как MVP, но есть видимые пробелы в UI/UX и в части операционных/безопасностных аспектов. Приоритетные шаги: довести основные страницы (Dashboard/Subscription/Onboarding), закрыть заглушки в фоне (health check), укрепить безопасную передачу токенов и пересмотреть секреты/конфигурации для production.
+### API
 
-## 7) Health check contract
+```typescript
+const handle = connectStatusSocket(token, onMessage, onStateChange?);
 
-### JSON schema (пример)
+handle.state;      // WsConnectionState
+handle.attempts;   // number (reconnect attempts since last success)
+handle.dispose();  // cleanup: stops timers, closes socket, no more retries
+```
+
+### Гарантии
+
+- **Singleton**: повторный вызов `connectStatusSocket()` автоматически закрывает предыдущий
+- **No duplicate timers**: `clearReconnectTimer()` перед каждым `setTimeout`
+- **Safe send**: все `ws.send()` через `safeSend()` — проверяет readyState, ловит исключения
+- **Safe dispose**: idempotent, noop handlers на onclose/onerror/onmessage
+- **Ping watchdog**: 45 с без сообщений → force close → reconnect
+- **JSON errors**: console.warn с snippet данных (до 80 символов)
+
+### Exported test helpers
+
+```typescript
+export const computeBackoff = (attempt: number): number;
+export const maybeJitter = (ms: number): number;
+```
+
+### Runbook — ручная проверка
+
+1. **Reconnect при падении backend:**
+   - Открыть Accounts/Campaigns → console: `Status WebSocket connected`
+   - `docker compose stop backend`
+   - Console: `[ws] Reconnect scheduled — attempt #1, delay X ms` ...
+   - `docker compose start backend` → автоматический reconnect + re-auth
+
+2. **Auth failure (1008):**
+   - Протухший/невалидный JWT → console: `[ws] Auth failed (code 1008) — will not retry`
+   - `handle.state === "auth_failed"`
+   - Retry НЕ происходит
+
+3. **Ping timeout:**
+   - Если backend завис (не шлёт ping 45 с) → `[ws] Ping timeout ... — forcing reconnect`
+
+4. **Singleton guard:**
+   - Навигация Accounts → Campaigns: предыдущий socket закрывается, один активный
+
+5. **Dispose (unmount):**
+   - Уход со страницы → `handle.dispose()` через useEffect cleanup
+   - Нет утечек таймеров/соединений
+
+---
+
+## 3) Health check contract
+
+### JSON schema
 ```json
 {
   "status": "ok",
@@ -60,32 +113,33 @@
 }
 ```
 
-### Правила HTTP-кодов
+### HTTP codes
 - `ok`/`warn` → `200 OK`
 - `fail` → `503 Service Unavailable`
-
-### Checks
-- `database`: результат `SELECT 1` + `latency_ms`
-- `redis`: `ping()` или `warn` если отключён
-- `celery_queue`: длина очереди `celery`
-- `celery_worker`: количество ответивших воркеров на `celery_app.control.ping()`
-
-### Настройки
-- `health_check_timeout_seconds` — общий таймаут (сек)
-- `health_queue_warn_threshold` — порог предупреждения по длине очереди
 
 ### Runbook
 ```bash
 curl -s http://localhost:8000/health | jq
 ```
 
-## 8) Testing
+---
 
-### Зависимости
-- `pytest`
-- `httpx`
+## 4) Testing
 
-### Команды
+### Backend
 ```bash
-pytest backend/tests/test_api.py backend/tests/test_analytics.py
+PYTHONPATH=backend pytest backend/tests
+```
+
+### Frontend type-check (без node_modules)
+```bash
+tsc --noEmit --strict --target ES2020 --module ESNext \
+    --lib ES2020,DOM,DOM.Iterable \
+    frontend/src/services/websocket.ts
+# → Exit 0, zero errors (не требует React types)
+```
+
+### Full frontend type-check (с node_modules)
+```bash
+cd frontend && npx tsc --noEmit
 ```
