@@ -6,7 +6,7 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   hasError: boolean;
-  error: Error | null;
+  error?: Error;
 }
 
 /**
@@ -18,7 +18,7 @@ interface ErrorBoundaryState {
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -42,8 +42,8 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   };
 
   private handleGoHome = () => {
-    this.setState({ hasError: false, error: null });
-    window.location.href = "/";
+    this.setState({ hasError: false, error: undefined });
+    window.location.assign("/");
   };
 
   render(): React.ReactNode {

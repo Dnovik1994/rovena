@@ -14,6 +14,7 @@
 - **Dashboard analytics v1** — добавлены метрики, последние кампании и спарклайны по аккаунтам/кампаниям. 【F:frontend/src/pages/Dashboard.tsx†L1-L255】
 - **Hardened /health** — единый контракт, non‑blocking I/O, timeout-ошибки и корректные HTTP‑коды. 【F:backend/app/main.py†L237-L316】
 - **Prod guards** — проверка критичных секретов/конфигов при production запуске. 【F:backend/app/core/settings.py†L70-L89】
+- **Error Boundary** — добавлен глобальный boundary, который ловит ошибки рендера и показывает контролируемый fallback (обёртка App → AuthProvider → BrowserRouter). 【F:frontend/src/components/ErrorBoundary.tsx†L1-L93】【F:frontend/src/App.tsx†L60-L85】
 
 ## 3) Что не готово / требует доработки
 
@@ -88,4 +89,22 @@ curl -s http://localhost:8000/health | jq
 ### Команды
 ```bash
 pytest backend/tests/test_api.py backend/tests/test_analytics.py
+```
+
+## 9) React Error Boundary — проверка и поведение
+
+### Где подключено
+- `ErrorBoundary` оборачивает приложение в `frontend/src/App.tsx`. 【F:frontend/src/App.tsx†L60-L85】
+
+### Как проверить вручную
+1. В любом компоненте временно добавьте `throw new Error("boom")` в рендер или эффект.
+2. Убедитесь, что приложение показывает fallback с кнопками “Перезагрузить” и “На главную”.
+
+### Поведение в prod
+- Ошибка рендера/жизненного цикла не валит всё приложение.
+- В консоль пишется лог; если глобально доступен `window.Sentry.captureException`, ошибка отправляется туда.
+
+### Команда проверки
+```bash
+cd frontend && npx tsc --noEmit
 ```
