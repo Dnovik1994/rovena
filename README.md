@@ -473,6 +473,33 @@ gunzip /backups/redis-YYYYMMDD.rdb.gz
 redis-cli -u $REDIS_URL --rdb /backups/redis-YYYYMMDD.rdb
 ```
 
+## Roadmap
+
+Подробный анализ проекта и план доработок: [ClaudeCodeReadMe.md](ClaudeCodeReadMe.md).
+
+### Текущий статус: Pre-production (~80%)
+
+Все критические security-проблемы закрыты. Все страницы и API-эндпоинты реализованы. 45 тестовых файлов.
+
+### Что осталось до production
+
+**Phase 1 — Frontend Hardening:**
+- [ ] WebSocket reconnection с exponential backoff
+- [ ] React Error Boundary
+- [ ] API fetch timeouts (AbortController)
+
+**Phase 2 — Infrastructure Hardening:**
+- [ ] Пиннинг Docker-образов (traefik, prometheus, grafana, blackbox)
+- [ ] Docker network isolation (3 сети)
+- [ ] Resource limits (CPU/memory) на контейнеры
+- [ ] Docker socket proxy для Traefik
+
+**Phase 3 — Monitoring & Reliability:**
+- [ ] MySQL/Redis Prometheus exporters
+- [ ] Расширенные alerting rules
+- [ ] Backup verification (checksums)
+- [ ] Database locking для campaign dispatch
+
 ## Troubleshooting
 
 - npm 403: задайте `NPM_REGISTRY` и proxy (см. раздел выше).

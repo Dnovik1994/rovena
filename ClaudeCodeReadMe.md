@@ -1,21 +1,21 @@
-# ClaudeCodeReadMe - Полный анализ проекта Rovena (FreeCRM Inviter)
+# ClaudeCodeReadMe - Анализ проекта Rovena (FreeCRM Inviter)
 
-> Автоматический анализ проекта, выполненный Claude Code. Дата: 2026-02-05
+> Актуализировано: 2026-02-05 | На основе PR #32-#43
 
 ---
 
 ## 1. Общее описание проекта
 
-**Rovena (FreeCRM Inviter)** - это полнофункциональная платформа для автоматизации массовых приглашений пользователей в Telegram-группы и каналы. Проект реализован как **Telegram Mini App** (WebApp) с полным стеком: бэкенд на FastAPI, фронтенд на React, инфраструктура на Docker с мониторингом.
+**Rovena (FreeCRM Inviter)** - полнофункциональная платформа для автоматизации массовых приглашений пользователей в Telegram-группы и каналы. Реализована как **Telegram Mini App** (WebApp) с полным стеком: FastAPI backend, React frontend, Docker-инфраструктура с мониторингом.
 
 ### Основная бизнес-логика
 
-1. **Управление Telegram-аккаунтами** - подключение, верификация (2FA), прогрев (warming), генерация конфигурации устройств для обхода детекции
-2. **Система кампаний** - создание массовых инвайт-кампаний из source-групп в target-группы с контролем лимитов (в час/день)
+1. **Управление Telegram-аккаунтами** - подключение, верификация (2FA), прогрев (warming), генерация конфигурации устройств
+2. **Система кампаний** - массовые инвайт-кампании из source-групп в target-группы с контролем лимитов (в час/день)
 3. **Управление контактами** - формирование списков контактов, тегирование, блокировка
 4. **Прокси-сервер** - поддержка HTTP, SOCKS5, residential-прокси для ротации аккаунтов
 5. **Тарифная система** - подписки через Stripe с лимитами по количеству аккаунтов и инвайтов
-6. **Онбординг** - пошаговый процесс настройки для новых пользователей
+6. **Онбординг** - пошаговый 3-step wizard для новых пользователей
 
 ---
 
@@ -37,6 +37,7 @@
 | Sentry SDK | 2.17.0 | Мониторинг ошибок |
 | structlog | 24.4.0 | Структурированное логирование |
 | prometheus-client | 0.20.0 | Метрики |
+| SlowAPI | - | Rate limiting |
 
 ### Frontend
 | Технология | Версия | Назначение |
@@ -49,7 +50,6 @@
 | React Hook Form | 7.53.0 | Формы |
 | Zod | - | Валидация |
 | Tailwind CSS | 3.4.13 | Стили |
-| Axios | 1.7.7 | HTTP-клиент |
 
 ### Инфраструктура
 | Технология | Назначение |
@@ -61,7 +61,7 @@
 | Grafana | Визуализация |
 | Blackbox Exporter | HTTP/TCP-пробы |
 | 3proxy | Прокси-сервер для аккаунтов |
-| GitHub Actions | CI/CD |
+| GitHub Actions | CI/CD (build + deploy) |
 
 ---
 
@@ -72,27 +72,27 @@ rovena/
 ├── backend/                    # FastAPI backend (Python 3.12)
 │   ├── app/
 │   │   ├── api/v1/             # REST API endpoints (9 модулей)
-│   │   ├── models/             # SQLAlchemy модели (9 таблиц)
-│   │   ├── schemas/            # Pydantic-схемы запросов/ответов
+│   │   ├── models/             # SQLAlchemy модели (11 таблиц)
+│   │   ├── schemas/            # Pydantic-схемы + SanitizedModel
 │   │   ├── services/           # Бизнес-логика (proxy_sync, websocket)
 │   │   ├── clients/            # Внешние интеграции (Telegram)
 │   │   ├── core/               # Ядро (settings, auth, cache, RBAC)
 │   │   ├── workers/            # Celery-задачи
 │   │   └── utils/              # Утилиты
-│   ├── alembic/                # 17 миграций БД
-│   ├── tests/                  # 25+ тестов
+│   ├── alembic/                # Миграции БД
+│   ├── tests/                  # 45 тестовых файлов
 │   └── Dockerfile
 ├── frontend/                   # React SPA (TypeScript)
 │   ├── src/
-│   │   ├── pages/              # 11 страниц
-│   │   ├── components/         # Переиспользуемые компоненты
+│   │   ├── pages/              # 13 страниц
+│   │   ├── components/         # 6 переиспользуемых компонентов
 │   │   ├── services/           # API + WebSocket клиенты
 │   │   ├── stores/             # Zustand-сторы
-│   │   └── types/              # TypeScript-интерфейсы
+│   │   └── types/              # 9 TypeScript-интерфейсов
 │   ├── Dockerfile / Dockerfile.dev
 │   └── nginx.conf
 ├── proxy/                      # 3proxy контейнер
-├── docs/                       # Документация (8 файлов)
+├── docs/                       # Документация
 ├── .github/workflows/          # CI/CD пайплайны
 ├── docker-compose.yml          # Dev-стек
 ├── docker-compose.prod.yml     # Prod-стек (11 сервисов)
@@ -135,304 +135,281 @@ rovena/
 
 ---
 
-## 4. Текущий этап проекта
+## 4. Прогресс: что сделано после первого аудита
 
-### Что реализовано (80-85% MVP)
+### PR #42: Security & Validation Fixes
+- Shell injection fix: `shlex.split()` + `shell=False` в proxy_sync.py
+- JWT int parsing: try-catch обёртки в WebSocket и Stripe handlers
+- setattr whitelist: явные `_*_UPDATE_FIELDS` в accounts, proxies, admin
+- WebSocket токен перенесён из URL query в первое сообщение (auth message)
+- Rate limiting через SlowAPI на все endpoints (10/min auth, 5/min actions)
+- Pagination (limit/offset) на все list-эндпоинты
+- Input sanitization через SanitizedModel
+- CSRF-проверка (опционально, через настройку)
+- Production startup validation: отклоняет дефолтные credentials
 
-- Полная аутентификация через Telegram initData + JWT с refresh-токенами
-- CRUD для всех основных сущностей (projects, accounts, campaigns, contacts, sources, targets)
-- Система ролей (user/admin/superadmin) с RBAC
-- Верификация Telegram-аккаунтов (2FA, phone code)
-- Прогрев аккаунтов (warming actions)
-- Генерация конфигурации устройств (device fingerprint)
-- Celery-задачи для рассылки кампаний
-- WebSocket для real-time статуса
-- Stripe-интеграция для подписок
-- Прокси-менеджмент с автоматической синхронизацией конфигурации 3proxy
-- Docker-инфраструктура (dev + prod)
-- Мониторинг (Prometheus + Grafana)
-- CI/CD через GitHub Actions
-- Бэкапы БД через cron
-- Нагрузочное тестирование (Locust)
-- 25+ unit-тестов
-- Документация (deploy checklist, smoke tests, security)
+### PR #41: Project Analysis
+- Создан ClaudeCodeReadMe.md с полным аудитом проекта
 
-### Что НЕ завершено
+### PR #32-#40: Infrastructure Fixes
+- 3proxy: исправлен config mount, healthcheck, init script, daemon mode, build
+- Traefik: Docker provider endpoint, API version compatibility
+- Cron: правильный image для production
+- Volume naming: postgres-data -> mysql-data
+- Production ENV и .env.example
 
-1. **Dashboard** - страница полностью пустая, содержит только placeholder-текст
-2. **Proxy Validation** - эндпоинт `/proxies/validate` возвращает hardcoded `{"valid": true}` без реальной проверки
-3. **Account Health Check** - Celery-задача `account_health_check` - stub, не выполняет проверку
-4. **Deploy Pipeline** - GitHub Actions deploy job содержит placeholder, не настроен
-5. **Subscription Page** - интеграция с Stripe начата, но UI не доработан
-6. **Онбординг** - процесс определён, но не полностью интегрирован
+### Ранее реализованный функционал
+- Dashboard — полноценная страница с аналитикой, графиками, статистикой
+- Proxy validation — реальная TCP-проверка (socket connect, 5s timeout)
+- Account health check — async проверка через Pyrogram get_me()
+- CI/CD — полный deploy.yml (build images + SSH deploy на сервер)
+- Subscription/Stripe — страница тарифов с checkout session creation
+- Onboarding — 3-step wizard (proxy → account → campaign)
+- Campaign validation — Pydantic схемы с min/max, sanitization
+- 45 тестовых файлов (security, performance, backup, migrations, etc.)
 
 ---
 
-## 5. Найденные ошибки и проблемы
+## 5. Оставшиеся проблемы и задачи
 
-### 5.1 Критические проблемы безопасности
+### 5.1 High Priority
 
-#### 5.1.1 Shell Injection в proxy_sync
-**Файл:** `backend/app/services/proxy_sync.py:51`
-```python
-subprocess.check_call(settings.proxy_reload_cmd, shell=True)
+#### 5.1.1 WebSocket reconnection отсутствует
+**Файл:** `frontend/src/services/websocket.ts`
+При закрытии соединения (потеря сети, перезапуск сервера) нет автоматического переподключения. Есть ping/pong, но нет retry.
+
+**Как реализовать:**
+- Добавить reconnection с exponential backoff (1s, 2s, 4s, 8s, max 30s)
+- Максимум попыток: 10, затем показать пользователю ошибку
+- При успешном reconnect — повторно отправить auth message
+- Добавить состояние соединения (connecting/connected/disconnected) в UI
+
+```typescript
+// Псевдокод
+let reconnectAttempts = 0;
+const MAX_RECONNECT = 10;
+
+function connect() {
+  const socket = new WebSocket(url);
+  socket.onclose = () => {
+    if (reconnectAttempts < MAX_RECONNECT) {
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+      setTimeout(connect, delay);
+      reconnectAttempts++;
+    }
+  };
+  socket.onopen = () => {
+    reconnectAttempts = 0;
+    socket.send(JSON.stringify({ type: "auth", token }));
+  };
+}
 ```
-Использование `shell=True` с командой из конфигурации создаёт вектор для shell-инъекции. Если `proxy_reload_cmd` будет модифицирован (через .env или уязвимость), злоумышленник получит выполнение произвольных команд.
 
-**Рекомендация:** Использовать `shell=False` и передавать команду как список, или захардкодить конкретную команду reload.
+#### 5.1.2 React Error Boundary отсутствует
+**Файлы для создания:** `frontend/src/components/ErrorBoundary.tsx`
+Ошибка рендеринга в любом компоненте крашит всё приложение. Есть `ErrorState` и `ErrorPage`, но нет class-based Error Boundary.
 
-#### 5.1.2 Небезопасное преобразование типов в JWT
-**Файл:** `backend/app/main.py:329`
-```python
-user_id = int(payload.get("sub", 0))
+**Как реализовать:**
+- Создать class component с `componentDidCatch` и `getDerivedStateFromError`
+- Обернуть `<App />` в `<ErrorBoundary>` в main.tsx
+- Показывать fallback UI с кнопкой "Перезагрузить"
+- Интегрировать с Sentry для отправки ошибок
+
+```tsx
+class ErrorBoundary extends React.Component<Props, State> {
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Sentry.captureException(error, { extra: errorInfo });
+  }
+  render() {
+    if (this.state.hasError) return <ErrorFallback onRetry={() => this.setState({ hasError: false })} />;
+    return this.props.children;
+  }
+}
 ```
-`ValueError` при невалидном payload, вместо корректной обработки токена. Аналогичная проблема в Stripe webhook (`main.py:308-315`) с `int(user_id)` и `int(tariff_id)` без try-catch.
 
-#### 5.1.3 Опасный setattr() без фильтрации полей
-**Файлы:** `backend/app/api/v1/accounts.py:86`, `admin.py:281`, `proxies.py:56`
-```python
-for field, value in payload.model_dump(exclude_unset=True).items():
-    setattr(account, field, value)
+#### 5.1.3 Нет таймаутов на API-запросы фронтенда
+**Файл:** `frontend/src/services/api.ts`
+Fetch-запросы могут зависнуть навсегда. Нет AbortController.
+
+**Как реализовать:**
+- Обернуть все fetch-вызовы в `apiFetch()` с AbortController
+- Дефолтный timeout: 15s для обычных запросов, 30s для загрузки файлов
+- Показывать пользователю ошибку при timeout
+
+```typescript
+async function apiFetch(url: string, options: RequestInit = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 ```
-Позволяет потенциально перезаписать `id`, `owner_id`, `user_id` и другие защищённые поля. Необходима явная фильтрация допустимых полей.
 
-#### 5.1.4 WebSocket токен в URL
-**Файлы:** `backend/app/main.py:322`, `frontend/src/services/websocket.ts:26`
-```python
-token = websocket.query_params.get("token")
-```
-Токен в URL сохраняется в логах сервера, истории браузера, прокси-логах. Необходимо передавать через WebSocket subprotocol или первое сообщение.
+#### 5.1.4 Пиннинг Docker-образов (частично)
+**Файл:** `docker-compose.prod.yml`
+4 образа используют `:latest`:
+- `traefik:latest` → пиннить на `traefik:v3.1`
+- `prom/prometheus:latest` → пиннить на `prom/prometheus:v2.51.0`
+- `grafana/grafana:latest` → пиннить на `grafana/grafana:10.4.0`
+- `prom/blackbox-exporter:latest` → пиннить на `prom/blackbox-exporter:v0.25.0`
 
-#### 5.1.5 Захардкоженные credentials
-**Файлы:**
-- `backend/app/utils/db_readiness.py:31,38` - пароль `"rovena"` по умолчанию
-- `backend/app/core/settings.py:23` - JWT secret `"change-me"`
-- `docker-compose.yml:18-19` - MYSQL_PASSWORD `rovena`
-- `docker-entrypoint-initdb.d/init-rovena.sql:2` - пользователь `rovena`@`%` с паролем `rovena`
+---
 
-#### 5.1.6 Docker Socket в production
+### 5.2 Medium Priority
+
+#### 5.2.1 Docker socket в production
 **Файл:** `docker-compose.prod.yml:34`
 ```yaml
 - /var/run/docker.sock:/var/run/docker.sock:ro
 ```
-Даже read-only доступ к Docker socket позволяет просматривать env-переменные всех контейнеров (включая секреты).
+Read-only доступ к Docker socket всё ещё позволяет просматривать env-переменные всех контейнеров.
+
+**Как решить:**
+- Вариант А: Использовать Traefik с файловым провайдером вместо Docker провайдера (не нужен socket)
+- Вариант Б: Использовать [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) для фильтрации API-вызовов
+- Вариант В (минимум): Оставить как есть, но задокументировать риск
+
+#### 5.2.2 Нет сетевой изоляции Docker
+Все 11 сервисов в одной default-сети. Frontend может обращаться к MySQL напрямую.
+
+**Как реализовать:**
+- Создать 3 сети: `frontend-net`, `backend-net`, `db-net`
+- frontend + traefik → `frontend-net`
+- backend + worker + redis + db → `backend-net`
+- db + redis → `db-net` (только для бэкенда)
+- traefik → обе сети (для проксирования)
+
+#### 5.2.3 Нет лимитов ресурсов (CPU/Memory)
+Ни один сервис не имеет `deploy.resources.limits`.
+
+**Как реализовать (рекомендуемые лимиты):**
+```yaml
+services:
+  backend:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "512M" }
+  worker:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "1G" }
+  db:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "1G" }
+  redis:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+  frontend:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+```
+
+#### 5.2.4 Мониторинг — нет экспортёров MySQL/Redis
+Prometheus скрейпит только backend `/metrics` и blackbox TCP-пробу.
+
+**Как реализовать:**
+- Добавить `mysqld-exporter` (image: `prom/mysqld-exporter:v0.15.1`) — скрейпит MySQL метрики
+- Добавить `redis-exporter` (image: `oliver006/redis_exporter:v1.58.0`) — скрейпит Redis метрики
+- Добавить scrape jobs в `prometheus.yml`
+- Добавить alerting rules: DiskSpaceHigh, HighMemory, ServiceDown, MySQLSlowQueries, RedisHighMemory
+
+#### 5.2.5 Race condition в dispatch кампаний
+**Файл:** `backend/app/workers/tasks.py`
+Статус кампании/аккаунта может измениться между проверкой и обработкой. Нет `SELECT FOR UPDATE`.
+
+**Как реализовать:**
+- Использовать `with_for_update()` при выборке кампании перед изменением статуса
+- Обернуть критические секции в явные транзакции
+- Добавить optimistic locking (version column) на модель Campaign
+
+#### 5.2.6 Бэкапы без верификации
+**Файл:** `crontab.txt`
+Нет проверки успешности mysqldump, нет checksums.
+
+**Как реализовать:**
+- После dump: `md5sum /backups/db-*.sql.gz > /backups/db-*.md5`
+- Проверять exit code mysqldump: `mysqldump ... && gzip ... || echo "BACKUP FAILED" >> /backups/backup.log`
+- Добавить Prometheus-метрику `backup_last_success_timestamp`
 
 ---
 
-### 5.2 Логические ошибки
+### 5.3 Low Priority
 
-#### 5.2.1 Race condition в dispatch кампаний
-**Файл:** `backend/app/workers/tasks.py:86-244`
-- Статус кампании может измениться между проверкой и обработкой
-- Статус аккаунта может измениться во время цикла рассылки
-- Нет блокировок (database locking) для конкурентного доступа
+#### 5.3.1 Accessibility (a11y)
+- Toast: добавить `role="alert"` и `aria-live="polite"`
+- Формы: добавить `htmlFor` на `<label>` и `aria-labelledby`
+- Статусы: добавить текстовые badge рядом с цветовыми индикаторами
+- Loading: `aria-busy="true"` на скелетоны
 
-#### 5.2.2 WebSocket Manager - утечка памяти
-**Файл:** `backend/app/services/websocket_manager.py:37-42`
-```python
-def broadcast_sync(self, payload):
-    try:
-        asyncio.run(self.broadcast(payload))  # Создаёт новый event loop каждый раз
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.create_task(self.broadcast(payload))
-```
-`asyncio.run()` создаёт новый event loop при каждом вызове - крайне неэффективно. Также stale-соединения удаляются неатомарно.
+#### 5.3.2 Hardcoded credentials (dev-окружение)
+Dev-значения остаются в docker-compose.yml и init-rovena.sql. Production защищён через startup validation в settings.py. Для полной чистоты — вынести все dev-credentials в .env.example и убрать из кода.
 
-#### 5.2.3 Celery + asyncio.run()
-**Файл:** `backend/app/workers/tasks.py:256`
-```python
-def campaign_dispatch(campaign_id: int) -> None:
-    asyncio.run(_run_campaign_dispatch(campaign_id))
-```
-Использование `asyncio.run()` в Celery-задачах проблематично в production. Celery prefork workers не предназначены для async-кода.
-
-#### 5.2.4 Отсутствие транзакционной изоляции
-**Файл:** `backend/app/api/v1/accounts.py:128-133`
-Конкурентные запросы могут привести к несогласованному состоянию аккаунтов (status, warming_started_at) без isolation level.
-
-#### 5.2.5 device_config default - мутабельный объект
-**Файл:** `backend/app/models/account.py:32`
-```python
-device_config: Mapped[dict | None] = mapped_column(JSON, default=generate_device_config)
-```
-Передача функции напрямую как default вместо `default_factory` может привести к общему dict-объекту между инстансами.
+#### 5.3.3 WebSocket Manager broadcast_sync
+**Файл:** `backend/app/services/websocket_manager.py`
+`asyncio.run()` в broadcast_sync создаёт новый event loop каждый раз. Неэффективно, но не критично при малом числе соединений.
 
 ---
 
-### 5.3 Проблемы валидации
+## 6. Roadmap до production
 
-#### 5.3.1 JSON parsing без обработки ошибок
-**Файл:** `backend/app/api/v1/auth.py:36-37`
-```python
-user_payload = json.loads(user_raw)  # Нет try-catch
-telegram_id = int(user_payload["id"])  # KeyError при отсутствии ключа
-```
+### Phase 1: Frontend Hardening (2-3 дня)
+1. WebSocket reconnection с exponential backoff
+2. React Error Boundary
+3. API fetch timeouts через AbortController
+4. A11y базовые исправления (role, aria)
 
-#### 5.3.2 Отсутствие валидации диапазонов в кампаниях
-**Файл:** `backend/app/api/v1/campaigns.py:60-63`
-- Нет проверки что `max_invites_per_hour` и `max_invites_per_day` > 0
-- Нет проверки что `start_at` < `end_at`
-- Нет проверки что даты в будущем
+### Phase 2: Infrastructure Hardening (1-2 дня)
+5. Пиннинг Docker-образов
+6. Docker network isolation (3 сети)
+7. Resource limits на все контейнеры
+8. Docker socket proxy или file provider для Traefik
 
-#### 5.3.3 Нет валидации Stripe webhook signature
-**Файл:** `backend/app/main.py:294`
-Если `stripe-signature` header отсутствует, `None` передаётся в `construct_event`, что приведёт к неинформативной ошибке.
+### Phase 3: Monitoring & Reliability (2-3 дня)
+9. MySQL/Redis экспортёры в Prometheus
+10. Расширенные alerting rules (5+ правил)
+11. Backup verification (checksums, exit codes)
+12. Database locking для campaign dispatch
 
----
-
-### 5.4 Проблемы фронтенда
-
-#### 5.4.1 Отсутствие reconnection для WebSocket
-**Файл:** `frontend/src/services/websocket.ts:20-48`
-При закрытии соединения нет автоматического переподключения. Потеря сети = потеря real-time обновлений без восстановления.
-
-#### 5.4.2 Отсутствие heartbeat/ping-pong
-WebSocket может быть молча отключён без уведомления приложения.
-
-#### 5.4.3 Пропущенные зависимости в useEffect
-**Файлы:** Все основные страницы (Projects, Sources, Targets, Contacts, Campaigns, Accounts)
-```typescript
-useEffect(() => {
-  fetchData();  // fetchData не в массиве зависимостей
-}, [token]);
-```
-Может приводить к stale closures, пропущенным обновлениям или infinite loops.
-
-#### 5.4.4 Нет таймаутов на fetch-запросы
-**Файл:** `frontend/src/services/api.ts:41`
-Запросы могут зависнуть навсегда без timeout. Нет retry-логики для сетевых ошибок.
-
-#### 5.4.5 Молчаливое игнорирование ошибок WebSocket
-**Файл:** `frontend/src/services/websocket.ts:42-44`
-```typescript
-catch (error) {
-  return;  // Молча игнорирует ошибки парсинга JSON
-}
-```
-
-#### 5.4.6 Отсутствие Error Boundary
-Нет React Error Boundary компонента. Ошибка в любом компоненте крашит всё приложение.
-
-#### 5.4.7 Проблемы доступности (a11y)
-- Нет `role="alert"` на Toast-уведомлениях
-- Формы без `htmlFor`/`aria-labelledby` на лейблах
-- Статусы обозначены только цветом (недоступны для дальтоников)
-- Loading-скелетоны без `aria-busy="true"`
+### Phase 4: Nice-to-have (опционально)
+13. Аналитика кампаний — графики конверсии, success/blocked rate
+14. Шедулинг кампаний — запуск по расписанию
+15. Импорт/экспорт контактов (CSV/Excel)
+16. Telegram Bot уведомления о статусе кампаний
+17. Account Pool Rotation при блокировке
 
 ---
 
-### 5.5 Проблемы инфраструктуры
-
-#### 5.5.1 Непиннированные версии Docker-образов
-**Файлы:** `docker-compose.prod.yml`
-- `traefik:latest` (строка 13)
-- `prom/prometheus:latest` (строка 231)
-- `grafana/grafana:latest` (строка 251)
-- `prom/blackbox-exporter:latest` (строка 267)
-
-**Риск:** Неконтролируемые обновления могут сломать деплой.
-
-#### 5.5.2 Нет лимитов ресурсов (CPU/Memory)
-Ни один сервис не имеет `deploy.resources.limits`. Один контейнер может потребить все ресурсы хоста.
-
-#### 5.5.3 Нет сетевой изоляции
-Все сервисы в одной default-сети. Фронтенд может обращаться к БД напрямую.
-
-#### 5.5.4 Неполный мониторинг
-- Prometheus: только 2 scrape-job (backend + blackbox)
-- Нет метрик Redis, MySQL, Traefik, Nginx
-- Только 2 alerting-правила (HighQueue, ManyBlockedAccounts)
-- Нет алертов на CPU, память, диск, доступность сервисов
-
-#### 5.5.5 Имя volume не соответствует БД
-**Файл:** `docker-compose.yml:23,229`
-Volume назван `postgres-data`, но используется для MySQL.
-
-#### 5.5.6 Неполный CI/CD
-- Deploy job в GitHub Actions содержит placeholder
-- Нет автоматического деплоя при merge в main
-- Нет smoke-тестов после деплоя
-- Нет стратегии rollback
-
-#### 5.5.7 Бэкапы без верификации
-- `crontab.txt`: нет проверки успешности mysqldump
-- Нет проверки целостности бэкапов (checksums)
-- Нет документированной процедуры восстановления
-- Только 7-дневное хранение
-
----
-
-## 6. Потенциальные возможности и рекомендации
-
-### 6.1 Немедленные исправления (Critical)
-
-1. **Заменить `shell=True`** в `proxy_sync.py` на `shell=False` с явным списком аргументов
-2. **Добавить try-catch** на все `int()` преобразования в auth и webhook обработчиках
-3. **Заменить `setattr()`** на явный маппинг допустимых полей во всех endpoint'ах
-4. **Перенести WebSocket-токен** из URL query params в subprotocol или первое сообщение
-5. **Убрать hardcoded credentials** из кода, использовать только env-переменные без дефолтов
-6. **Пиннить Docker-образы** на конкретные версии
-7. **Добавить Error Boundary** в React-приложение
-
-### 6.2 Важные улучшения (High Priority)
-
-1. **WebSocket reconnection** - реализовать экспоненциальный backoff при переподключении
-2. **Пагинация** - добавить на все list-эндпоинты (сейчас `.all()` загружает всё в память)
-3. **Database locking** - добавить `SELECT FOR UPDATE` в критических секциях (campaign dispatch)
-4. **Celery async** - заменить `asyncio.run()` на `asgiref.sync_to_async` или sync-реализацию
-5. **Сетевая изоляция** - разделить Docker-сети (frontend, backend, db-only)
-6. **Resource limits** - добавить CPU/memory limits на все контейнеры
-7. **Расширить мониторинг** - добавить MySQL, Redis, Traefik экспортёры и alerting-правила
-8. **Fetch timeouts** - добавить AbortController с таймаутом на все API-запросы фронтенда
-
-### 6.3 Средний приоритет
-
-1. **Завершить Dashboard** - добавить графики, статистику кампаний, состояние аккаунтов
-2. **Реализовать proxy validation** - реальная проверка прокси вместо hardcoded true
-3. **Реализовать account_health_check** - периодическая проверка статуса аккаунтов
-4. **Доработать CI/CD** - настроить автоматический деплой, smoke-тесты, rollback
-5. **Добавить кэш-инвалидацию** - при изменении данных пользователя/тарифа
-6. **Расширить тесты** - покрытие edge-cases, integration-тесты
-7. **Доступность (a11y)** - ARIA-атрибуты, корректные лейблы форм, не только цветовые индикаторы
-8. **Верификация бэкапов** - checksums, тестовое восстановление, уведомления при сбое
-
-### 6.4 Потенциальные фичи
-
-1. **Аналитика кампаний** - графики конверсии, success rate, blocked rate по времени
-2. **Шедулинг кампаний** - запуск по расписанию с учётом часовых поясов
-3. **Импорт/экспорт контактов** - CSV/Excel для массового импорта
-4. **Шаблоны сообщений** - приветственные сообщения при инвайте
-5. **Telegram Bot уведомления** - уведомления о статусе кампаний через бота
-6. **Multi-tenant** - изоляция данных между организациями
-7. **API Rate Limiting Dashboard** - визуализация использования лимитов
-8. **Account Pool Rotation** - автоматическая ротация аккаунтов при блокировке
-9. **Smart Cooling** - ML-based определение оптимальных пауз между инвайтами
-10. **Webhook-уведомления** - интеграция с внешними системами (Slack, Discord, CRM)
-
----
-
-## 7. Оценка зрелости проекта
+## 7. Оценка зрелости проекта (обновлённая)
 
 | Аспект | Статус | Оценка |
 |---|---|---|
-| Backend API | Почти готов | 85% |
-| Frontend UI | Базовый функционал | 70% |
-| Аутентификация | Реализована | 90% |
-| Telegram-интеграция | Работает | 80% |
-| Платежи (Stripe) | Базовая интеграция | 50% |
-| Мониторинг | Базовый | 40% |
-| CI/CD | Частично | 35% |
-| Тестирование | Базовое покрытие | 45% |
-| Документация | Хорошая | 75% |
-| Безопасность | Требует доработки | 55% |
-| DevOps/Infra | Настроено | 65% |
-| **Общая оценка** | **MVP стадия** | **~65%** |
+| Backend API | Готов (rate limit, pagination, validation) | 92% |
+| Frontend UI | Все страницы реализованы | 82% |
+| Аутентификация | Реализована + CSRF + sanitization | 95% |
+| Telegram-интеграция | Работает (verify, warming, health check) | 85% |
+| Платежи (Stripe) | Полная страница + webhook | 75% |
+| Мониторинг | Базовый (нет MySQL/Redis exporters) | 50% |
+| CI/CD | Build + Deploy настроен | 70% |
+| Тестирование | 45 тестовых файлов | 70% |
+| Документация | README + ClaudeCodeReadMe + docs/ | 80% |
+| Безопасность | Критические закрыты, остался socket | 80% |
+| DevOps/Infra | Docker настроен, нет network isolation | 72% |
+| **Общая оценка** | **Pre-production** | **~80%** |
 
 ### Вывод
 
-Проект находится на стадии **позднего MVP**. Основной функционал реализован и архитектурно продуман. Backend имеет грамотную структуру с разделением ответственности. Инфраструктура подготовлена для production (Traefik, мониторинг, бэкапы). Однако перед production-релизом необходимо закрыть критические проблемы безопасности, доработать валидацию, реализовать stub-эндпоинты и обеспечить стабильность WebSocket-соединений.
+Проект перешёл из стадии "поздний MVP" в **pre-production**. Все критические security-проблемы закрыты (PR #42). Все stub-эндпоинты реализованы. Dashboard, Subscription, Onboarding — полностью рабочие. 45 тестовых файлов обеспечивают хорошее покрытие. Для production-релиза остаётся: frontend hardening (WebSocket reconnect, Error Boundary, timeouts), infrastructure hardening (network isolation, resource limits, image pinning) и расширение мониторинга.
 
 ---
 
-*Этот документ сгенерирован автоматически на основе полного анализа кодовой базы. Рекомендуется использовать как roadmap для дальнейшей разработки.*
+*Актуализировано на основе анализа PR #32-#43 и текущего состояния кодовой базы.*
