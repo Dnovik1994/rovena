@@ -44,7 +44,7 @@ APP_VERSION = "1.0.0"
 
 configure_logging(production=settings.production)
 
-if settings.sentry_dsn:
+if settings.sentry_enabled and settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         traces_sample_rate=1.0,
@@ -358,6 +358,12 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request) -> dict[str, str]:
+    if not settings.stripe_enabled:
+        raise HTTPException(
+            status_code=http_status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Stripe is disabled",
+        )
+
     if not settings.stripe_webhook_secret:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,

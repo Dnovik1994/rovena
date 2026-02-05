@@ -19,10 +19,12 @@ from app.services.proxy_sync import sync_3proxy
 from app.services.proxy_validation import validate_proxy
 from app.services.websocket_manager import manager
 from app.workers import celery_app
+from app.core.settings import get_settings
 from pyrogram.errors import FloodWait, PeerIdInvalid, UserAlreadyParticipant, UserBlocked, UserPrivacyRestricted
 import sentry_sdk
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 def _log_task_started(campaign_id: int | None = None, account_id: int | None = None) -> None:
     task = current_task
@@ -87,6 +89,9 @@ def _set_account_cooldown(db, account: Account, seconds: int) -> None:
 
 
 async def _run_campaign_dispatch(campaign_id: int) -> None:
+    if not settings.telegram_client_enabled:
+        logger.info("Telegram client disabled; campaign dispatch skipped", extra={"campaign_id": campaign_id})
+        return
     with SessionLocal() as db:
         campaign = db.get(Campaign, campaign_id)
         if not campaign:
@@ -276,6 +281,9 @@ def account_health_check(account_id: int) -> None:
 
 
 async def _run_account_health_check(account_id: int) -> None:
+    if not settings.telegram_client_enabled:
+        logger.info("Telegram client disabled; account health check skipped", extra={"account_id": account_id})
+        return
     with SessionLocal() as db:
         account = db.get(Account, account_id)
         if not account:
@@ -330,6 +338,9 @@ async def perform_low_risk_action(client) -> int:
 
 
 async def _run_warming_cycle(account_id: int) -> None:
+    if not settings.telegram_client_enabled:
+        logger.info("Telegram client disabled; warming cycle skipped", extra={"account_id": account_id})
+        return
     with SessionLocal() as db:
         account = db.get(Account, account_id)
         if not account:

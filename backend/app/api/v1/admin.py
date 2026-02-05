@@ -325,6 +325,12 @@ async def admin_create_checkout(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
+    if not settings.stripe_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Stripe is disabled",
+        )
+
     if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

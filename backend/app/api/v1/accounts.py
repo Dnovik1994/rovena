@@ -10,6 +10,7 @@ from app.clients.device_generator import generate_device_config
 from app.models.account import Account, AccountStatus
 from app.models.user import User
 from app.core.rate_limit import limiter
+from app.core.settings import get_settings
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountVerifyResponse
 from app.services.websocket_manager import manager
 from app.workers.tasks import account_health_check, start_warming
@@ -18,6 +19,7 @@ from app.clients.telegram_client import get_client
 from app.models.proxy import Proxy
 
 router = APIRouter(tags=["accounts"])
+settings = get_settings()
 
 
 def _is_admin(user: User) -> bool:
@@ -179,6 +181,11 @@ async def verify_account(
     current_user: User = Depends(require_permission("accounts", "verify")),
     db: Session = Depends(get_db),
 ) -> AccountVerifyResponse:
+    if not settings.telegram_client_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Telegram client is disabled",
+        )
     query = db.query(Account).filter(Account.id == account_id)
     if not _is_admin(current_user):
         query = query.filter(Account.owner_id == current_user.id)

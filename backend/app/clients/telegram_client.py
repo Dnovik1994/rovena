@@ -28,6 +28,8 @@ def _build_proxy(proxy: Proxy | None) -> dict[str, Any] | None:
 
 
 def get_client(account: Account, proxy: Proxy | None = None) -> Client:
+    if not settings.telegram_client_enabled:
+        raise RuntimeError("Telegram client is disabled")
     if not settings.telegram_api_id or not settings.telegram_api_hash:
         raise RuntimeError("TELEGRAM_API_ID/HASH not configured")
 
@@ -60,6 +62,8 @@ def get_client(account: Account, proxy: Proxy | None = None) -> Client:
 
 
 def get_validator_client(proxy: Proxy) -> Client:
+    if not settings.telegram_client_enabled:
+        raise RuntimeError("Telegram client is disabled")
     if not settings.telegram_api_id or not settings.telegram_api_hash:
         raise RuntimeError("TELEGRAM_API_ID/HASH not configured")
 

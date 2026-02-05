@@ -12,11 +12,13 @@ from app.core.security import (
     decode_refresh_token,
     hash_token,
 )
+from app.core.settings import get_settings
 from app.models.user import User
 from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(tags=["auth"])
 
@@ -28,6 +30,12 @@ async def auth_via_telegram(
     payload: TelegramAuthRequest,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
+    if not settings.telegram_auth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Telegram auth is disabled",
+        )
+
     try:
         data = validate_init_data(payload.init_data)
     except TelegramAuthError as exc:

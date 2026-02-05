@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     web_base_url: str = "http://localhost:5173"
+    stripe_enabled: bool = False
+    sentry_enabled: bool = False
+    telegram_auth_enabled: bool = True
+    telegram_client_enabled: bool = False
 
     proxy_config_path: str = "/app/3proxy.cfg"
     proxy_base_port: int = 10000
@@ -75,11 +79,18 @@ def get_settings() -> Settings:
     if settings.production:
         if settings.database_url == "mysql+pymysql://rovena:rovena@db:3306/rovena":
             raise ValueError("Change DATABASE_URL!")
-        if not settings.telegram_api_id or not settings.telegram_api_hash:
-            raise ValueError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH!")
-        if settings.stripe_secret_key or settings.stripe_webhook_secret:
+        if settings.stripe_enabled:
             if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
                 raise ValueError("Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET!")
+        if settings.telegram_auth_enabled and not settings.telegram_bot_token:
+            raise ValueError("Set TELEGRAM_BOT_TOKEN!")
+        if settings.telegram_client_enabled:
+            if not settings.telegram_api_id or not settings.telegram_api_hash:
+                raise ValueError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH!")
+        if settings.csrf_enabled and not settings.csrf_token:
+            raise ValueError("Set CSRF_TOKEN!")
+        if settings.sentry_enabled and not settings.sentry_dsn:
+            raise ValueError("Set SENTRY_DSN!")
         if not settings.cors_origins or settings.cors_origins == ["*"]:
             raise ValueError("Set CORS_ORIGINS for production!")
         settings.cors_origins = settings.cors_origins or []

@@ -89,3 +89,30 @@ curl -s http://localhost:8000/health | jq
 ```bash
 pytest backend/tests/test_api.py backend/tests/test_analytics.py
 ```
+
+## 9) Feature flags
+
+Backend (env, boolean):
+- `STRIPE_ENABLED` — включает Stripe webhook и admin checkout (при `false` endpoints возвращают 501). 【F:backend/app/main.py†L359-L374】【F:backend/app/api/v1/admin.py†L322-L338】
+- `SENTRY_ENABLED` — включает инициализацию Sentry (только если задан DSN). 【F:backend/app/main.py†L47-L52】
+- `TELEGRAM_AUTH_ENABLED` — включает `/auth/telegram` и валидацию initData. 【F:backend/app/api/v1/auth.py†L24-L39】【F:backend/app/services/telegram_auth.py†L19-L39】
+- `TELEGRAM_CLIENT_ENABLED` — включает Pyrogram‑клиенты (аккаунты, warming, proxy validation). 【F:backend/app/clients/telegram_client.py†L30-L74】【F:backend/app/workers/tasks.py†L115-L352】
+- `CSRF_ENABLED` — включает проверку `X-CSRF-Token` для mutating запросов. 【F:backend/app/api/deps.py†L64-L71】
+
+Defaults:
+- `TELEGRAM_AUTH_ENABLED=true` (логин через Telegram WebApp — основной вход в продукт).
+- Все остальные flags по умолчанию `false`. 【F:backend/app/core/settings.py†L27-L47】
+
+## 10) Production config validation
+
+Always required in prod:
+- `JWT_SECRET` не дефолтный.
+- `DATABASE_URL` не дефолтный.
+- `CORS_ORIGINS` не пустой и не `["*"]`. 【F:backend/app/core/settings.py†L70-L90】
+
+Conditional (только при включённых фичах):
+- `STRIPE_ENABLED=true` → `STRIPE_SECRET_KEY` и `STRIPE_WEBHOOK_SECRET` обязательны.
+- `TELEGRAM_AUTH_ENABLED=true` → `TELEGRAM_BOT_TOKEN` обязателен.
+- `TELEGRAM_CLIENT_ENABLED=true` → `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` обязательны.
+- `CSRF_ENABLED=true` → `CSRF_TOKEN` обязателен.
+- `SENTRY_ENABLED=true` → `SENTRY_DSN` обязателен. 【F:backend/app/core/settings.py†L70-L90】
