@@ -1,10 +1,13 @@
 import asyncio
+import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
 from exceptiongroup import ExceptionGroup
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import status as http_status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -33,6 +36,7 @@ from app.core.database import SessionLocal, get_db
 from app.models.account import Account, AccountStatus
 from app.models.user import User
 from app.core.metrics import accounts_by_status, accounts_total, celery_queue_length
+from app.workers import celery_app
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -190,9 +194,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 async def starlette_http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
-    if exc.status_code == status.HTTP_404_NOT_FOUND:
+    if exc.status_code == http_status.HTTP_404_NOT_FOUND:
         return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             content={"error": {"code": "404", "message": "Not found"}},
         )
     return JSONResponse(
@@ -231,27 +235,95 @@ async def unhandled_exception_group_handler(
     return await _internal_error_response(request, exc)
 
 
+def _derive_status(checks: dict[str, dict[str, object]]) -> str:
+    statuses = [check["status"] for check in checks.values()]
+    if "fail" in statuses:
+        return "fail"
+    if "warn" in statuses:
+        return "warn"
+    return "ok"
+
+
+async def _run_with_timeout(func, timeout_seconds: float, *args, **kwargs):
+    return await asyncio.wait_for(asyncio.to_thread(func, *args, **kwargs), timeout=timeout_seconds)
+
+
 @app.get("/health")
-async def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
+async def health_check(db: Session = Depends(get_db)) -> JSONResponse:
+    checks: dict[str, dict[str, object]] = {}
+    timeout_seconds = settings.health_check_timeout_seconds
+
+    db_started = time.monotonic()
     try:
-        db.execute(text("SELECT 1"))
-        redis_status = "disabled"
-        if settings.redis_url:
-            redis_ok = await cache_ping()
-            if not redis_ok:
-                raise HTTPException(status_code=503, detail="Redis ping failed")
-            redis_status = "connected"
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "redis": redis_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Health check failed", extra={"error": str(exc)})
-        raise HTTPException(status_code=503, detail="Service unavailable") from exc
+        await _run_with_timeout(db.execute, timeout_seconds, text("SELECT 1"))
+        db_latency_ms = int((time.monotonic() - db_started) * 1000)
+        db_status = "ok" if db_latency_ms <= timeout_seconds * 1000 else "warn"
+        checks["database"] = {"status": db_status, "latency_ms": db_latency_ms}
+    except asyncio.TimeoutError:
+        checks["database"] = {"status": "fail", "error": "timeout"}
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = {"status": "fail", "error": str(exc)}
+
+    if settings.redis_url:
+        try:
+            redis_started = time.monotonic()
+            redis_ok = await asyncio.wait_for(cache_ping(), timeout=timeout_seconds)
+            redis_latency_ms = int((time.monotonic() - redis_started) * 1000)
+            checks["redis"] = {
+                "status": "ok" if redis_ok else "fail",
+                "latency_ms": redis_latency_ms,
+            }
+        except asyncio.TimeoutError:
+            checks["redis"] = {"status": "fail", "error": "timeout"}
+        except Exception as exc:  # noqa: BLE001
+            checks["redis"] = {"status": "fail", "error": str(exc)}
+    else:
+        checks["redis"] = {"status": "warn", "detail": "disabled"}
+
+    if settings.redis_url:
+        try:
+            redis_client = await _run_with_timeout(Redis.from_url, timeout_seconds, settings.redis_url)
+            queue_length = await _run_with_timeout(redis_client.llen, timeout_seconds, "celery")
+            queue_status = "ok"
+            if queue_length >= settings.health_queue_warn_threshold:
+                queue_status = "warn"
+            checks["celery_queue"] = {"status": queue_status, "queue_length": queue_length}
+        except asyncio.TimeoutError:
+            checks["celery_queue"] = {"status": "fail", "error": "timeout"}
+        except Exception as exc:  # noqa: BLE001
+            checks["celery_queue"] = {"status": "fail", "error": str(exc)}
+    else:
+        checks["celery_queue"] = {"status": "warn", "detail": "disabled"}
+
+    if settings.redis_url:
+        try:
+            responses = await _run_with_timeout(
+                celery_app.control.ping,
+                timeout_seconds,
+                timeout=timeout_seconds,
+            )
+            worker_status = "ok" if responses else "fail"
+            checks["celery_worker"] = {"status": worker_status, "responders": len(responses)}
+        except asyncio.TimeoutError:
+            checks["celery_worker"] = {"status": "fail", "error": "timeout"}
+        except Exception as exc:  # noqa: BLE001
+            checks["celery_worker"] = {"status": "fail", "error": str(exc)}
+    else:
+        checks["celery_worker"] = {"status": "warn", "detail": "disabled"}
+
+    status_str = _derive_status(checks)
+    response_payload = {
+        "status": status_str,
+        "checks": checks,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": APP_VERSION,
+    }
+    http_status_code = (
+        http_status.HTTP_503_SERVICE_UNAVAILABLE
+        if status_str == "fail"
+        else http_status.HTTP_200_OK
+    )
+    return JSONResponse(content=response_payload, status_code=http_status_code)
 
 
 def _get_git_commit() -> str:
@@ -288,7 +360,7 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 async def stripe_webhook(request: Request) -> dict[str, str]:
     if not settings.stripe_webhook_secret:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Stripe webhook secret is not configured",
         )
 
@@ -303,7 +375,10 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Stripe webhook signature verification failed", extra={"error": str(exc)})
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature") from exc
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Invalid webhook signature",
+        ) from exc
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
@@ -327,7 +402,20 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
 
 @app.websocket("/ws/status")
 async def websocket_status(websocket: WebSocket) -> None:
-    token = websocket.query_params.get("token")
+    await websocket.accept()
+    try:
+        raw_payload = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+    except asyncio.TimeoutError:
+        await websocket.close(code=1008)
+        return
+
+    try:
+        auth_payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        await websocket.close(code=1008)
+        return
+
+    token = auth_payload.get("token") if isinstance(auth_payload, dict) else None
     if not token:
         await websocket.close(code=1008)
         return
@@ -345,7 +433,7 @@ async def websocket_status(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
 
-    await manager.connect(websocket, user_id)
+    await manager.connect(websocket, user_id, accept=False)
 
     async def _ping_loop() -> None:
         """Send periodic pings to detect stale connections."""

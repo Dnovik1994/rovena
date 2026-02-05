@@ -7,6 +7,7 @@ export type StatusMessage =
       target_actions?: number;
       cooldown_until?: string | null;
     }
+  | { type: "ping" }
   | { type: "campaign_progress"; campaign_id: number; progress: number; success?: number }
   | {
       type: "dispatch_error";
@@ -23,12 +24,12 @@ export const connectStatusSocket = (
 ): WebSocket => {
   const url = new URL("/ws/status", window.location.origin);
   url.protocol = url.protocol.replace("http", "ws");
-  url.searchParams.set("token", token);
 
   const socket = new WebSocket(url.toString());
 
   socket.onopen = () => {
     console.log("Status WebSocket connected");
+    socket.send(JSON.stringify({ type: "auth", token }));
   };
 
   socket.onclose = () => {
@@ -38,6 +39,10 @@ export const connectStatusSocket = (
   socket.onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data) as StatusMessage;
+      if (payload.type === "ping") {
+        socket.send("pong");
+        return;
+      }
       onMessage(payload);
     } catch (error) {
       return;

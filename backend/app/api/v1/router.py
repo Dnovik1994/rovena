@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     accounts,
     admin,
+    analytics,
     auth,
     campaigns,
     contacts,
@@ -25,3 +26,4 @@ router.include_router(campaigns.router)
 router.include_router(accounts.router)
 router.include_router(proxies.router)
 router.include_router(admin.router, prefix="/admin")
+router.include_router(analytics.router)

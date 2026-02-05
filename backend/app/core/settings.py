@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     proxy_config_path: str = "/app/3proxy.cfg"
     proxy_base_port: int = 10000
     proxy_reload_cmd: str = ""
+    health_check_timeout_seconds: float = 2.0
+    health_queue_warn_threshold: int = 100
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -71,6 +73,15 @@ def get_settings() -> Settings:
         raise ValueError("Change JWT_SECRET!")
 
     if settings.production:
+        if settings.database_url == "mysql+pymysql://rovena:rovena@db:3306/rovena":
+            raise ValueError("Change DATABASE_URL!")
+        if not settings.telegram_api_id or not settings.telegram_api_hash:
+            raise ValueError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH!")
+        if settings.stripe_secret_key or settings.stripe_webhook_secret:
+            if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
+                raise ValueError("Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET!")
+        if not settings.cors_origins or settings.cors_origins == ["*"]:
+            raise ValueError("Set CORS_ORIGINS for production!")
         settings.cors_origins = settings.cors_origins or []
     else:
         settings.cors_origins = ["*"]
