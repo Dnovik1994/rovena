@@ -5,6 +5,7 @@ import { Contact } from "../types/contact";
 import { Project } from "../types/project";
 import { Source } from "../types/source";
 import { Target } from "../types/target";
+import { DashboardAnalytics } from "../types/analytics";
 import { apiFetch } from "./api";
 
 export const fetchProjects = (token: string): Promise<Project[]> => {
@@ -76,6 +77,10 @@ export const createContact = (
 
 export const fetchCampaigns = (token: string): Promise<Campaign[]> => {
   return apiFetch<Campaign[]>("/campaigns", {}, token);
+};
+
+export const fetchDashboardAnalytics = (token: string, windowDays = 14): Promise<DashboardAnalytics> => {
+  return apiFetch<DashboardAnalytics>(`/analytics/dashboard?window_days=${windowDays}`, {}, token);
 };
 
 export const createCampaign = (

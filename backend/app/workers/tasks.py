@@ -270,10 +270,44 @@ def campaign_dispatch(campaign_id: int) -> None:
 
 
 @celery_app.task
-
 def account_health_check(account_id: int) -> None:
     _log_task_started(account_id=account_id)
-    logger.info("Checking account", extra={"account_id": account_id})
+    asyncio.run(_run_account_health_check(account_id))
+
+
+async def _run_account_health_check(account_id: int) -> None:
+    with SessionLocal() as db:
+        account = db.get(Account, account_id)
+        if not account:
+            logger.info("Account not found", extra={"account_id": account_id})
+            return
+
+        proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+        client = get_client(account, proxy)
+
+        try:
+            async with client:
+                await client.get_me()
+            account.last_activity_at = datetime.now(timezone.utc)
+            if account.status == AccountStatus.cooldown and account.cooldown_until:
+                if account.cooldown_until <= datetime.now(timezone.utc):
+                    account.status = AccountStatus.active
+            db.commit()
+            manager.broadcast_sync(
+                {
+                    "type": "account_update",
+                    "user_id": account.owner_id,
+                    "account_id": account.id,
+                    "status": account.status,
+                    "actions_completed": account.warming_actions_completed,
+                    "target_actions": account.target_warming_actions,
+                    "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
+                }
+            )
+        except FloodWait as exc:
+            _set_account_cooldown(db, account, int(exc.value))
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Account health check failed", extra={"account_id": account_id, "error": str(exc)})
 
 
 async def perform_low_risk_action(client) -> int:

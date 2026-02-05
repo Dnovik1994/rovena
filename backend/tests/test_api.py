@@ -17,7 +17,40 @@ def _create_user(db: Session, telegram_id: int) -> User:
 def test_health_ok(client):
     response = client.get("/health")
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert payload["status"] in {"ok", "warn", "fail"}
+    assert "checks" in payload
+    assert "timestamp" in payload
+    assert "version" in payload
+
+
+def test_health_fail_returns_503(db_session, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app as main_app
+    from app.core.database import get_db
+
+    def raise_db_error(*_args, **_kwargs):
+        raise RuntimeError("DB unavailable")
+
+    monkeypatch.setattr(db_session, "execute", raise_db_error)
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    main_app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(main_app) as test_client:
+            response = test_client.get("/health")
+    finally:
+        main_app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    payload = response.json()
+    assert payload["status"] == "fail"
+    assert "checks" in payload
 
 
 def test_auth_invalid_initdata(client):

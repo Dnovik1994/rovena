@@ -7,7 +7,7 @@ import { useAuth } from "../stores/auth";
 import { AdminTariff } from "../types/admin";
 
 const Subscription = (): JSX.Element => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loadingCheckout, setLoadingCheckout] = useState<number | null>(null);
   const enabled = useMemo(() => Boolean(token), [token]);
@@ -41,8 +41,26 @@ const Subscription = (): JSX.Element => {
   return (
     <section className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Subscription</h2>
-        <p className="text-sm text-slate-400">Тарифы и апгрейд аккаунта.</p>
+        <h2 className="text-xl font-semibold">Подписка</h2>
+        <p className="text-sm text-slate-400">Текущий план и доступные тарифы.</p>
+      </div>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <p className="text-xs uppercase text-slate-400">Текущий тариф</p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-lg font-semibold">{user?.tariff?.name ?? "Free"}</p>
+            <p className="text-xs text-slate-400">
+              Лимиты: аккаунты {user?.tariff?.max_accounts ?? 0}, инвайты/день{" "}
+              {user?.tariff?.max_invites_day ?? 0}
+            </p>
+          </div>
+          <div className="text-sm text-slate-300">
+            {user?.tariff?.price !== null && user?.tariff?.price !== undefined
+              ? `$${user.tariff.price} / month`
+              : "Бесплатный план"}
+          </div>
+        </div>
       </div>
 
       {tariffsQuery.isLoading ? (
@@ -62,6 +80,9 @@ const Subscription = (): JSX.Element => {
               </p>
               <p className="mt-2 text-2xl font-semibold">
                 {tariff.price !== null ? `$${tariff.price}` : "Free"}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">
+                Лимиты: аккаунты {tariff.max_accounts}, инвайты/день {tariff.max_invites_day}
               </p>
               <button
                 type="button"
