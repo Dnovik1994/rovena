@@ -127,3 +127,57 @@ docker compose -f docker-compose.prod.yml pull
 docker images | grep -E "traefik|prom/prometheus|grafana/grafana|prom/blackbox-exporter"
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+## 11) Docker socket exposure (production guard)
+
+### Правило
+- **Прямой mount `/var/run/docker.sock` запрещён в production compose** для всех сервисов, **кроме** `docker-socket-proxy` (только `:ro`).
+- **Traefik общается с Docker только через `docker-socket-proxy` по TCP**, прямой доступ к сокету запрещён.
+- **`privileged: true` запрещён в production compose**, если нет критичной технической причины.
+
+### Почему
+- Проброс Docker socket даёт доступ к root‑уровню хоста, что позволяет эскалацию привилегий и полный takeover окружения при компрометации контейнера.
+- Прокси ограничивает доступ только к нужным read‑only эндпойнтам Docker API.
+
+### Runbook проверки
+```bash
+docker compose -f docker-compose.prod.yml config | rg -n "/var/run/docker.sock|privileged:\\s*true"
+```
+
+### CI enforcement
+- В CI job `compose-validate` правило проверяется автоматически (запрещён `privileged: true` и любые mount docker.sock вне `docker-socket-proxy`; доступ остаётся только у `docker-socket-proxy` и только `:ro`).
+
+## 12) Network isolation (production)
+
+### Схема сетей (prod)
+| Service | Networks | Зачем |
+| --- | --- | --- |
+| traefik | public, app, infra | Публичный вход (80/443), маршрутизация к app, доступ к docker-socket-proxy. |
+| docker-socket-proxy | infra | Доступен только Traefik для Docker provider. |
+| frontend | app | Доступен Traefik для веб-трафика. |
+| backend | app, data | API для Traefik и доступ к DB/Redis. |
+| worker | data | Фоновая обработка с доступом к DB/Redis. |
+| proxy | app | Внутренний прокси, доступен backend/Traefik при необходимости. |
+| db | data | База данных доступна только сервисам data. |
+| redis | data | Redis доступен только сервисам data. |
+| prometheus | monitor, app | Сбор метрик и доступ к backend/proxy и blackbox-exporter. |
+| grafana | monitor | UI метрик в мониторинговой сети. |
+| blackbox-exporter | monitor | Черный ящик мониторинга в monitor. |
+| cron | data | Бэкапы с доступом к DB/Redis. |
+
+### Runbook проверки
+```bash
+docker compose -f docker-compose.prod.yml config
+docker network inspect <network_name>
+```
+
+### Почему так
+- Разделение сетей ограничивает east‑west доступ: сервисы видят только нужные зависимости.
+- Публичная сеть (`public`) используется только Traefik.
+- Доступ к Docker socket ограничен сетью `infra` между Traefik и docker-socket-proxy.
+- Сети `app`, `data`, `monitor`, `infra` объявлены как `internal: true`, чтобы ограничить внешний доступ и egress вне Docker‑сети; доступ извне возможен только через опубликованные порты/маршрутизацию.
+
+### Как добавлять осознанно (dev/override)
+1. Добавьте mount в `docker-compose.override.yml` только для нужного сервиса.
+2. Добавьте комментарий рядом с mount/`privileged` с обоснованием (зачем и на какой срок).
+3. Отразите изменение в этом разделе (краткая причина и сервис).

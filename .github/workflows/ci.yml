@@ -15,7 +15,51 @@ jobs:
           set -euo pipefail
           docker compose -f docker-compose.yml config
           docker compose -f docker-compose.override.yml config
-          docker compose -f docker-compose.prod.yml config
+          docker compose -f docker-compose.prod.yml config > /tmp/compose-prod.yml
+          python - <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          try:
+              import yaml  # type: ignore
+          except ModuleNotFoundError:  # pragma: no cover
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "pyyaml"])
+              import yaml  # type: ignore
+
+          config_text = Path("/tmp/compose-prod.yml").read_text()
+          config = yaml.safe_load(config_text) or {}
+          errors = []
+          for name, service in config.get("services", {}).items():
+              if service.get("privileged") is True:
+                  errors.append(f"{name} uses privileged: true")
+              networks = service.get("networks") or {}
+              if isinstance(networks, list):
+                  networks = {network: {} for network in networks}
+              if name in {"db", "redis"} and "public" in networks:
+                  errors.append(f"{name} is attached to public network")
+              for volume in service.get("volumes", []) or []:
+                  source = None
+                  read_only = False
+                  if isinstance(volume, str):
+                      parts = volume.split(":")
+                      if len(parts) >= 2:
+                          source = parts[0]
+                          read_only = "ro" in parts[2:]
+                  elif isinstance(volume, dict):
+                      source = volume.get("source")
+                      read_only = volume.get("read_only") is True or volume.get("mode") == "ro"
+                  if source == "/var/run/docker.sock":
+                      if name != "docker-socket-proxy":
+                          errors.append(f"{name} mounts docker.sock")
+                      if not read_only:
+                          errors.append("docker-socket-proxy docker.sock mount is not read-only")
+          if errors:
+              print("Invalid docker.sock/privileged configuration:")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+          PY
       - name: Ensure pinned images
         run: |
           set -euo pipefail
