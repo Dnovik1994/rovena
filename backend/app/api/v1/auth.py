@@ -41,8 +41,14 @@ async def auth_via_telegram(
             detail="Missing user in initData",
         )
 
-    user_payload = json.loads(user_raw)
-    telegram_id = int(user_payload["id"])
+    try:
+        user_payload = json.loads(user_raw)
+        telegram_id = int(user_payload["id"])
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid user data in initData",
+        ) from exc
 
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:

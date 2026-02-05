@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.rbac import require_permission
@@ -28,11 +28,13 @@ def _is_admin(user: User) -> bool:
 async def list_accounts(
     current_user: User = Depends(require_permission("accounts", "list")),
     db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[AccountResponse]:
     query = db.query(Account)
     if not _is_admin(current_user):
         query = query.filter(Account.owner_id == current_user.id)
-    accounts = query.order_by(Account.created_at.desc()).all()
+    accounts = query.order_by(Account.created_at.desc()).offset(offset).limit(limit).all()
     return [AccountResponse.model_validate(account) for account in accounts]
 
 

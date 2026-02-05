@@ -311,10 +311,15 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
         user_id = metadata.get("user_id")
         tariff_id = metadata.get("tariff_id")
         if user_id and tariff_id:
+            try:
+                uid, tid = int(user_id), int(tariff_id)
+            except (ValueError, TypeError):
+                logger.warning("Invalid Stripe metadata", extra={"user_id": user_id, "tariff_id": tariff_id})
+                return {"status": "ok"}
             with SessionLocal() as db:
-                user = db.get(User, int(user_id))
+                user = db.get(User, uid)
                 if user:
-                    user.tariff_id = int(tariff_id)
+                    user.tariff_id = tid
                     db.commit()
 
     return {"status": "ok"}

@@ -1,7 +1,7 @@
 import logging
 import socket
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.rbac import require_permission
@@ -20,8 +20,10 @@ router = APIRouter(tags=["proxies"])
 async def list_proxies(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("proxies", "list")),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[ProxyResponse]:
-    proxies = db.query(Proxy).order_by(Proxy.created_at.desc()).all()
+    proxies = db.query(Proxy).order_by(Proxy.created_at.desc()).offset(offset).limit(limit).all()
     return [ProxyResponse.model_validate(proxy) for proxy in proxies]
 
 

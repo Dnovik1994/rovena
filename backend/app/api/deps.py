@@ -27,7 +27,10 @@ def _cache_key_from_authorization(authorization: str | None) -> str | None:
     user_id = payload.get("sub")
     if not user_id:
         return None
-    return _user_cache_key(int(user_id))
+    try:
+        return _user_cache_key(int(user_id))
+    except (ValueError, TypeError):
+        return None
 
 
 def _serialize_user(user: User) -> dict[str, Any]:
@@ -94,7 +97,12 @@ async def get_current_user(
     if not user_id:
         raise unauthorized("Invalid token payload")
 
-    user = await get_cached_user(db, int(user_id))
+    try:
+        user_id_int = int(user_id)
+    except (ValueError, TypeError) as exc:
+        raise unauthorized("Invalid token payload") from exc
+
+    user = await get_cached_user(db, user_id_int)
     if not user:
         raise unauthorized("User not found")
 

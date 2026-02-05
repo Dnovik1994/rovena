@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
@@ -15,11 +15,15 @@ router = APIRouter(tags=["targets"])
 async def list_targets(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[TargetResponse]:
     targets = (
         db.query(Target)
         .filter(Target.owner_id == current_user.id)
         .order_by(Target.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return [TargetResponse.model_validate(target) for target in targets]
