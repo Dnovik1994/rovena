@@ -175,8 +175,9 @@ const Accounts = (): JSX.Element => {
       setVerifyMessage("Нужен пароль 2FA для завершения проверки.");
       return;
     }
-    if (result.account) {
-      setAccounts((prev) => prev.map((item) => (item.id === accountId ? result.account : item)));
+    if (result.account !== null) {
+      const verifiedAccount = result.account;
+      setAccounts((prev) => prev.map((item) => (item.id === accountId ? verifiedAccount : item)));
       setVerifyMessage("Аккаунт подтверждён через Telegram.");
     }
   };
@@ -277,6 +278,8 @@ const Accounts = (): JSX.Element => {
         <div className="space-y-3">
           {accounts.map((account) => {
             const progress = formatProgress(account);
+            const deviceModel = account.device_config?.device_model;
+            const deviceModelLabel = deviceModel ? String(deviceModel) : null;
             return (
               <div
                 key={account.id}
@@ -297,9 +300,9 @@ const Accounts = (): JSX.Element => {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500">ID: {account.telegram_id}</p>
-                {account.device_config?.device_model && (
+                {deviceModelLabel && (
                   <p className="text-xs text-slate-500">
-                    Device: {String(account.device_config.device_model)}
+                    Device: {deviceModelLabel}
                   </p>
                 )}
                 {account.status === "warming" && (
