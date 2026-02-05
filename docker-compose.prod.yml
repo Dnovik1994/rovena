@@ -128,6 +128,8 @@ services:
       MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
+      # Use liveness endpoint for container health; /health remains readiness.
+      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/openapi.json}
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     depends_on:
@@ -146,6 +148,7 @@ services:
       traefik.http.routers.kass-api.tls.certresolver: le
       traefik.http.services.kass-api.loadbalancer.server.port: "8020"
     healthcheck:
+      # /health is readiness; Docker healthcheck uses liveness endpoint.
       test: ["CMD", "/app/scripts/healthcheck-backend.sh"]
       interval: 10s
       timeout: 5s
@@ -200,7 +203,8 @@ services:
         hard: -1
     depends_on:
       backend:
-        condition: service_healthy
+        # Avoid readiness deadlock: backend health depends on worker readiness.
+        condition: service_started
       db:
         condition: service_healthy
       redis:

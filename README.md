@@ -63,11 +63,13 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 Откройте:
 - Frontend: `https://YOUR_DOMAIN/`
 - Backend healthcheck: `https://YOUR_DOMAIN/health`
+  - Note: `/health` is readiness; Docker healthchecks use `/openapi.json` for liveness to avoid blocking startup.
 
 ## Проверка
 
 - Backend healthcheck (через Traefik): `https://YOUR_DOMAIN/health`
 - Frontend (через Traefik): `https://YOUR_DOMAIN/`
+  - Worker containers use `service_started` on backend to avoid readiness deadlocks.
 
 ## Testing in Production
 
