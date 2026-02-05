@@ -31,7 +31,8 @@ async def auth_via_telegram(
     try:
         data = validate_init_data(payload.init_data)
     except TelegramAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        logger.warning("Telegram auth failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed") from exc
 
     user_raw = data.get("user")
     if not user_raw:

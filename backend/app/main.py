@@ -250,7 +250,8 @@ async def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.error("Health check failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=503, detail="Service unavailable") from exc
 
 
 def _get_git_commit() -> str:
@@ -301,7 +302,8 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
             secret=settings.stripe_webhook_secret,
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        logger.warning("Stripe webhook signature verification failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature") from exc
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
