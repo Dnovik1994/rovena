@@ -17,5 +17,8 @@ def test_ws_broadcast(client):
 
     with client.websocket_connect(f"/ws/status?token={token}") as websocket:
         manager.broadcast_sync({"type": "account_update", "account_id": 1, "status": "warming"})
-        payload = json.loads(websocket.receive_text())
+        for _ in range(3):
+            payload = json.loads(websocket.receive_text())
+            if payload.get("type") != "ping":
+                break
         assert payload["type"] == "account_update"

@@ -2,7 +2,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from app.clients.telegram_client import get_validator_client
+from app.clients.telegram_client import TelegramClientDisabledError, get_validator_client
 from app.core.database import SessionLocal
 from app.models.proxy import Proxy, ProxyStatus
 
@@ -16,7 +16,11 @@ async def validate_proxy(proxy_id: int) -> Proxy | None:
             logger.info("Proxy not found", extra={"proxy_id": proxy_id})
             return None
 
-        client = get_validator_client(proxy)
+        try:
+            client = get_validator_client(proxy)
+        except TelegramClientDisabledError as exc:
+            logger.info("Telegram client disabled for proxy validation", extra={"proxy_id": proxy_id})
+            raise TelegramClientDisabledError from exc
         start = time.monotonic()
         try:
             async with client:

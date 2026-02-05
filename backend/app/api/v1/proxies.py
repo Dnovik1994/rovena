@@ -8,6 +8,7 @@ from app.core.rbac import require_permission
 from app.core.database import get_db
 from app.models.proxy import Proxy
 from app.schemas.proxy import ProxyCreate, ProxyResponse, ProxyUpdate
+from app.clients.telegram_client import TelegramClientDisabledError
 from app.services.proxy_validation import validate_proxy
 from app.workers.tasks import sync_3proxy_config, validate_proxy_task
 
@@ -116,7 +117,13 @@ async def validate_proxy_by_id(
     proxy_id: int,
     current_user=Depends(require_permission("proxies", "validate")),
 ) -> ProxyResponse:
-    proxy = await validate_proxy(proxy_id)
+    try:
+        proxy = await validate_proxy(proxy_id)
+    except TelegramClientDisabledError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Telegram client disabled",
+        ) from exc
     if not proxy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
     return ProxyResponse.model_validate(proxy)

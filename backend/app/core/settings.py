@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
+    telegram_client_enabled: bool | None = None
     telegram_auth_ttl_seconds: int = 0
     sentry_dsn: str = ""
     stripe_secret_key: str = ""
@@ -69,13 +70,15 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     settings = Settings()
+    if settings.telegram_client_enabled is None:
+        settings.telegram_client_enabled = bool(settings.telegram_api_id and settings.telegram_api_hash)
     if settings.production and settings.jwt_secret == "change-me":
         raise ValueError("Change JWT_SECRET!")
 
     if settings.production:
         if settings.database_url == "mysql+pymysql://rovena:rovena@db:3306/rovena":
             raise ValueError("Change DATABASE_URL!")
-        if not settings.telegram_api_id or not settings.telegram_api_hash:
+        if settings.telegram_client_enabled and (not settings.telegram_api_id or not settings.telegram_api_hash):
             raise ValueError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH!")
         if settings.stripe_secret_key or settings.stripe_webhook_secret:
             if not settings.stripe_secret_key or not settings.stripe_webhook_secret:

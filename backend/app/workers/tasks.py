@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from celery import current_task
 
-from app.clients.telegram_client import get_client
+from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.core.database import SessionLocal
 from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
@@ -134,7 +134,19 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
 
         for account in accounts:
             proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-            client = get_client(account, proxy)
+            try:
+                client = get_client(account, proxy)
+            except TelegramClientDisabledError as exc:
+                _log_dispatch_error(
+                    db,
+                    campaign.id,
+                    account.id,
+                    None,
+                    DispatchErrorType.other,
+                    str(exc),
+                    owner_id=campaign.owner_id,
+                )
+                continue
             try:
                 async with client:
                     for contact in contacts:
@@ -283,7 +295,11 @@ async def _run_account_health_check(account_id: int) -> None:
             return
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-        client = get_client(account, proxy)
+        try:
+            client = get_client(account, proxy)
+        except TelegramClientDisabledError:
+            _set_account_cooldown(db, account, 300)
+            return
 
         try:
             async with client:
@@ -347,7 +363,11 @@ async def _run_warming_cycle(account_id: int) -> None:
             db.commit()
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-        client = get_client(account, proxy)
+        try:
+            client = get_client(account, proxy)
+        except TelegramClientDisabledError:
+            _set_account_cooldown(db, account, 300)
+            return
 
         manager.broadcast_sync(
             {

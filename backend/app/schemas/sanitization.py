@@ -17,7 +17,7 @@ _SQL_STRUCTURAL = re.compile(
 
 # Dangerous HTML/JS patterns (common XSS vectors)
 _XSS_PATTERN = re.compile(
-    r"(<\s*script|javascript\s*:|on\w+\s*=)",
+    r"(javascript\s*:|on\w+\s*=)",
     re.IGNORECASE,
 )
 
