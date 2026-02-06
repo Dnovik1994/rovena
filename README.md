@@ -245,6 +245,11 @@ docker logs frontend | tail -n 50
 docker compose up -d redis worker
 ```
 
+Настройки Celery для воркера задаются через `.env`:
+
+- `CELERY_POOL` (по умолчанию `solo` для dev) — `solo` запускает один процесс.
+- `CELERY_CONCURRENCY` (по умолчанию `1` для `solo`) — число процессов для пулов, отличных от `solo`.
+
 ## 3proxy reload
 
 Синхронизация прокси генерирует `3proxy.cfg` и вызывает reload через SIGUSR1:
