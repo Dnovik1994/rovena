@@ -158,10 +158,12 @@ services:
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
       CELERY_APP: ${CELERY_APP:-app.workers}
+      CELERY_POOL: ${CELERY_POOL:-solo}
+      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
       APP_ROLE: worker
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
-    command: celery -A app.workers worker --loglevel=info
+    command: celery -A app.workers worker --loglevel=info --hostname "celery@%h" --pool "${CELERY_POOL:-solo}" --concurrency "${CELERY_CONCURRENCY:-1}"
     depends_on:
       backend:
         # Avoid readiness deadlock: backend health depends on worker readiness.
