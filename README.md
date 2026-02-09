@@ -130,6 +130,10 @@ curl -I https://YOUR_DOMAIN/api/v1/health
 
 Traefik сам выпускает и обновляет сертификаты; certbot не требуется.
 
+### Traefik/Docker socket proxy
+
+Traefik требует DOCKER_API_VERSION>=1.44 для Docker Engine 29.x; используем 1.44.
+
 ### Troubleshooting: Traefik Docker API incompatibility
 
 **Симптом:** `404` на `https://127.0.0.1/` (или `https://YOUR_DOMAIN/`) и в логах Traefik есть ошибка:
