@@ -45,6 +45,7 @@ services:
     networks:
       - infra
     environment:
+      DOCKER_API_VERSION: "1.44"
       CONTAINERS: "1"
       EVENTS: "1"
       INFO: "1"
@@ -63,10 +64,10 @@ services:
     networks:
       - data
     environment:
-      MYSQL_DATABASE: rovena
-      MYSQL_USER: rovena
-      MYSQL_PASSWORD: rovena
-      MYSQL_ROOT_PASSWORD: rovena_root
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - mysql-data:/var/lib/mysql
       - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
@@ -142,12 +143,23 @@ services:
       com.prometheus.scrape: "true"
       com.prometheus.port: "8020"
       traefik.enable: "true"
+      # основной API
       traefik.http.routers.kass-api.rule: Host(`${DOMAIN}`) && PathPrefix(`/api/v1`)
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "100"
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
       traefik.http.services.kass-api.loadbalancer.server.port: "8020"
+
+      # health (вне /api/v1)
+      traefik.http.routers.kass-health.rule: Host(`${DOMAIN}`) && Path(`/health`)
+      traefik.http.routers.kass-health.entrypoints: websecure
+      traefik.http.routers.kass-health.priority: "110"
+      traefik.http.routers.kass-health.tls: "true"
+      traefik.http.routers.kass-health.tls.certresolver: le
+      traefik.http.services.kass-health.loadbalancer.server.port: "8020"
+
+
     healthcheck:
       # /health is readiness; Docker healthcheck uses liveness endpoint.
       test: ["CMD", "/app/scripts/healthcheck-backend.sh"]
@@ -270,7 +282,7 @@ services:
       traefik.http.services.kass.loadbalancer.server.port: "5173"
 
   prometheus:
-    image: prom/prometheus:2.54.1
+    image: prom/prometheus:v2.54.1
     restart: unless-stopped
     logging: *default-logging
     networks:
