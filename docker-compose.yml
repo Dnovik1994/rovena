@@ -97,7 +97,7 @@ services:
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       APP_ROLE: backend
-      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/health}
+      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/api/v1/health}
     ports:
       - "8020:8020"
     volumes:
