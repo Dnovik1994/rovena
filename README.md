@@ -28,16 +28,21 @@ cp .env.example .env
 3. Запустите сервисы:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker-compose.prod.yml up -d --build
 ```
 
 MySQL init script автоматически создаёт базу rovena при первом запуске.
 
-Для режима разработки (hot-reload) можно использовать override:
+### Команды запуска (dev vs prod)
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.override.yml up --build
-```
+- **Dev (hot-reload):** используйте основной compose + override (только для разработки).
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.override.yml up --build
+  ```
+- **Prod:** используйте только `docker-compose.prod.yml`, без override.
+  ```bash
+  docker compose --env-file .env -f docker-compose.prod.yml up -d --build
+  ```
 
 4. Примените миграции:
 
@@ -63,7 +68,7 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 Откройте:
 - Frontend: `https://YOUR_DOMAIN/`
 - Backend healthcheck: `https://YOUR_DOMAIN/health`
-  - Note: `/health` is readiness; Docker healthchecks use `/openapi.json` for liveness to avoid blocking startup.
+  - Note: `/health` используется для readiness и Docker healthcheck.
 
 ## Проверка
 
