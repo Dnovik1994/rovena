@@ -143,14 +143,12 @@ services:
       com.prometheus.port: "8020"
       traefik.enable: "true"
       # основной API
-      traefik.http.routers.kass-api.rule: Host(`${DOMAIN}`) && PathPrefix(`/api/v1`)
+      traefik.http.routers.kass-api.rule: Host(`kass.freestorms.top`) && PathPrefix(`/api/v1`)
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "100"
-      traefik.http.routers.kass-api.middlewares: kass-api-strip
       traefik.http.routers.kass-api.service: kass-api
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
-      traefik.http.middlewares.kass-api-strip.stripprefix.prefixes: /api/v1
       traefik.http.services.kass-api.loadbalancer.server.port: "8020"
       traefik.http.services.kass-api.loadbalancer.serverstransport: kass-api-transport
       traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.dialtimeout: 30s
@@ -158,7 +156,7 @@ services:
       traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.idletimeout: 120s
 
       # health (вне /api/v1)
-      traefik.http.routers.kass-health.rule: Host(`${DOMAIN}`) && Path(`/health`)
+      traefik.http.routers.kass-health.rule: Host(`kass.freestorms.top`) && Path(`/health`)
       traefik.http.routers.kass-health.entrypoints: websecure
       traefik.http.routers.kass-health.priority: "110"
       traefik.http.routers.kass-health.service: kass-health
@@ -282,7 +280,7 @@ services:
       start_period: 10s
     labels:
       traefik.enable: "true"
-      traefik.http.routers.kass.rule: Host(`${DOMAIN}`) && PathPrefix(`/`) && !PathPrefix(`/api/v1`)
+      traefik.http.routers.kass.rule: Host(`kass.freestorms.top`) && !PathPrefix(`/api/v1`)
       traefik.http.routers.kass.entrypoints: websecure
       traefik.http.routers.kass.tls: "true"
       traefik.http.routers.kass.tls.certresolver: le
