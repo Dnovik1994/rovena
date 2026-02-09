@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-import { apiFetch } from "../services/api";
+import { apiFetch, API_PATHS, ApiError } from "../shared/api/client";
 import { useAuth } from "../stores/auth";
 import { parseJwtExpiry } from "../utils/authStorage";
 import { diagnoseInitData, isTelegramWebApp } from "../utils/telegram";
@@ -38,7 +38,7 @@ const Login = (): JSX.Element => {
         access_token: string;
         refresh_token: string;
         onboarding_needed?: boolean;
-      }>("/auth/telegram", {
+      }>(API_PATHS.telegramAuth, {
         method: "POST",
         body: JSON.stringify({ init_data: status.initData }),
       });
@@ -49,7 +49,11 @@ const Login = (): JSX.Element => {
       );
       setOnboardingNeeded(Boolean(response.onboarding_needed));
     } catch (err) {
-      setError("Не удалось войти через Telegram.");
+      const apiError = err as ApiError;
+      const statusInfo = apiError.status ? `Статус: ${apiError.status}. ` : "";
+      const bodyInfo = apiError.body ? `Ответ: ${apiError.body}` : "";
+      const details = `${statusInfo}${bodyInfo}`.trim();
+      setError(`Не удалось войти через Telegram.${details ? ` ${details}` : ""}`);
     } finally {
       setLoading(false);
     }

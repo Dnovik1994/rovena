@@ -6,7 +6,7 @@ import { Project } from "../types/project";
 import { Source } from "../types/source";
 import { Target } from "../types/target";
 import { DashboardAnalytics } from "../types/analytics";
-import { apiFetch } from "./api";
+import { apiFetch } from "../shared/api/client";
 
 export const fetchProjects = (token: string): Promise<Project[]> => {
   return apiFetch<Project[]>("/projects", {}, token);
