@@ -152,10 +152,6 @@ services:
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
       traefik.http.services.kass-api.loadbalancer.server.port: "8000"
-      traefik.http.services.kass-api.loadbalancer.serverstransport: kass-api-transport
-      traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.dialtimeout: 30s
-      traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.responseheadertimeout: 30s
-      traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.idletimeout: 120s
 
       # health (вне /api/v1)
       traefik.http.routers.kass-health.rule: Host(`kass.freestorms.top`) && Path(`/health`)
