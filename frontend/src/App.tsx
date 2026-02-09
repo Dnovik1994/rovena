@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 
 import AppShell from "./components/AppShell";
 import ErrorBoundary from "./components/ErrorBoundary";
+import TelegramWebAppGuard from "./components/TelegramWebAppGuard";
 import Accounts from "./pages/Accounts";
 import Campaigns from "./pages/Campaigns";
 import Contacts from "./pages/Contacts";
@@ -83,6 +84,9 @@ const App = (): JSX.Element => {
 
     const updateTheme = () => applyTelegramTheme(telegram.themeParams);
 
+    telegram.ready();
+    telegram.expand?.();
+    updateTheme();
     telegram.onEvent("themeChanged", updateTheme);
     return () => {
       telegram.offEvent("themeChanged", updateTheme);
@@ -92,9 +96,11 @@ const App = (): JSX.Element => {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <TelegramWebAppGuard>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </TelegramWebAppGuard>
       </AuthProvider>
     </ErrorBoundary>
   );

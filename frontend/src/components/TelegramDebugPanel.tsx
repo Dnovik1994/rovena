@@ -2,7 +2,10 @@ import React from "react";
 import { getTelegramDebugInfo } from "../utils/telegram";
 
 const TelegramDebugPanel = (): JSX.Element | null => {
-  if (!import.meta.env.DEV) {
+  const searchParams = new URLSearchParams(window.location.search);
+  const isDebugEnabled = import.meta.env.DEV || searchParams.get("debug") === "1";
+
+  if (!isDebugEnabled) {
     return null;
   }
 
@@ -22,6 +25,22 @@ const TelegramDebugPanel = (): JSX.Element | null => {
           <tr>
             <td className="pr-2 text-slate-500">initData length</td>
             <td>{info.initDataLength}</td>
+          </tr>
+          <tr>
+            <td className="pr-2 text-slate-500">initDataUnsafe keys</td>
+            <td>{info.initDataUnsafeKeys}</td>
+          </tr>
+          <tr>
+            <td className="pr-2 text-slate-500">user id</td>
+            <td>{info.userId}</td>
+          </tr>
+          <tr>
+            <td className="pr-2 text-slate-500">auth_date</td>
+            <td>{info.authDate}</td>
+          </tr>
+          <tr>
+            <td className="pr-2 text-slate-500">query_id</td>
+            <td>{info.queryId}</td>
           </tr>
           <tr>
             <td className="pr-2 text-slate-500">platform</td>
