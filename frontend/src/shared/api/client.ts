@@ -6,8 +6,11 @@ import {
 } from "../../utils/authStorage";
 
 const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-export const API_BASE_URL =
-  RAW_API_BASE_URL && RAW_API_BASE_URL !== "/" ? RAW_API_BASE_URL : "/api/v1";
+const normalizedApiBaseUrl = RAW_API_BASE_URL?.trim();
+const defaultApiBaseUrl = "/api/v1";
+const resolvedApiBaseUrl =
+  normalizedApiBaseUrl && normalizedApiBaseUrl !== "/" ? normalizedApiBaseUrl : defaultApiBaseUrl;
+export const API_BASE_URL = resolvedApiBaseUrl.replace(/\/+$/, "");
 
 /** Default request timeout in milliseconds. */
 const DEFAULT_TIMEOUT_MS = 15_000;
