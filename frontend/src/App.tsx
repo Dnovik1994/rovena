@@ -14,7 +14,7 @@ import Onboarding from "./pages/Onboarding";
 import Projects from "./pages/Projects";
 import Sources from "./pages/Sources";
 import Targets from "./pages/Targets";
-import { apiFetch } from "./services/api";
+import { apiFetch } from "./shared/api/client";
 import { AuthProvider, useAuth } from "./stores/auth";
 import { UserProfile } from "./types/user";
 import { getTelegramWebApp } from "./utils/telegram";
