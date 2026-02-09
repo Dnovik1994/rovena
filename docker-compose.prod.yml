@@ -130,7 +130,9 @@ services:
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       PRODUCTION: "true"
       ENVIRONMENT: production
-      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/health}
+      UVICORN_HOST: ${UVICORN_HOST:-0.0.0.0}
+      UVICORN_PORT: ${UVICORN_PORT:-8000}
+      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8000/health}
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     depends_on:
@@ -140,7 +142,7 @@ services:
         condition: service_healthy
     labels:
       com.prometheus.scrape: "true"
-      com.prometheus.port: "8020"
+      com.prometheus.port: "8000"
       traefik.enable: "true"
       # основной API
       traefik.http.routers.kass-api.rule: Host(`kass.freestorms.top`) && PathPrefix(`/api/v1`)
@@ -149,7 +151,7 @@ services:
       traefik.http.routers.kass-api.service: kass-api
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
-      traefik.http.services.kass-api.loadbalancer.server.port: "8020"
+      traefik.http.services.kass-api.loadbalancer.server.port: "8000"
       traefik.http.services.kass-api.loadbalancer.serverstransport: kass-api-transport
       traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.dialtimeout: 30s
       traefik.http.serverstransports.kass-api-transport.forwardingtimeouts.responseheadertimeout: 30s
@@ -162,7 +164,7 @@ services:
       traefik.http.routers.kass-health.service: kass-health
       traefik.http.routers.kass-health.tls: "true"
       traefik.http.routers.kass-health.tls.certresolver: le
-      traefik.http.services.kass-health.loadbalancer.server.port: "8020"
+      traefik.http.services.kass-health.loadbalancer.server.port: "8000"
 
 
     healthcheck:

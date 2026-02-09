@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.request
 
-url = os.getenv("BACKEND_HEALTH_URL", "http://localhost:8020/health")
+url = os.getenv("BACKEND_HEALTH_URL", "http://localhost:8000/health")
 
 try:
     with urllib.request.urlopen(url, timeout=2) as response:

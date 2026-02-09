@@ -23,7 +23,10 @@ if [[ "${WAIT_FOR_REDIS:-1}" == "1" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-  set -- uvicorn app.main:app --host 0.0.0.0 --port 8020
+  uvicorn_host="${UVICORN_HOST:-${HOST:-0.0.0.0}}"
+  uvicorn_port="${UVICORN_PORT:-${PORT:-8000}}"
+  log "Starting uvicorn on ${uvicorn_host}:${uvicorn_port}"
+  set -- uvicorn app.main:app --host "${uvicorn_host}" --port "${uvicorn_port}"
 fi
 
 terminate() {
