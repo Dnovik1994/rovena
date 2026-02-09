@@ -7,6 +7,7 @@ from app.api.v1 import (
     auth,
     campaigns,
     contacts,
+    health,
     projects,
     proxies,
     sources,
@@ -27,3 +28,4 @@ router.include_router(accounts.router)
 router.include_router(proxies.router)
 router.include_router(admin.router, prefix="/admin")
 router.include_router(analytics.router)
+router.include_router(health.router)
