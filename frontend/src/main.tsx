@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import App from "./App";
 import "./styles/index.css";
+import { getTelegramWebApp } from "./utils/telegram";
 import { applyTelegramTheme } from "./utils/telegramTheme";
 
 const rootElement = document.getElementById("root");
@@ -14,10 +15,9 @@ if (!rootElement) {
 
 const queryClient = new QueryClient();
 
-const telegram = (window as unknown as { Telegram?: { WebApp?: { ready?: () => void; themeParams?: Record<string, string> } } }).Telegram
-  ?.WebApp;
+const telegram = getTelegramWebApp();
 if (telegram) {
-  telegram.ready?.();
+  telegram.ready();
   applyTelegramTheme(telegram.themeParams);
 }
 
