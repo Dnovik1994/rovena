@@ -132,23 +132,34 @@ Traefik сам выпускает и обновляет сертификаты; 
 
 ### Traefik/Docker socket proxy
 
-Traefik требует DOCKER_API_VERSION>=1.44 для Docker Engine 29.x; используем 1.44.
+Traefik общается с Docker Engine через `docker-socket-proxy` (HAProxy, фильтрует API-запросы).
 
 ### Troubleshooting: Traefik Docker API incompatibility
 
-**Симптом:** `404` на `https://127.0.0.1/` (или `https://YOUR_DOMAIN/`) и в логах Traefik есть ошибка:
+**Симптом:** в логах Traefik:
 `client version 1.24 is too old. Minimum supported API version is 1.44`.
 
-**Причина:** Traefik стартует без явного endpoint Docker API и уходит в несовместимый путь/клиент, из-за чего провайдер Docker не может читать `docker.sock`, и роутеры не обнаруживаются.
+**Причина:** Traefik v2.x жёстко прописывает `DockerAPIVersion = "1.24"` в исходном коде Go
+и игнорирует переменную окружения `DOCKER_API_VERSION`. Docker Engine 27+ (API >= 1.44)
+отклоняет запросы с версией 1.24. Переменная `DOCKER_API_VERSION` **не помогает** — Traefik
+её не читает (использует `client.WithVersion()`, а не `client.FromEnv`).
 
-**Исправление:** задать endpoint Docker API для провайдера Traefik (предпочтительно через флаг `--providers.docker.endpoint=unix:///var/run/docker.sock`, либо через `DOCKER_HOST=unix:///var/run/docker.sock`). Псевдо-фикс через одиночный `DOCKER_API_VERSION` не решает проблему.
+**Исправление:** обновить Traefik до **v3.6.1+**, где реализовано автоматическое согласование
+версии Docker API (auto-negotiation). См. [traefik/traefik#12253](https://github.com/traefik/traefik/issues/12253).
 
-**Проверка после фикса (пересоздать Traefik и проверить docker provider):**
+**Проверка после фикса:**
 ```bash
-docker compose --env-file .env -f docker-compose.prod.yml config | sed -n '/^  traefik:/,/^  [A-Za-z0-9_-]\+:/p' | grep -nE 'image:|command:|providers.docker.endpoint'
-docker compose --env-file .env -f docker-compose.prod.yml up -d --force-recreate --no-deps traefik
-docker compose --env-file .env -f docker-compose.prod.yml logs --tail=200 traefik | grep -F "client version 1.24 is too old" && exit 1 || true
-bash scripts/verify-traefik-docker-provider.sh
+# 1. Проверить версию Traefik
+docker exec rovena-traefik-1 traefik version
+# Ожидаем: Version >= 3.6.1
+
+# 2. Проверить отсутствие ошибок API version
+docker logs --since=5m rovena-traefik-1 | grep -F "client version 1.24"
+# Ожидаем: пустой вывод (ошибок нет)
+
+# 3. Проверить что Docker provider работает (роутеры обнаружены)
+docker logs --since=5m rovena-traefik-1 | grep -iE "error|router"
+# Ожидаем: нет ошибок провайдера
 ```
 
 ## Production deploy checklist
