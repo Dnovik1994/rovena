@@ -65,6 +65,20 @@ class Settings(BaseSettings):
                 return [parsed.strip()] if parsed.strip() else []
         return []
 
+    @field_validator("api_v1_prefix", mode="before")
+    @classmethod
+    def normalize_api_v1_prefix(cls, value: object) -> str:
+        if value is None:
+            return "/api/v1"
+        if isinstance(value, str):
+            cleaned = value.strip() or "/api/v1"
+            if not cleaned.startswith("/"):
+                cleaned = f"/{cleaned}"
+            if cleaned != "/" and cleaned.endswith("/"):
+                cleaned = cleaned.rstrip("/")
+            return cleaned
+        return "/api/v1"
+
 
 @lru_cache
 
