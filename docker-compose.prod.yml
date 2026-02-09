@@ -146,6 +146,7 @@ services:
       traefik.http.routers.kass-api.rule: Host(`${DOMAIN}`) && PathPrefix(`/api/v1`)
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "100"
+      traefik.http.routers.kass-api.service: kass-api
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
       traefik.http.services.kass-api.loadbalancer.server.port: "8020"
@@ -154,6 +155,7 @@ services:
       traefik.http.routers.kass-health.rule: Host(`${DOMAIN}`) && Path(`/health`)
       traefik.http.routers.kass-health.entrypoints: websecure
       traefik.http.routers.kass-health.priority: "110"
+      traefik.http.routers.kass-health.service: kass-health
       traefik.http.routers.kass-health.tls: "true"
       traefik.http.routers.kass-health.tls.certresolver: le
       traefik.http.services.kass-health.loadbalancer.server.port: "8020"
