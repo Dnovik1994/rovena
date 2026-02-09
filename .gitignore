@@ -1,5 +1,7 @@
 .env
 letsencrypt/
+node_modules/
+dist/
 
 # local backups
 docker-compose.prod.yml.bak.*
