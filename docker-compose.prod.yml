@@ -128,8 +128,9 @@ services:
       MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
-      # Use liveness endpoint for container health; /health remains readiness.
-      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/openapi.json}
+      PRODUCTION: "true"
+      ENVIRONMENT: production
+      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/health}
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     depends_on:
@@ -191,6 +192,8 @@ services:
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
       CELERY_APP: ${CELERY_APP:-app.workers}
+      PRODUCTION: "true"
+      ENVIRONMENT: production
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     command: celery -A app.workers worker --loglevel=info
@@ -308,7 +311,7 @@ services:
       start_period: 15s
 
   blackbox-exporter:
-    image: prom/blackbox-exporter:0.25.0
+    image: quay.io/prometheus/blackbox-exporter:v0.25.0
     restart: unless-stopped
     logging: *default-logging
     networks:

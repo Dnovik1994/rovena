@@ -97,8 +97,7 @@ services:
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       APP_ROLE: backend
-      # Use liveness endpoint for container health; /health remains readiness.
-      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/openapi.json}
+      BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/health}
     ports:
       - "8020:8020"
     volumes:
@@ -109,7 +108,6 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # /health is readiness; Docker healthcheck uses liveness endpoint.
       test: ["CMD", "/app/scripts/healthcheck-backend.sh"]
       interval: 10s
       timeout: 5s
