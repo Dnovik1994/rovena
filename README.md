@@ -392,9 +392,40 @@ NO_PROXY=localhost,127.0.0.1,*.local
 
 Эти переменные будут прокинуты в backend/frontend/worker через Docker Compose.
 
-## Локальная авторизация
+## Как правильно открыть Mini App (initData)
 
-В Telegram WebApp `initData` берётся автоматически. Для локальной разработки укажите `VITE_TG_INIT_DATA` в `.env`. Это позволит пройти `/auth/telegram` и получить токен.
+### Почему `Telegram` undefined в обычном браузере
+
+Объект `window.Telegram.WebApp` создаётся Telegram-клиентом при запуске Mini App.
+Если открыть URL приложения (`https://kass.freestorms.top/`) напрямую в Chrome/Safari/Firefox,
+Telegram SDK загрузится (через `<script>` в `index.html`), но `initData` будет пустой строкой,
+потому что браузер не предоставляет подпись пользователя — это делает только клиент Telegram.
+
+### Как открыть правильно
+
+1. **Через Menu Button бота** — зайдите в чат с ботом → нажмите кнопку «Menu» (слева от поля ввода).
+2. **Через Inline Button** — бот отправляет сообщение с кнопкой типа `web_app`, нажмите на неё.
+3. **Через BotFather** — откройте `@BotFather` → `/mybots` → выберите бота → Bot Settings → Menu Button → укажите URL приложения.
+
+Во всех случаях Telegram откроет встроенный WebView и передаст `initData` с подписью.
+
+### Локальная разработка (без Telegram)
+
+Для локальной разработки, когда `window.Telegram.WebApp` недоступен, задайте переменную окружения:
+
+```bash
+VITE_TG_INIT_DATA="query_id=...&user=...&auth_date=...&hash=..."
+```
+
+Эта переменная используется **только** как fallback, когда Telegram WebApp не обнаружен.
+
+### Диагностика проблем
+
+| Симптом | Причина | Решение |
+|---|---|---|
+| «Telegram WebApp не обнаружен» | Открыто в обычном браузере | Откройте через Telegram-бот |
+| «initData пуст» | URL открыт в Telegram, но не как Mini App | Используйте Menu Button или Inline Button бота |
+| `ReferenceError: Telegram` | Код обращается к `Telegram` без проверки | Обновите код — используйте `window.Telegram?.WebApp` |
 
 ## npm registry blocked (403)
 

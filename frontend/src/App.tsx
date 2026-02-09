@@ -16,6 +16,7 @@ import Targets from "./pages/Targets";
 import { apiFetch } from "./services/api";
 import { AuthProvider, useAuth } from "./stores/auth";
 import { UserProfile } from "./types/user";
+import { getTelegramWebApp } from "./utils/telegram";
 import { applyTelegramTheme } from "./utils/telegramTheme";
 
 const Admin = lazy(() => import("./pages/Admin"));
@@ -75,10 +76,8 @@ const AppRoutes = (): JSX.Element => {
 
 const App = (): JSX.Element => {
   useEffect(() => {
-    const telegram = (window as unknown as { Telegram?: { WebApp?: { onEvent?: (event: string, handler: () => void) => void; offEvent?: (event: string, handler: () => void) => void; themeParams?: Record<string, string> } } }).Telegram
-      ?.WebApp;
-
-    if (!telegram?.onEvent) {
+    const telegram = getTelegramWebApp();
+    if (!telegram) {
       return;
     }
 
@@ -86,7 +85,7 @@ const App = (): JSX.Element => {
 
     telegram.onEvent("themeChanged", updateTheme);
     return () => {
-      telegram.offEvent?.("themeChanged", updateTheme);
+      telegram.offEvent("themeChanged", updateTheme);
     };
   }, []);
 
