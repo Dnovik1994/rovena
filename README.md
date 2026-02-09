@@ -403,11 +403,68 @@ Telegram SDK загрузится (через `<script>` в `index.html`), но 
 
 ### Как открыть правильно
 
-1. **Через Menu Button бота** — зайдите в чат с ботом → нажмите кнопку «Menu» (слева от поля ввода).
+1. **Через Menu Button бота** — зайдите в чат с ботом `@freeinviters_bot` → нажмите кнопку «Menu» (слева от поля ввода).
 2. **Через Inline Button** — бот отправляет сообщение с кнопкой типа `web_app`, нажмите на неё.
-3. **Через BotFather** — откройте `@BotFather` → `/mybots` → выберите бота → Bot Settings → Menu Button → укажите URL приложения.
+3. **Через BotFather** — откройте `@BotFather` → `/mybots` → выберите бота `@freeinviters_bot` → Bot Settings → Menu Button → укажите URL приложения (`https://kass.freestorms.top/`).
 
 Во всех случаях Telegram откроет встроенный WebView и передаст `initData` с подписью.
+
+### Требования к кнопкам бота (WebApp launch)
+
+Все кнопки, открывающие Mini App, должны быть **WebApp-кнопками**, а не обычными URL:
+
+- `InlineKeyboardButton` с полем `web_app`.
+- `ReplyKeyboardButton` с полем `web_app`.
+- `setChatMenuButton` с `type="web_app"`.
+
+URL должен совпадать с доменом, указанным в настройках WebApp для бота (BotFather → Web App).
+Обычные `url`-кнопки откроют браузер и дадут пустой `initData`.
+
+### Smoke-check в консоли Mini App
+
+Откройте Mini App внутри Telegram и выполните в консоли:
+
+```js
+typeof window.Telegram
+window.Telegram.WebApp.version
+window.Telegram.WebApp.initData.length
+```
+
+Ожидаемые значения при корректном запуске:
+
+- `typeof window.Telegram` → `"object"`
+- `window.Telegram.WebApp.version` → строка версии SDK (например, `"6.9"`)
+- `window.Telegram.WebApp.initData.length` → `> 0`
+
+Если открыть URL напрямую в браузере, `window.Telegram` будет `undefined` или `initData.length` будет `0`.
+
+### Debug-панель в UI
+
+Для диагностики можно включить debug-панель:
+
+- В development: доступна автоматически.
+- В production: добавьте `?debug=1` к URL (например, `https://kass.freestorms.top/?debug=1`).
+
+Debug-панель показывает user agent, текущий URL, флаг `isTelegramWebApp`, длину `initData`,
+количество ключей `initDataUnsafe`, а также `user id`, `auth_date`, `query_id`.
+
+### Проверка backend валидации initData
+
+Backend проверяет подпись `initData` и отклоняет запросы без валидной подписи. Пример команды:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/telegram \\
+  -H "Content-Type: application/json" \\
+  -d '{"init_data":"<PASTE_INIT_DATA_HERE>"}'
+```
+
+Ответ `200` с токенами означает успешную валидацию; `401`/`422` — неверный или отсутствующий initData.
+
+### Короткий checklist проверки
+
+- Открыть Mini App через Menu Button бота → debug-панель показывает `isTelegramWebApp=true`, `initData length > 0`.
+- Вызвать `POST /api/v1/auth/telegram` с `initData` → получить `200` и токены.
+- Открыть URL в браузере → увидеть сообщение «Open this app from Telegram...».
 
 ### Локальная разработка (без Telegram)
 

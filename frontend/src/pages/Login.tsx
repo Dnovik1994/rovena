@@ -10,6 +10,7 @@ const Login = (): JSX.Element => {
   const { setToken, setOnboardingNeeded } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const hasDevInitData = import.meta.env.DEV && Boolean(import.meta.env.VITE_TG_INIT_DATA);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -62,7 +63,7 @@ const Login = (): JSX.Element => {
           Авторизуйтесь через Telegram WebApp, чтобы продолжить.
         </p>
 
-        {!isTelegramWebApp() && !import.meta.env.VITE_TG_INIT_DATA && (
+        {!isTelegramWebApp() && !hasDevInitData && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
             Telegram WebApp не обнаружен. Откройте это приложение через
             Telegram-бот (кнопка Menu или Inline Button).
