@@ -282,7 +282,7 @@ services:
       start_period: 10s
     labels:
       traefik.enable: "true"
-      traefik.http.routers.kass.rule: Host(`${DOMAIN}`)
+      traefik.http.routers.kass.rule: Host(`${DOMAIN}`) && PathPrefix(`/`) && !PathPrefix(`/api/v1`)
       traefik.http.routers.kass.entrypoints: websecure
       traefik.http.routers.kass.tls: "true"
       traefik.http.routers.kass.tls.certresolver: le
