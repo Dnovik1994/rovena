@@ -10,11 +10,9 @@ x-3proxy-healthcheck: &proxy-healthcheck ["CMD", "sh", "-lc", "test -s /etc/3pro
 
 services:
   traefik:
-    image: traefik:2.11.8
+    image: traefik:v3.6.1
     restart: unless-stopped
     logging: *default-logging
-    environment:
-      DOCKER_API_VERSION: "1.44"
     networks:
       - public
       - app
@@ -47,7 +45,6 @@ services:
     networks:
       - infra
     environment:
-      DOCKER_API_VERSION: "1.44"
       CONTAINERS: "1"
       EVENTS: "1"
       INFO: "1"
