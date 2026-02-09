@@ -13,6 +13,8 @@ services:
     image: traefik:2.11.8
     restart: unless-stopped
     logging: *default-logging
+    environment:
+      DOCKER_API_VERSION: "1.44"
     networks:
       - public
       - app
