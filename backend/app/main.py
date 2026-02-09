@@ -115,11 +115,19 @@ class ExceptionGroupMiddleware:
 @app.on_event("startup")
 async def on_startup() -> None:
     commit = _get_git_commit()
+    resolved_host = os.getenv("UVICORN_HOST") or os.getenv("HOST") or "0.0.0.0"
+    resolved_port = os.getenv("UVICORN_PORT") or os.getenv("PORT") or "8000"
     logger.info(
         "App starting | version=%s | commit=%s | env=PRODUCTION=%s",
         APP_VERSION,
         commit,
         settings.production,
+    )
+    logger.info(
+        "Resolved API settings | host=%s | port=%s | api_v1_prefix=%s",
+        resolved_host,
+        resolved_port,
+        settings.api_v1_prefix,
     )
     try:
         redis_client = Redis.from_url(settings.redis_url)
