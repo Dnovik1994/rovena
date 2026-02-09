@@ -284,6 +284,7 @@ services:
       traefik.enable: "true"
       traefik.http.routers.kass.rule: Host(`kass.freestorms.top`) && !PathPrefix(`/api/v1`)
       traefik.http.routers.kass.entrypoints: websecure
+      traefik.http.routers.kass.priority: "10"
       traefik.http.routers.kass.tls: "true"
       traefik.http.routers.kass.tls.certresolver: le
       traefik.http.services.kass.loadbalancer.server.port: "5173"
