@@ -11,6 +11,28 @@ request_id_ctx_var: ContextVar[str | None] = ContextVar("request_id", default=No
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        standard_attrs = {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+        }
         payload: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
@@ -20,6 +42,10 @@ class JsonFormatter(logging.Formatter):
         request_id = request_id_ctx_var.get()
         if request_id:
             payload["request_id"] = request_id
+        for key, value in record.__dict__.items():
+            if key in standard_attrs or key in payload:
+                continue
+            payload[key] = value
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)

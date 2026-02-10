@@ -1,7 +1,11 @@
 import json
 import logging
+import time
+from typing import Any
+from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -21,6 +25,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
 
 
+def _extract_init_data_metadata(init_data: str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"auth_date": None, "hash_prefix": None}
+    if not init_data:
+        return metadata
+    try:
+        parsed = dict(parse_qsl(init_data, strict_parsing=False))
+    except ValueError:
+        return metadata
+    hash_value = parsed.get("hash")
+    if hash_value:
+        metadata["hash_prefix"] = hash_value[:8]
+    auth_date_raw = parsed.get("auth_date")
+    if auth_date_raw:
+        try:
+            metadata["auth_date"] = int(auth_date_raw)
+        except ValueError:
+            metadata["auth_date"] = None
+    return metadata
+
+
 @router.post("/auth/telegram", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def auth_via_telegram(
@@ -31,8 +55,29 @@ async def auth_via_telegram(
     try:
         data = validate_init_data(payload.init_data)
     except TelegramAuthError as exc:
-        logger.warning("Telegram auth failed", extra={"error": str(exc)})
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed") from exc
+        init_data = payload.init_data or ""
+        metadata = _extract_init_data_metadata(init_data)
+        logger.warning(
+            "Telegram auth failed",
+            extra={
+                "reason_code": exc.reason_code,
+                "init_data_len": len(init_data),
+                "has_hash": "hash=" in init_data,
+                "hash_prefix": exc.hash_prefix or metadata["hash_prefix"],
+                "auth_date": exc.auth_date or metadata["auth_date"],
+                "server_time": int(time.time()),
+            },
+        )
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "error": {
+                    "code": str(status.HTTP_401_UNAUTHORIZED),
+                    "message": "Authentication failed",
+                    "reason_code": exc.reason_code,
+                }
+            },
+        )
 
     user_raw = data.get("user")
     if not user_raw:

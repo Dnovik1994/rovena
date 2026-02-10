@@ -57,7 +57,14 @@ def test_auth_invalid_initdata(client):
     response = client.post("/api/v1/auth/telegram", json={"init_data": "bad"})
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     body = response.json()
-    assert "error" in body
+    assert body["error"]["message"] == "Authentication failed"
+    assert body["error"]["reason_code"] in {
+        "missing_init_data",
+        "parse_failed",
+        "missing_hash",
+        "hmac_mismatch",
+        "auth_date_expired",
+    }
 
 
 def test_projects_isolated_by_owner(client):
