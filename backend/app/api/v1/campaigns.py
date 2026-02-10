@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/campaigns", response_model=list[CampaignResponse])
-async def list_campaigns(
+def list_campaigns(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -41,7 +41,7 @@ async def list_campaigns(
 
 
 @router.post("/campaigns", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
-async def create_campaign(
+def create_campaign(
     payload: CampaignCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -73,7 +73,7 @@ async def create_campaign(
 
 
 @router.patch("/campaigns/{campaign_id}", response_model=CampaignResponse)
-async def update_campaign(
+def update_campaign(
     campaign_id: int,
     payload: CampaignUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -115,7 +115,7 @@ async def update_campaign(
 
 
 @router.delete("/campaigns/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_campaign(
+def delete_campaign(
     campaign_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -141,7 +141,7 @@ async def delete_campaign(
 @router.post("/campaigns/{campaign_id}/start", response_model=CampaignResponse)
 @limiter.limit("5/minute")
 @limiter.limit(tariff_rate_limit)
-async def start_campaign(
+def start_campaign(
     campaign_id: int,
     request: Request,
     current_user: User = Depends(get_current_active_user),
@@ -197,7 +197,7 @@ async def start_campaign(
 
 
 @router.post("/campaigns/{campaign_id}/stop", response_model=CampaignResponse)
-async def stop_campaign(
+def stop_campaign(
     campaign_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
