@@ -72,10 +72,10 @@ const Contacts = (): JSX.Element => {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Contacts</h2>
-        <p className="text-sm text-slate-400">Контакты аудитории и метки.</p>
+        <h2 className="page__title">Contacts</h2>
+        <p className="page__subtitle">Контакты аудитории и метки.</p>
       </div>
 
       <form
@@ -83,7 +83,7 @@ const Contacts = (): JSX.Element => {
         className="space-y-3 rounded-2xl bg-[var(--tg-theme-secondary-bg)] p-4"
       >
         <div>
-          <label className="text-xs uppercase text-slate-400">Project ID</label>
+          <label className="label">Project ID</label>
           <input
             className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
             type="number"
@@ -94,7 +94,7 @@ const Contacts = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Telegram ID</label>
+          <label className="label">Telegram ID</label>
           <input
             className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
             type="number"
@@ -105,7 +105,7 @@ const Contacts = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Имя</label>
+          <label className="label">Имя</label>
           <input
             className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
             {...register("first_name")}
@@ -115,21 +115,21 @@ const Contacts = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Фамилия</label>
+          <label className="label">Фамилия</label>
           <input
             className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
             {...register("last_name")}
           />
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Username</label>
+          <label className="label">Username</label>
           <input
             className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
             {...register("username")}
           />
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Phone</label>
+          <label className="label">Phone</label>
           <input
             className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
             {...register("phone")}
@@ -137,12 +137,12 @@ const Contacts = (): JSX.Element => {
         </div>
         <button
           type="submit"
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           disabled={isSubmitting}
         >
           {isSubmitting ? "Сохраняем..." : "Добавить контакт"}
         </button>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p className="hint">{error}</p>}
       </form>
 
       {error && !loading && (

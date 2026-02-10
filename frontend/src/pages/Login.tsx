@@ -69,7 +69,7 @@ const Login = (): JSX.Element => {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <section className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-4 text-center">
         <h1 className="text-3xl font-semibold">FreeCRM Inviter</h1>
-        <p className="text-sm text-slate-400">
+        <p className="page__subtitle">
           Авторизуйтесь через Telegram WebApp, чтобы продолжить.
         </p>
 
@@ -82,12 +82,12 @@ const Login = (): JSX.Element => {
 
         <button
           onClick={handleLogin}
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           disabled={loading}
         >
           {loading ? "Подключаем..." : "Войти"}
         </button>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p className="hint">{error}</p>}
 
         <TelegramDebugPanel />
       </section>

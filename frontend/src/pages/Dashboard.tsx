@@ -108,39 +108,39 @@ const Dashboard = (): JSX.Element => {
   }, [campaignsQuery.data]);
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Dashboard</h2>
-        <p className="text-sm text-slate-400">Сводка по проектам, аккаунтам и кампаниям.</p>
+        <h2 className="page__title">Dashboard</h2>
+        <p className="page__subtitle">Сводка по проектам, аккаунтам и кампаниям.</p>
       </div>
 
       {hasError ? (
-        <p className="text-sm text-rose-400">Не удалось загрузить сводку.</p>
+        <p className="hint">Не удалось загрузить сводку.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Проекты</p>
+          <div className="card card__body">
+            <p className="label">Проекты</p>
             <p className="mt-2 text-2xl font-semibold">
               {isLoading ? "…" : projectsQuery.data?.length ?? 0}
             </p>
             <p className="text-xs text-slate-400">Активные пространства работы</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Аккаунты</p>
+          <div className="card card__body">
+            <p className="label">Аккаунты</p>
             <p className="mt-2 text-2xl font-semibold">{isLoading ? "…" : accountCounts.total}</p>
             <p className="text-xs text-slate-400">
               Активных: {accountCounts.active} · Прогрев: {accountCounts.warming}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Кампании</p>
+          <div className="card card__body">
+            <p className="label">Кампании</p>
             <p className="mt-2 text-2xl font-semibold">{isLoading ? "…" : campaignCounts.total}</p>
             <p className="text-xs text-slate-400">
               В работе: {campaignCounts.active} · Завершено: {campaignCounts.completed}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Источники & цели</p>
+          <div className="card card__body">
+            <p className="label">Источники & цели</p>
             <p className="mt-2 text-2xl font-semibold">
               {isLoading
                 ? "…"
@@ -154,7 +154,7 @@ const Dashboard = (): JSX.Element => {
       )}
 
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="card card__body">
           <h3 className="text-base font-semibold">Последние кампании</h3>
           {isLoading ? (
             <p className="mt-3 text-sm text-slate-400">Загружаем кампании…</p>
@@ -171,7 +171,7 @@ const Dashboard = (): JSX.Element => {
             </ul>
           )}
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="card card__body">
           <h3 className="text-base font-semibold">Быстрые действия</h3>
           <div className="mt-3 flex flex-col gap-2 text-sm">
             <Link className="rounded-xl border border-slate-700 px-3 py-2 text-left" to="/projects">
@@ -192,7 +192,7 @@ const Dashboard = (): JSX.Element => {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="card card__body">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-semibold">Динамика за 14 дней</h3>
           {analyticsQuery.data && (
@@ -209,7 +209,7 @@ const Dashboard = (): JSX.Element => {
         ) : (
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4">
-              <p className="text-xs uppercase text-slate-400">Новые аккаунты</p>
+              <p className="label">Новые аккаунты</p>
               {hasData(analyticsQuery.data?.accounts_created) ? (
                 <svg className="mt-3 h-10 w-full" viewBox="0 0 120 32" preserveAspectRatio="none">
                   <polyline
@@ -224,7 +224,7 @@ const Dashboard = (): JSX.Element => {
               )}
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4">
-              <p className="text-xs uppercase text-slate-400">Новые кампании</p>
+              <p className="label">Новые кампании</p>
               {hasData(analyticsQuery.data?.campaigns_created) ? (
                 <svg className="mt-3 h-10 w-full" viewBox="0 0 120 32" preserveAspectRatio="none">
                   <polyline

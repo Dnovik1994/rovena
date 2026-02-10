@@ -49,42 +49,37 @@ const AppShell = ({ children, isAdmin = false }: AppShellProps): JSX.Element => 
   }, []);
 
   return (
-    <div className="min-h-screen bg-[var(--tg-theme-bg)] text-[var(--tg-theme-text)]">
+    <div className="app-shell">
       {toastMessage && <Toast message={toastMessage} />}
-      <header className="border-b border-slate-800/60">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+      <header className="app-shell__container" style={{ paddingBottom: 0 }}>
+        <div className="page__header" style={{ alignItems: "center" }}>
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-[var(--tg-theme-hint)]">
+            <p className="label" style={{ marginBottom: 0 }}>
               FreeCRM Inviter
             </p>
-            <h1 className="text-lg font-semibold">Mini App</h1>
+            <h1 className="page__title" style={{ fontSize: "1.2rem" }}>Mini App</h1>
           </div>
           {isAdmin && (
             <NavLink
               to="/admin"
-              className="rounded-full border border-[var(--tg-theme-link)] px-3 py-1 text-xs text-[var(--tg-theme-link)]"
+              className="btn btn--ghost"
             >
               Admin Panel
             </NavLink>
           )}
         </div>
         {!isOnline && (
-          <div className="bg-rose-500/10 px-4 py-2 text-center text-xs text-rose-200">
+          <div className="error" style={{ marginTop: "8px", padding: "10px" }}>
             Offline mode: некоторые данные могут быть недоступны.
           </div>
         )}
-        <nav className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 pb-4">
+        <nav className="nav" style={{ marginTop: "12px" }}>
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                [
-                  "rounded-full px-3 py-1 text-sm",
-                  isActive
-                    ? "bg-[var(--tg-theme-button)] text-[var(--tg-theme-button-text)]"
-                    : "bg-[var(--tg-theme-secondary-bg)] text-[var(--tg-theme-hint)]",
-                ].join(" ")
+                ["nav__item", isActive ? "nav__item--active" : ""].join(" ").trim()
               }
             >
               {item.label}
@@ -92,7 +87,7 @@ const AppShell = ({ children, isAdmin = false }: AppShellProps): JSX.Element => 
           ))}
         </nav>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-6">{children}</main>
+      <main className="app-shell__container app-main">{children}</main>
     </div>
   );
 };

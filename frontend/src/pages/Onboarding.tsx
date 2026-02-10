@@ -57,7 +57,7 @@ const Onboarding = (): JSX.Element => {
   return (
     <section className="mx-auto flex min-h-[70vh] max-w-xl flex-col justify-center gap-6">
       <div>
-        <p className="text-xs uppercase text-slate-400">Onboarding</p>
+        <p className="label">Onboarding</p>
         <h2 className="text-2xl font-semibold">{currentStep.title}</h2>
         <p className="mt-2 text-sm text-slate-400">{currentStep.description}</p>
         <Link
@@ -67,7 +67,7 @@ const Onboarding = (): JSX.Element => {
           {currentStep.linkLabel}
         </Link>
       </div>
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="card card__body">
         <p className="text-xs text-slate-400">
           Шаг {stepIndex + 1} из {steps.length}
         </p>
@@ -89,7 +89,7 @@ const Onboarding = (): JSX.Element => {
         </button>
         <button
           type="button"
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           onClick={handleNext}
           disabled={loading}
         >

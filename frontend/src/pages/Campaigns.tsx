@@ -181,19 +181,19 @@ const Campaigns = (): JSX.Element => {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Campaigns</h2>
-        <p className="text-sm text-slate-400">
+        <h2 className="page__title">Campaigns</h2>
+        <p className="page__subtitle">
           Кампании инвайтинга: запуск и контроль прогресса.
         </p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 rounded-2xl bg-slate-900/60 p-4">
         <div>
-          <label className="text-xs uppercase text-slate-400">Project ID</label>
+          <label className="label">Project ID</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             type="number"
             {...register("project_id")}
           />
@@ -202,26 +202,26 @@ const Campaigns = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Название</label>
+          <label className="label">Название</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("name")}
           />
           {errors.name && <p className="text-xs text-rose-400">Минимум 2 символа.</p>}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div>
-            <label className="text-xs uppercase text-slate-400">Source ID</label>
+            <label className="label">Source ID</label>
             <input
-              className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+              className="input"
               type="number"
               {...register("source_id")}
             />
           </div>
           <div>
-            <label className="text-xs uppercase text-slate-400">Target ID</label>
+            <label className="label">Target ID</label>
             <input
-              className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+              className="input"
               type="number"
               {...register("target_id")}
             />
@@ -229,17 +229,17 @@ const Campaigns = (): JSX.Element => {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div>
-            <label className="text-xs uppercase text-slate-400">Invites/hour</label>
+            <label className="label">Invites/hour</label>
             <input
-              className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+              className="input"
               type="number"
               {...register("max_invites_per_hour")}
             />
           </div>
           <div>
-            <label className="text-xs uppercase text-slate-400">Invites/day</label>
+            <label className="label">Invites/day</label>
             <input
-              className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+              className="input"
               type="number"
               {...register("max_invites_per_day")}
             />
@@ -247,12 +247,12 @@ const Campaigns = (): JSX.Element => {
         </div>
         <button
           type="submit"
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           disabled={isSubmitting}
         >
           {isSubmitting ? "Сохраняем..." : "Создать кампанию"}
         </button>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p className="hint">{error}</p>}
       </form>
 
       {error && !loading && (

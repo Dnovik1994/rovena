@@ -205,7 +205,7 @@ const Admin = (): JSX.Element => {
   });
 
   if (!token) {
-    return <p className="text-sm text-slate-400">Нужна авторизация.</p>;
+    return <p className="page__subtitle">Нужна авторизация.</p>;
   }
 
   if (statsQuery.isLoading && activeTab === "stats") {
@@ -229,10 +229,10 @@ const Admin = (): JSX.Element => {
   });
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Admin Dashboard</h2>
-        <p className="text-sm text-slate-400">Базовые метрики и контроль доступов.</p>
+        <h2 className="page__title">Admin Dashboard</h2>
+        <p className="page__subtitle">Базовые метрики и контроль доступов.</p>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -252,24 +252,24 @@ const Admin = (): JSX.Element => {
 
       {activeTab === "stats" && stats && (
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Users</p>
+          <div className="card card__body">
+            <p className="label">Users</p>
             <p className="text-2xl font-semibold">{stats.users}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Accounts</p>
+          <div className="card card__body">
+            <p className="label">Accounts</p>
             <p className="text-2xl font-semibold">{stats.accounts}</p>
             <p className="text-xs text-slate-400">
               Active: {stats.accounts_active} · Warming: {stats.accounts_warming}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Proxies</p>
+          <div className="card card__body">
+            <p className="label">Proxies</p>
             <p className="text-2xl font-semibold">{stats.proxies}</p>
             <p className="text-xs text-slate-400">Online: {stats.proxies_online}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs uppercase text-slate-400">Campaigns</p>
+          <div className="card card__body">
+            <p className="label">Campaigns</p>
             <p className="text-2xl font-semibold">{stats.campaigns}</p>
             <p className="text-xs text-slate-400">Active: {stats.campaigns_active}</p>
           </div>
@@ -370,7 +370,7 @@ const Admin = (): JSX.Element => {
         <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
           <form onSubmit={onTariffSubmit} className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-xs uppercase text-slate-400">Name</label>
+              <label className="label">Name</label>
               <input
                 className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
                 {...tariffForm.register("name")}
@@ -380,7 +380,7 @@ const Admin = (): JSX.Element => {
               )}
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase text-slate-400">Max accounts</label>
+              <label className="label">Max accounts</label>
               <input
                 className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
                 type="number"
@@ -388,7 +388,7 @@ const Admin = (): JSX.Element => {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase text-slate-400">Max invites / day</label>
+              <label className="label">Max invites / day</label>
               <input
                 className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
                 type="number"
@@ -396,7 +396,7 @@ const Admin = (): JSX.Element => {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase text-slate-400">Price</label>
+              <label className="label">Price</label>
               <input
                 className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
                 type="number"
