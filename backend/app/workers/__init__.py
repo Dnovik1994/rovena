@@ -65,7 +65,18 @@ if celery_pool == "solo":
 else:
     celery_concurrency = int(os.getenv("CELERY_CONCURRENCY", "4"))
 
-celery_app = Celery("app", broker=settings.redis_url, backend=settings.redis_url)
+celery_app = Celery(
+    "app",
+    broker=settings.redis_url,
+    backend=settings.redis_url,
+    # Explicit list of every module that contains @celery_app.task definitions.
+    # autodiscover_tasks only finds modules named "tasks.py" by default,
+    # so non-standard names like tg_auth_tasks.py were silently skipped.
+    include=[
+        "app.workers.tasks",
+        "app.workers.tg_auth_tasks",
+    ],
+)
 celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     broker_pool_limit=1,
@@ -79,8 +90,6 @@ celery_app.conf.update(
         "fanout_patterns": True,
     },
 )
-celery_app.conf.broker_connection_retry_on_startup = True
-celery_app.autodiscover_tasks(["app.workers"])
 logger.info("Task queue ready")
 
 __all__ = [
