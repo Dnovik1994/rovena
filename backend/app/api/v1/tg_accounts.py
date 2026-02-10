@@ -204,7 +204,9 @@ async def get_auth_flow_status(
             detail="Auth flow not found",
         )
 
-    # Re-read account to get the latest status (may have been updated by worker)
+    # Re-read both flow and account to get the latest state
+    # (may have been updated by the Celery worker in a separate session)
+    db.refresh(flow)
     db.refresh(account)
 
     return AuthFlowStatusResponse(

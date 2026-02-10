@@ -79,36 +79,25 @@ def _broadcast_flow_update(flow: TelegramAuthFlow, account_id: int, owner_user_i
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
     t0 = time.monotonic()
+    log = logger.getChild("send_code")
+    ctx = {"account_id": account_id, "flow_id": flow_id}
+
     with SessionLocal() as db:
         account = db.get(TelegramAccount, account_id)
         flow = db.get(TelegramAuthFlow, flow_id)
         if not account or not flow:
-            logger.warning(
-                "send_code: not found | account_id=%s flow_id=%s",
-                account_id, flow_id,
-            )
+            log.warning("not found | %s", ctx)
             return
 
         masked = _mask_phone(account.phone_e164)
+        ctx["phone"] = masked
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
 
+        client = None
         try:
             client = create_tg_account_client(account, proxy, phone=account.phone_e164)
-        except TelegramClientDisabledError:
-            flow.state = AuthFlowState.failed
-            flow.last_error = "Telegram client disabled"
-            account.status = TelegramAccountStatus.error
-            account.last_error = "Telegram client disabled"
-            db.commit()
-            logger.warning(
-                "send_code: client disabled | account_id=%s flow_id=%s phone=%s",
-                account_id, flow_id, masked,
-            )
-            _broadcast_account_update(account)
-            _broadcast_flow_update(flow, account_id, account.owner_user_id)
-            return
+            log.info("client created | %s", ctx)
 
-        try:
             await client.connect()
             sent_code = await client.send_code(account.phone_e164)
 
@@ -122,26 +111,30 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             db.commit()
 
             elapsed = int((time.monotonic() - t0) * 1000)
-            logger.info(
-                "send_code: OK | account_id=%s flow_id=%s phone=%s "
-                "type=%s elapsed_ms=%s",
-                account_id, flow_id, masked,
-                getattr(sent_code, "type", "unknown"), elapsed,
+            log.info(
+                "OK | %s type=%s elapsed_ms=%s",
+                ctx, getattr(sent_code, "type", "unknown"), elapsed,
             )
 
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
+        except TelegramClientDisabledError:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Telegram client disabled"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Telegram client disabled"
+            db.commit()
+            log.warning("client disabled | %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except PhoneNumberInvalid:
             flow.state = AuthFlowState.failed
             flow.last_error = "Invalid phone number"
             account.status = TelegramAccountStatus.error
             account.last_error = "Invalid phone number"
             db.commit()
-            logger.warning(
-                "send_code: PhoneNumberInvalid | account_id=%s flow_id=%s phone=%s",
-                account_id, flow_id, masked,
-            )
+            log.warning("PhoneNumberInvalid | %s", ctx)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except FloodWait as exc:
@@ -149,18 +142,12 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             flow.last_error = f"FloodWait: retry after {exc.value}s"
             account.last_error = f"FloodWait: {exc.value}s"
             db.commit()
-            logger.warning(
-                "send_code: FloodWait | account_id=%s flow_id=%s phone=%s wait=%ss",
-                account_id, flow_id, masked, exc.value,
-            )
+            log.warning("FloodWait | %s wait=%ss", ctx, exc.value)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
-            logger.exception(
-                "send_code: FAILED | account_id=%s flow_id=%s phone=%s error=%s",
-                account_id, flow_id, masked, err_msg,
-            )
+            log.exception("FAILED | %s error=%s", ctx, err_msg)
             flow.state = AuthFlowState.failed
             flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
@@ -169,10 +156,11 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 @celery_app.task(bind=True, max_retries=2)
@@ -186,22 +174,23 @@ def send_code_task(self, account_id: int, flow_id: str) -> None:
 
 async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
     t0 = time.monotonic()
+    log = logger.getChild("confirm_code")
+    ctx = {"account_id": account_id, "flow_id": flow_id}
+
     with SessionLocal() as db:
         account = db.get(TelegramAccount, account_id)
         flow = db.get(TelegramAuthFlow, flow_id)
         if not account or not flow:
-            logger.warning("confirm_code: not found account=%s flow=%s", account_id, flow_id)
+            log.warning("not found | %s", ctx)
             return
 
         masked = _mask_phone(account.phone_e164)
+        ctx["phone"] = masked
 
         if flow.state not in (AuthFlowState.wait_code, AuthFlowState.code_sent):
             flow.last_error = f"Invalid flow state: {flow.state}"
             db.commit()
-            logger.warning(
-                "confirm_code: bad state=%s | account_id=%s flow_id=%s",
-                flow.state, account_id, flow_id,
-            )
+            log.warning("bad state=%s | %s", flow.state, ctx)
             return
 
         if flow.expires_at and flow.expires_at < datetime.now(timezone.utc):
@@ -226,18 +215,12 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             return
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-
-        try:
-            client = create_tg_account_client(account, proxy, phone=account.phone_e164)
-        except TelegramClientDisabledError:
-            flow.state = AuthFlowState.failed
-            flow.last_error = "Telegram client disabled"
-            db.commit()
-            return
-
         phone_code_hash = (flow.meta_json or {}).get("phone_code_hash", "")
 
+        client = None
         try:
+            client = create_tg_account_client(account, proxy, phone=account.phone_e164)
+
             await client.connect()
             # Re-send code to re-establish connection context, then sign in
             try:
@@ -269,10 +252,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             db.commit()
 
             elapsed = int((time.monotonic() - t0) * 1000)
-            logger.info(
-                "confirm_code: OK | account_id=%s flow_id=%s phone=%s elapsed_ms=%s",
-                account_id, flow_id, masked, elapsed,
-            )
+            log.info("OK | %s elapsed_ms=%s", ctx, elapsed)
 
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -284,17 +264,15 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             flow.last_error = None
 
             # Save the partial session so we can continue with password
-            try:
-                session_string = await client.export_session_string()
-                account.session_encrypted = encrypt_session(session_string)
-            except Exception:
-                pass
+            if client is not None:
+                try:
+                    session_string = await client.export_session_string()
+                    account.session_encrypted = encrypt_session(session_string)
+                except Exception:
+                    pass
 
             db.commit()
-            logger.info(
-                "confirm_code: 2FA required | account_id=%s flow_id=%s phone=%s",
-                account_id, flow_id, masked,
-            )
+            log.info("2FA required | %s", ctx)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -302,10 +280,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             flow.last_error = "Invalid verification code"
             account.last_error = "Invalid verification code"
             db.commit()
-            logger.warning(
-                "confirm_code: PhoneCodeInvalid | account_id=%s flow_id=%s",
-                account_id, flow_id,
-            )
+            log.warning("PhoneCodeInvalid | %s", ctx)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except PhoneCodeExpired:
@@ -325,10 +300,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
-            logger.exception(
-                "confirm_code: FAILED | account_id=%s flow_id=%s error=%s",
-                account_id, flow_id, err_msg,
-            )
+            log.exception("FAILED | %s error=%s", ctx, err_msg)
             flow.state = AuthFlowState.failed
             flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
@@ -337,10 +309,11 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 @celery_app.task(bind=True, max_retries=1)
@@ -354,18 +327,23 @@ def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
 
 async def _run_confirm_password(account_id: int, flow_id: str, password: str) -> None:
     t0 = time.monotonic()
+    log = logger.getChild("confirm_password")
+    ctx = {"account_id": account_id, "flow_id": flow_id}
+
     with SessionLocal() as db:
         account = db.get(TelegramAccount, account_id)
         flow = db.get(TelegramAuthFlow, flow_id)
         if not account or not flow:
-            logger.warning("confirm_password: not found account=%s flow=%s", account_id, flow_id)
+            log.warning("not found | %s", ctx)
             return
 
         masked = _mask_phone(account.phone_e164)
+        ctx["phone"] = masked
 
         if flow.state != AuthFlowState.wait_password:
             flow.last_error = f"Invalid flow state for password: {flow.state}"
             db.commit()
+            log.warning("bad state=%s | %s", flow.state, ctx)
             return
 
         flow.attempts += 1
@@ -381,15 +359,10 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
 
+        client = None
         try:
             client = create_tg_account_client(account, proxy, phone=account.phone_e164)
-        except TelegramClientDisabledError:
-            flow.state = AuthFlowState.failed
-            flow.last_error = "Telegram client disabled"
-            db.commit()
-            return
 
-        try:
             await client.connect()
             await client.check_password(password)
 
@@ -411,10 +384,7 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             db.commit()
 
             elapsed = int((time.monotonic() - t0) * 1000)
-            logger.info(
-                "confirm_password: OK | account_id=%s flow_id=%s phone=%s elapsed_ms=%s",
-                account_id, flow_id, masked, elapsed,
-            )
+            log.info("OK | %s elapsed_ms=%s", ctx, elapsed)
 
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -424,9 +394,11 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
                 flow.last_error = "Invalid 2FA password"
                 account.last_error = "Invalid 2FA password"
             else:
-                flow.last_error = str(exc)[:500]
-                account.last_error = str(exc)[:500]
+                err = _sanitize_error(str(exc)[:500])
+                flow.last_error = err
+                account.last_error = err
             db.commit()
+            log.warning("BadRequest | %s", ctx)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except FloodWait as exc:
@@ -437,10 +409,7 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
 
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
-            logger.exception(
-                "confirm_password: FAILED | account_id=%s flow_id=%s error=%s",
-                account_id, flow_id, err_msg,
-            )
+            log.exception("FAILED | %s error=%s", ctx, err_msg)
             flow.state = AuthFlowState.failed
             flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
@@ -449,10 +418,11 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
 
 @celery_app.task(bind=True, max_retries=1)
