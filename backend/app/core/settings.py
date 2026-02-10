@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     web_base_url: str = "http://localhost:5173"
 
+    admin_user_id: int | None = None
+    admin_telegram_id: int | None = None
+    admin_email: str = ""
+
     proxy_config_path: str = "/app/3proxy.cfg"
     proxy_base_port: int = 10000
     proxy_reload_cmd: str = ""

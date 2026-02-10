@@ -130,8 +130,44 @@ async def on_startup() -> None:
         logger.info("Redis connected")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
+    _bootstrap_admin()
     logger.info("Application startup complete")
 
+
+
+
+def _bootstrap_admin() -> None:
+    admin_user_id = settings.admin_user_id
+    admin_telegram_id = settings.admin_telegram_id
+    if admin_user_id is None and admin_telegram_id is None:
+        return
+
+    with SessionLocal() as db:
+        user = None
+        if admin_user_id is not None:
+            user = db.get(User, admin_user_id)
+        if user is None and admin_telegram_id is not None:
+            user = db.query(User).filter(User.telegram_id == admin_telegram_id).first()
+
+        if not user:
+            logger.info("Admin bootstrap skipped; target user not found")
+            return
+
+        changed = False
+        if not user.is_admin:
+            user.is_admin = True
+            changed = True
+        if getattr(user, "role", None) and user.role.value != "admin":
+            from app.models.user import UserRole
+
+            user.role = UserRole.admin
+            changed = True
+
+        if changed:
+            db.commit()
+            logger.info("Admin bootstrap applied", extra={"user_id": user.id})
+        else:
+            logger.info("Admin bootstrap already up to date", extra={"user_id": user.id})
 
 class RequestIdMiddleware:
     def __init__(self, app_instance: FastAPI):
