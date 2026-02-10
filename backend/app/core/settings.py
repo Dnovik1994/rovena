@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     telegram_api_hash: str = ""
     telegram_client_enabled: bool | None = None
     telegram_auth_ttl_seconds: int = 0
+    session_enc_key: str = ""
+    auth_flow_ttl_seconds: int = 300
+    auth_flow_max_attempts: int = 5
     sentry_dsn: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

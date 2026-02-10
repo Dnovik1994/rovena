@@ -12,6 +12,20 @@ export type StatusMessage =
       target_actions?: number;
       cooldown_until?: string | null;
     }
+  | {
+      type: "account_status_changed";
+      account_id: number;
+      status: string;
+      phone?: string;
+      actions_completed?: number;
+      target_actions?: number;
+    }
+  | {
+      type: "auth_flow_updated";
+      account_id: number;
+      flow_id: string;
+      state: string;
+    }
   | { type: "ping" }
   | { type: "campaign_progress"; campaign_id: number; progress: number; success?: number }
   | {
