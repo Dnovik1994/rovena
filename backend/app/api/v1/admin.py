@@ -32,6 +32,13 @@ class AdminCheckoutRequest(BaseModel):
     user_id: int | None = None
 
 
+
+
+@router.get("/me", response_model=UserResponse)
+async def admin_me(
+    current_user: User = Depends(get_current_admin),
+) -> UserResponse:
+    return UserResponse.model_validate(current_user)
 @router.get("/stats")
 async def admin_stats(
     current_user: User = Depends(get_current_admin),

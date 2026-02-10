@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from app.core.cache import get_json, set_json
+from app.core.cache import set_json
 from app.core.settings import get_settings
 
 settings = get_settings()
@@ -56,19 +56,11 @@ def get_db() -> Session:
 async def get_cached_user(db: Session, user_id: int):
     from app.models.user import User
 
-    cache_key = f"user:{user_id}"
-    cached = await get_json(cache_key)
-    if cached:
-        role_value = cached.get("role")
-        if role_value:
-            from app.models.user import UserRole
-
-            cached["role"] = UserRole(role_value)
-        return User(**cached)
-
     user = db.get(User, user_id)
     if not user:
         return None
+
+    cache_key = f"user:{user_id}"
     payload = {
         "id": user.id,
         "telegram_id": user.telegram_id,

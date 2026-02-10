@@ -45,6 +45,43 @@ def test_onboarding_flow(client):
     assert response.json()["onboarding_completed"] is True
 
 
+def test_onboarding_repeated_calls_are_stable(client):
+    user = _create_user(client)
+    token = create_access_token(str(user.id))
+
+    for value in [True, False, True, True, False]:
+        response = client.patch(
+            "/api/v1/users/me/onboarding",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"onboarding_completed": value},
+        )
+        assert response.status_code == 200
+        assert response.json()["onboarding_completed"] is value
+
+
+def test_onboarding_invalidates_user_cache(client, monkeypatch):
+    user = _create_user(client)
+    token = create_access_token(str(user.id))
+
+    deleted_keys = []
+
+    async def fake_delete(key: str) -> None:
+        deleted_keys.append(key)
+
+    from app.api.v1 import users as users_api
+
+    monkeypatch.setattr(users_api, "delete", fake_delete)
+
+    response = client.patch(
+        "/api/v1/users/me/onboarding",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"onboarding_completed": True},
+    )
+
+    assert response.status_code == 200
+    assert deleted_keys == [f"user:{user.id}"]
+
+
 def test_read_me_handles_null_onboarding_completed(client):
     user = _create_user(client)
     user.onboarding_completed = None
