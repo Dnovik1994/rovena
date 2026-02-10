@@ -18,7 +18,7 @@ router = APIRouter(tags=["proxies"])
 
 
 @router.get("/proxies", response_model=list[ProxyResponse])
-async def list_proxies(
+def list_proxies(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("proxies", "list")),
     limit: int = Query(default=100, ge=1, le=500),
@@ -29,7 +29,7 @@ async def list_proxies(
 
 
 @router.post("/proxies", response_model=ProxyResponse, status_code=status.HTTP_201_CREATED)
-async def create_proxy(
+def create_proxy(
     payload: ProxyCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("proxies", "create")),
@@ -51,7 +51,7 @@ async def create_proxy(
 
 
 @router.patch("/proxies/{proxy_id}", response_model=ProxyResponse)
-async def update_proxy(
+def update_proxy(
     proxy_id: int,
     payload: ProxyUpdate,
     db: Session = Depends(get_db),
@@ -78,7 +78,7 @@ async def update_proxy(
 
 
 @router.delete("/proxies/{proxy_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_proxy(
+def delete_proxy(
     proxy_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("proxies", "delete")),
@@ -93,7 +93,7 @@ async def delete_proxy(
 
 
 @router.post("/proxies/validate")
-async def validate_proxy_credentials(
+def validate_proxy_credentials(
     payload: ProxyCreate,
     current_user=Depends(require_permission("proxies", "validate")),
 ) -> dict[str, object]:
