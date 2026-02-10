@@ -1,3 +1,4 @@
+from app.api.deps import get_current_active_user
 from app.core.database import get_db
 from app.core.security import create_access_token
 from app.models.user import User
@@ -42,3 +43,17 @@ def test_onboarding_flow(client):
     )
     assert response.status_code == 200
     assert response.json()["onboarding_completed"] is True
+
+
+def test_read_me_handles_null_onboarding_completed(client):
+    user = _create_user(client)
+    user.onboarding_completed = None
+
+    client.app.dependency_overrides[get_current_active_user] = lambda: user
+    try:
+        response = client.get("/api/v1/me")
+    finally:
+        client.app.dependency_overrides.pop(get_current_active_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["onboarding_completed"] is False
