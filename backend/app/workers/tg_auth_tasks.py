@@ -6,6 +6,8 @@ Each task handles one step of the OTP sign-in flow:
 
 import asyncio
 import logging
+import re
+import time
 from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client
@@ -31,6 +33,28 @@ from app.workers import celery_app
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Configure Redis on the manager so broadcast_sync publishes via Redis
+# (Celery workers are separate processes with no WS clients)
+if settings.redis_url:
+    manager.configure_redis(settings.redis_url)
+
+
+def _mask_phone(phone: str) -> str:
+    """Mask phone number for logging (no PII in logs).
+    '+380501234567' -> '+380*****4567'
+    """
+    if not phone or len(phone) < 8:
+        return "***"
+    return phone[:4] + "*" * (len(phone) - 8) + phone[-4:]
+
+
+_PHONE_RE = re.compile(r"\+\d{7,15}")
+
+
+def _sanitize_error(msg: str) -> str:
+    """Remove any phone numbers from error messages before logging."""
+    return _PHONE_RE.sub("***", msg)
+
 
 def _broadcast_account_update(account: TelegramAccount) -> None:
     manager.broadcast_sync({
@@ -38,7 +62,6 @@ def _broadcast_account_update(account: TelegramAccount) -> None:
         "user_id": account.owner_user_id,
         "account_id": account.id,
         "status": account.status.value if hasattr(account.status, "value") else str(account.status),
-        "phone": account.phone_e164,
     })
 
 
@@ -55,13 +78,18 @@ def _broadcast_flow_update(flow: TelegramAuthFlow, account_id: int, owner_user_i
 # ─── send_code ───────────────────────────────────────────────────────
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
+    t0 = time.monotonic()
     with SessionLocal() as db:
         account = db.get(TelegramAccount, account_id)
         flow = db.get(TelegramAuthFlow, flow_id)
         if not account or not flow:
-            logger.warning("send_code: account=%s flow=%s not found", account_id, flow_id)
+            logger.warning(
+                "send_code: not found | account_id=%s flow_id=%s",
+                account_id, flow_id,
+            )
             return
 
+        masked = _mask_phone(account.phone_e164)
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
 
         try:
@@ -72,6 +100,10 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             account.status = TelegramAccountStatus.error
             account.last_error = "Telegram client disabled"
             db.commit()
+            logger.warning(
+                "send_code: client disabled | account_id=%s flow_id=%s phone=%s",
+                account_id, flow_id, masked,
+            )
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
             return
@@ -89,6 +121,14 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             account.last_error = None
             db.commit()
 
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "send_code: OK | account_id=%s flow_id=%s phone=%s "
+                "type=%s elapsed_ms=%s",
+                account_id, flow_id, masked,
+                getattr(sent_code, "type", "unknown"), elapsed,
+            )
+
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -98,6 +138,10 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             account.status = TelegramAccountStatus.error
             account.last_error = "Invalid phone number"
             db.commit()
+            logger.warning(
+                "send_code: PhoneNumberInvalid | account_id=%s flow_id=%s phone=%s",
+                account_id, flow_id, masked,
+            )
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except FloodWait as exc:
@@ -105,13 +149,22 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             flow.last_error = f"FloodWait: retry after {exc.value}s"
             account.last_error = f"FloodWait: {exc.value}s"
             db.commit()
+            logger.warning(
+                "send_code: FloodWait | account_id=%s flow_id=%s phone=%s wait=%ss",
+                account_id, flow_id, masked, exc.value,
+            )
+            _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except Exception as exc:
-            logger.exception("send_code failed | account=%s", account_id)
+            err_msg = _sanitize_error(str(exc)[:500])
+            logger.exception(
+                "send_code: FAILED | account_id=%s flow_id=%s phone=%s error=%s",
+                account_id, flow_id, masked, err_msg,
+            )
             flow.state = AuthFlowState.failed
-            flow.last_error = str(exc)[:500]
+            flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
-            account.last_error = str(exc)[:500]
+            account.last_error = err_msg
             db.commit()
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -126,11 +179,13 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
 def send_code_task(self, account_id: int, flow_id: str) -> None:
     logger.info("send_code_task started | account_id=%s flow_id=%s", account_id, flow_id)
     asyncio.run(_run_send_code(account_id, flow_id))
+    logger.info("send_code_task finished | account_id=%s flow_id=%s", account_id, flow_id)
 
 
 # ─── confirm_code ────────────────────────────────────────────────────
 
 async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
+    t0 = time.monotonic()
     with SessionLocal() as db:
         account = db.get(TelegramAccount, account_id)
         flow = db.get(TelegramAuthFlow, flow_id)
@@ -138,9 +193,15 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             logger.warning("confirm_code: not found account=%s flow=%s", account_id, flow_id)
             return
 
+        masked = _mask_phone(account.phone_e164)
+
         if flow.state not in (AuthFlowState.wait_code, AuthFlowState.code_sent):
             flow.last_error = f"Invalid flow state: {flow.state}"
             db.commit()
+            logger.warning(
+                "confirm_code: bad state=%s | account_id=%s flow_id=%s",
+                flow.state, account_id, flow_id,
+            )
             return
 
         if flow.expires_at and flow.expires_at < datetime.now(timezone.utc):
@@ -207,6 +268,12 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             flow.last_error = None
             db.commit()
 
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "confirm_code: OK | account_id=%s flow_id=%s phone=%s elapsed_ms=%s",
+                account_id, flow_id, masked, elapsed,
+            )
+
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -224,6 +291,10 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                 pass
 
             db.commit()
+            logger.info(
+                "confirm_code: 2FA required | account_id=%s flow_id=%s phone=%s",
+                account_id, flow_id, masked,
+            )
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -231,6 +302,10 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             flow.last_error = "Invalid verification code"
             account.last_error = "Invalid verification code"
             db.commit()
+            logger.warning(
+                "confirm_code: PhoneCodeInvalid | account_id=%s flow_id=%s",
+                account_id, flow_id,
+            )
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except PhoneCodeExpired:
@@ -249,11 +324,15 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except Exception as exc:
-            logger.exception("confirm_code failed | account=%s", account_id)
+            err_msg = _sanitize_error(str(exc)[:500])
+            logger.exception(
+                "confirm_code: FAILED | account_id=%s flow_id=%s error=%s",
+                account_id, flow_id, err_msg,
+            )
             flow.state = AuthFlowState.failed
-            flow.last_error = str(exc)[:500]
+            flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
-            account.last_error = str(exc)[:500]
+            account.last_error = err_msg
             db.commit()
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -268,17 +347,21 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
     logger.info("confirm_code_task started | account_id=%s flow_id=%s", account_id, flow_id)
     asyncio.run(_run_confirm_code(account_id, flow_id, code))
+    logger.info("confirm_code_task finished | account_id=%s flow_id=%s", account_id, flow_id)
 
 
 # ─── confirm_password (2FA) ─────────────────────────────────────────
 
 async def _run_confirm_password(account_id: int, flow_id: str, password: str) -> None:
+    t0 = time.monotonic()
     with SessionLocal() as db:
         account = db.get(TelegramAccount, account_id)
         flow = db.get(TelegramAuthFlow, flow_id)
         if not account or not flow:
             logger.warning("confirm_password: not found account=%s flow=%s", account_id, flow_id)
             return
+
+        masked = _mask_phone(account.phone_e164)
 
         if flow.state != AuthFlowState.wait_password:
             flow.last_error = f"Invalid flow state for password: {flow.state}"
@@ -327,6 +410,12 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             flow.last_error = None
             db.commit()
 
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "confirm_password: OK | account_id=%s flow_id=%s phone=%s elapsed_ms=%s",
+                account_id, flow_id, masked, elapsed,
+            )
+
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -347,11 +436,15 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except Exception as exc:
-            logger.exception("confirm_password failed | account=%s", account_id)
+            err_msg = _sanitize_error(str(exc)[:500])
+            logger.exception(
+                "confirm_password: FAILED | account_id=%s flow_id=%s error=%s",
+                account_id, flow_id, err_msg,
+            )
             flow.state = AuthFlowState.failed
-            flow.last_error = str(exc)[:500]
+            flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
-            account.last_error = str(exc)[:500]
+            account.last_error = err_msg
             db.commit()
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -366,3 +459,4 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
 def confirm_password_task(self, account_id: int, flow_id: str, password: str) -> None:
     logger.info("confirm_password_task started | account_id=%s flow_id=%s", account_id, flow_id)
     asyncio.run(_run_confirm_password(account_id, flow_id, password))
+    logger.info("confirm_password_task finished | account_id=%s flow_id=%s", account_id, flow_id)

@@ -90,3 +90,13 @@ class ConfirmPasswordResponse(BaseModel):
     status: TgAccountStatus
     account: TgAccountResponse | None = None
     message: str = ""
+
+
+class AuthFlowStatusResponse(BaseModel):
+    flow_id: str
+    flow_state: str
+    account_status: TgAccountStatus
+    last_error: str | None = None
+    sent_at: datetime | None = None
+    expires_at: datetime | None = None
+    attempts: int = 0

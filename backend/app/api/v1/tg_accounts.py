@@ -16,6 +16,7 @@ from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.models.user import User
 from app.schemas.telegram_account import (
+    AuthFlowStatusResponse,
     ConfirmCodeRequest,
     ConfirmCodeResponse,
     ConfirmPasswordRequest,
@@ -179,6 +180,41 @@ async def send_code(
         flow_id=flow.id,
         status=TgAccountResponse.model_validate(account).status,
         message="Verification code is being sent to your Telegram app",
+    )
+
+
+# ─── AUTH FLOW STATUS (polling endpoint) ──────────────────────────────
+
+@router.get("/{account_id}/auth-flow/{flow_id}", response_model=AuthFlowStatusResponse)
+async def get_auth_flow_status(
+    account_id: int,
+    flow_id: str,
+    current_user: User = Depends(require_permission("tg_accounts", "list")),
+    db: Session = Depends(get_db),
+) -> AuthFlowStatusResponse:
+    """Poll the status of an auth flow.  Used by the frontend after send-code
+    to detect when the Celery task has completed (code_sent / error / etc).
+    """
+    account = _get_account_or_404(db, account_id, current_user)
+
+    flow = db.get(TelegramAuthFlow, flow_id)
+    if not flow or flow.account_id != account.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Auth flow not found",
+        )
+
+    # Re-read account to get the latest status (may have been updated by worker)
+    db.refresh(account)
+
+    return AuthFlowStatusResponse(
+        flow_id=flow.id,
+        flow_state=flow.state.value if hasattr(flow.state, "value") else str(flow.state),
+        account_status=account.status,
+        last_error=flow.last_error,
+        sent_at=flow.sent_at,
+        expires_at=flow.expires_at,
+        attempts=flow.attempts,
     )
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from app.core.database import SessionLocal
@@ -438,3 +440,209 @@ class TestCeleryTaskRegistration:
         assert any("send_code_task" in name for name in task_names)
         assert any("confirm_code_task" in name for name in task_names)
         assert any("confirm_password_task" in name for name in task_names)
+
+
+# ─── Auth flow polling endpoint ───────────────────────────────────
+
+
+class TestAuthFlowPolling:
+    @pytest.fixture(autouse=True)
+    def _disable_rate_limit(self, monkeypatch):
+        """Disable rate limiting so multiple send-code calls don't hit 429."""
+        from app.core.rate_limit import limiter
+        monkeypatch.setattr(limiter, "enabled", False)
+
+    def test_poll_init_state(self, client, db_session, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.send_code_task",
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+        )
+        user = _create_user(db_session, telegram_id=5001)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380505001001"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+        send_resp = client.post(
+            f"/api/v1/tg-accounts/{account_id}/send-code",
+            headers=headers,
+        )
+        flow_id = send_resp.json()["flow_id"]
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/auth-flow/{flow_id}",
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["flow_id"] == flow_id
+        assert data["flow_state"] == "init"
+        assert data["account_status"] == "new"
+
+    def test_poll_wait_code_state(self, client, db_session, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.send_code_task",
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+        )
+        user = _create_user(db_session, telegram_id=5002)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380505002002"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+        send_resp = client.post(
+            f"/api/v1/tg-accounts/{account_id}/send-code",
+            headers=headers,
+        )
+        flow_id = send_resp.json()["flow_id"]
+
+        # Use the db_session (same session the client test uses) to update state
+        flow = db_session.get(TelegramAuthFlow, flow_id)
+        flow.state = AuthFlowState.wait_code
+        flow.sent_at = datetime.now(timezone.utc)
+        account_obj = db_session.get(TelegramAccount, account_id)
+        account_obj.status = TelegramAccountStatus.code_sent
+        db_session.commit()
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/auth-flow/{flow_id}",
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["flow_state"] == "wait_code"
+        assert data["account_status"] == "code_sent"
+        assert data["sent_at"] is not None
+
+    def test_poll_failed_state(self, client, db_session, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.send_code_task",
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+        )
+        user = _create_user(db_session, telegram_id=5003)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380505003003"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+        send_resp = client.post(
+            f"/api/v1/tg-accounts/{account_id}/send-code",
+            headers=headers,
+        )
+        flow_id = send_resp.json()["flow_id"]
+
+        # Update flow to failed state
+        flow = db_session.get(TelegramAuthFlow, flow_id)
+        flow.state = AuthFlowState.failed
+        flow.last_error = "FloodWait: retry after 300s"
+        account_obj = db_session.get(TelegramAccount, account_id)
+        account_obj.last_error = "FloodWait: 300s"
+        db_session.commit()
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/auth-flow/{flow_id}",
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["flow_state"] == "failed"
+        assert "FloodWait" in data["last_error"]
+
+    def test_poll_nonexistent_flow_404(self, client, db_session, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.send_code_task",
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+        )
+        user = _create_user(db_session, telegram_id=5004)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380505004004"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/auth-flow/nonexistent-id",
+            headers=headers,
+        )
+        assert resp.status_code == 404
+
+    def test_poll_other_user_account_404(self, client, db_session, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.send_code_task",
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+        )
+        user = _create_user(db_session, telegram_id=5005)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380505005005"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+        send_resp = client.post(
+            f"/api/v1/tg-accounts/{account_id}/send-code",
+            headers=headers,
+        )
+        flow_id = send_resp.json()["flow_id"]
+
+        other_user = _create_user(db_session, telegram_id=5006)
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/auth-flow/{flow_id}",
+            headers=_auth_headers(other_user),
+        )
+        assert resp.status_code == 404
+
+
+# ─── Phone masking utility ──────────────────────────────────────────
+
+
+class TestPhoneMasking:
+    def test_mask_phone_standard(self):
+        from app.workers.tg_auth_tasks import _mask_phone
+        assert _mask_phone("+380501234567") == "+380*****4567"
+
+    def test_mask_phone_short(self):
+        from app.workers.tg_auth_tasks import _mask_phone
+        assert _mask_phone("+12345") == "***"
+
+    def test_mask_phone_empty(self):
+        from app.workers.tg_auth_tasks import _mask_phone
+        assert _mask_phone("") == "***"
+
+    def test_sanitize_error_removes_phone(self):
+        from app.workers.tg_auth_tasks import _sanitize_error
+        msg = "Error for +380501234567: something failed"
+        result = _sanitize_error(msg)
+        assert "+380501234567" not in result
+        assert "***" in result
+
+
+# ─── WebSocket routing test ────────────────────────────────────────
+
+
+class TestWsRouting:
+    def test_ws_status_not_index_html(self, client):
+        """GET /ws/status must NOT return index.html (SPA fallback).
+        It should return 426 Upgrade Required from the backend."""
+        resp = client.get("/ws/status")
+        assert resp.status_code == 426
+        data = resp.json()
+        assert data["error"]["code"] == "426"
+        assert "WebSocket" in data["error"]["message"]
+
+    def test_ws_upgrade_accepted(self, client, db_session):
+        """WebSocket connection to /ws/status should be accepted with valid token."""
+        user = _create_user(db_session, telegram_id=7001)
+        token = create_access_token(str(user.id))
+        with client.websocket_connect(f"/ws/status?token={token}") as websocket:
+            # Should get a ping within 30s, but we just verify connection works
+            data = websocket.receive_json()
+            assert data["type"] == "ping"

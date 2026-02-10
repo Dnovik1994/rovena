@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -15,6 +15,7 @@ import {
   tgHealthCheck,
   tgWarmup,
   tgRegenerateDevice,
+  getAuthFlowStatus,
 } from "../services/resources";
 import { connectStatusSocket, StatusMessage } from "../services/websocket";
 import { useAuth } from "../stores/auth";
@@ -40,6 +41,11 @@ const passwordSchema = z.object({
   password: z.string().min(1, "Enter your 2FA password"),
 });
 type PasswordFormValues = z.infer<typeof passwordSchema>;
+
+/* ── Polling constants ─────────────────────────────────────────── */
+
+const POLL_INTERVAL_MS = 2_000;
+const POLL_MAX_ATTEMPTS = 30; // 60s max
 
 /* ── Status styling ─────────────────────────────────────────────── */
 
@@ -69,6 +75,16 @@ const statusLabels: Record<string, string> = {
   cooldown: "Cooldown",
 };
 
+/* Flow states that indicate polling is done */
+const TERMINAL_FLOW_STATES = new Set([
+  "wait_code",
+  "code_sent",
+  "wait_password",
+  "done",
+  "expired",
+  "failed",
+]);
+
 /* ── Helper: extract error message ──────────────────────────────── */
 
 function extractError(err: unknown): string {
@@ -90,6 +106,9 @@ const Accounts = (): JSX.Element => {
   // Per-account auth flow state
   const [flowMap, setFlowMap] = useState<Record<number, string>>({}); // account_id -> flow_id
   const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
+  // Track which accounts are waiting for send-code to complete
+  const [pendingAccounts, setPendingAccounts] = useState<Set<number>>(new Set());
+  const pollTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   /* ── Phone form ─── */
   const phoneForm = useForm<PhoneFormValues>({
@@ -105,6 +124,13 @@ const Accounts = (): JSX.Element => {
   const passwordForm = useForm<PasswordFormValues>({
     resolver: zodResolver(passwordSchema),
   });
+
+  /* ── Cleanup poll timers on unmount ─── */
+  useEffect(() => {
+    return () => {
+      Object.values(pollTimersRef.current).forEach(clearTimeout);
+    };
+  }, []);
 
   /* ── Load accounts ─── */
   const load = useCallback(async () => {
@@ -126,6 +152,68 @@ const Accounts = (): JSX.Element => {
   useEffect(() => {
     load();
   }, [load]);
+
+  /* ── Poll flow status after send-code ─── */
+  const startFlowPolling = useCallback(
+    (accountId: number, flowId: string) => {
+      if (!token) return;
+      let attempt = 0;
+
+      const poll = async () => {
+        if (attempt >= POLL_MAX_ATTEMPTS) {
+          setPendingAccounts((prev) => {
+            const next = new Set(prev);
+            next.delete(accountId);
+            return next;
+          });
+          return;
+        }
+        attempt++;
+        try {
+          const status = await getAuthFlowStatus(token, accountId, flowId);
+
+          if (TERMINAL_FLOW_STATES.has(status.flow_state)) {
+            // Update account status from the polling response
+            setAccounts((prev) =>
+              prev.map((a) =>
+                a.id === accountId
+                  ? { ...a, status: status.account_status, last_error: status.last_error }
+                  : a,
+              ),
+            );
+            setPendingAccounts((prev) => {
+              const next = new Set(prev);
+              next.delete(accountId);
+              return next;
+            });
+
+            if (status.flow_state === "failed" || status.flow_state === "expired") {
+              setGlobalError(status.last_error || "Verification failed");
+              setActionMessage(null);
+            } else if (status.flow_state === "wait_code" || status.flow_state === "code_sent") {
+              setActionMessage("Verification code sent. Enter the code below.");
+              setGlobalError(null);
+            } else if (status.flow_state === "wait_password") {
+              setActionMessage("2FA password required. Enter your Telegram cloud password.");
+              setGlobalError(null);
+            }
+            return;
+          }
+        } catch {
+          // Ignore poll errors, will retry
+        }
+        pollTimersRef.current[accountId] = setTimeout(poll, POLL_INTERVAL_MS);
+      };
+
+      // Clear any existing timer for this account
+      if (pollTimersRef.current[accountId]) {
+        clearTimeout(pollTimersRef.current[accountId]);
+      }
+      setPendingAccounts((prev) => new Set(prev).add(accountId));
+      poll();
+    },
+    [token],
+  );
 
   /* ── WebSocket for real-time updates ─── */
   useEffect(() => {
@@ -151,16 +239,36 @@ const Accounts = (): JSX.Element => {
               : item,
           ),
         );
+        // Stop polling if WS already delivered the update
+        if (pendingAccounts.has(message.account_id)) {
+          if (pollTimersRef.current[message.account_id]) {
+            clearTimeout(pollTimersRef.current[message.account_id]);
+          }
+          setPendingAccounts((prev) => {
+            const next = new Set(prev);
+            next.delete(message.account_id);
+            return next;
+          });
+        }
       }
       if (message.type === "auth_flow_updated") {
         // Refresh accounts on flow state changes for fresh data
         load();
+        // Stop polling for this account
+        if (pollTimersRef.current[message.account_id]) {
+          clearTimeout(pollTimersRef.current[message.account_id]);
+        }
+        setPendingAccounts((prev) => {
+          const next = new Set(prev);
+          next.delete(message.account_id);
+          return next;
+        });
       }
     });
     return () => {
       handle.dispose();
     };
-  }, [token, load]);
+  }, [token, load, pendingAccounts]);
 
   /* ── Submit phone ─── */
   const onSubmitPhone = async (values: PhoneFormValues) => {
@@ -190,9 +298,13 @@ const Accounts = (): JSX.Element => {
       const resp = await sendTgCode(token, accountId);
       setFlowMap((prev) => ({ ...prev, [accountId]: resp.flow_id }));
       setActiveAccountId(accountId);
-      setActionMessage(resp.message);
+      setActionMessage("Sending verification code...");
       codeForm.reset();
       passwordForm.reset();
+
+      // Start polling for flow status (primary mechanism)
+      // WebSocket will also deliver updates when available
+      startFlowPolling(accountId, resp.flow_id);
     } catch (err) {
       setGlobalError(extractError(err));
     }
@@ -213,12 +325,10 @@ const Accounts = (): JSX.Element => {
         flow_id: flowId,
         code: values.code,
       });
-      setActionMessage(resp.message);
-      if (resp.needs_password) {
-        setActionMessage("2FA password required. Enter your Telegram cloud password.");
-      }
+      setActionMessage(resp.message || "Verifying code...");
       codeForm.reset();
-      await load();
+      // Poll for result of confirm-code task
+      startFlowPolling(accountId, flowId);
     } catch (err) {
       setGlobalError(extractError(err));
     }
@@ -239,9 +349,10 @@ const Accounts = (): JSX.Element => {
         flow_id: flowId,
         password: values.password,
       });
-      setActionMessage(resp.message);
+      setActionMessage(resp.message || "Verifying password...");
       passwordForm.reset();
-      await load();
+      // Poll for result
+      startFlowPolling(accountId, flowId);
     } catch (err) {
       setGlobalError(extractError(err));
     }
@@ -306,9 +417,11 @@ const Accounts = (): JSX.Element => {
   const canSendCode = (status: TgAccountStatus) =>
     ["new", "error", "disconnected", "code_sent"].includes(status);
 
-  const needsCodeInput = (status: TgAccountStatus) => status === "code_sent";
+  const needsCodeInput = (status: TgAccountStatus, accountId: number) =>
+    status === "code_sent" && !!flowMap[accountId];
 
-  const needsPasswordInput = (status: TgAccountStatus) => status === "password_required";
+  const needsPasswordInput = (status: TgAccountStatus, accountId: number) =>
+    status === "password_required" && !!flowMap[accountId];
 
   const canWarmup = (status: TgAccountStatus) => ["verified", "active"].includes(status);
 
@@ -379,6 +492,7 @@ const Accounts = (): JSX.Element => {
             const deviceModel = account.device_config?.device_model;
             const deviceModelLabel = deviceModel ? String(deviceModel) : null;
             const isActive = activeAccountId === account.id;
+            const isPending = pendingAccounts.has(account.id);
 
             return (
               <div
@@ -399,7 +513,7 @@ const Accounts = (): JSX.Element => {
                   <span
                     className={`text-xs uppercase ${statusStyles[account.status] || "text-slate-300"}`}
                   >
-                    {statusLabels[account.status] || account.status}
+                    {isPending ? "Sending..." : statusLabels[account.status] || account.status}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500">{account.phone_e164}</p>
@@ -430,7 +544,7 @@ const Accounts = (): JSX.Element => {
                 )}
 
                 {/* ── Inline code form ──── */}
-                {isActive && needsCodeInput(account.status) && flowMap[account.id] && (
+                {isActive && needsCodeInput(account.status, account.id) && (
                   <form
                     onSubmit={codeForm.handleSubmit((v) => handleConfirmCode(account.id, v))}
                     className="mt-3 flex gap-2"
@@ -452,7 +566,7 @@ const Accounts = (): JSX.Element => {
                 )}
 
                 {/* ── Inline 2FA password form ──── */}
-                {isActive && needsPasswordInput(account.status) && flowMap[account.id] && (
+                {isActive && needsPasswordInput(account.status, account.id) && (
                   <form
                     onSubmit={passwordForm.handleSubmit((v) =>
                       handleConfirmPassword(account.id, v),
@@ -481,13 +595,18 @@ const Accounts = (): JSX.Element => {
                   {canSendCode(account.status) && (
                     <button
                       type="button"
+                      disabled={isPending}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleSendCode(account.id);
                       }}
-                      className="rounded-lg bg-indigo-500/80 px-3 py-1 text-xs font-semibold text-white"
+                      className="rounded-lg bg-indigo-500/80 px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
                     >
-                      {account.status === "code_sent" ? "Resend Code" : "Send Code"}
+                      {isPending
+                        ? "Sending..."
+                        : account.status === "code_sent"
+                          ? "Resend Code"
+                          : "Send Code"}
                     </button>
                   )}
                   {canWarmup(account.status) && (

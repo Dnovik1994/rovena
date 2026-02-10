@@ -162,6 +162,13 @@ services:
       traefik.http.routers.kass-health.tls.certresolver: le
       traefik.http.services.kass-health.loadbalancer.server.port: "8000"
 
+      # WebSocket /ws/* → backend (must not fall through to frontend catch-all)
+      traefik.http.routers.kass-ws.rule: Host(`kass.freestorms.top`) && PathPrefix(`/ws`)
+      traefik.http.routers.kass-ws.entrypoints: websecure
+      traefik.http.routers.kass-ws.priority: "110"
+      traefik.http.routers.kass-ws.service: kass-api
+      traefik.http.routers.kass-ws.tls: "true"
+      traefik.http.routers.kass-ws.tls.certresolver: le
 
     healthcheck:
       # /health is readiness; Docker healthcheck uses liveness endpoint.

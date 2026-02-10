@@ -30,7 +30,7 @@ from app.core.logging import configure_logging, request_id_ctx_var
 from app.core.rate_limit import limiter
 from app.core.security import decode_access_token
 from app.core.settings import get_settings
-from app.services.websocket_manager import manager
+from app.services.websocket_manager import REDIS_WS_CHANNEL, manager
 from app.core.database import SessionLocal, get_db
 from app.models.account import Account, AccountStatus
 from app.models.user import User
@@ -126,6 +126,9 @@ async def on_startup() -> None:
         resolved_port,
         settings.api_v1_prefix,
     )
+    # Configure WS manager with Redis for cross-process pub/sub
+    if settings.redis_url:
+        manager.configure_redis(settings.redis_url)
     try:
         redis_client = Redis.from_url(settings.redis_url)
         redis_client.ping()
@@ -133,9 +136,44 @@ async def on_startup() -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
     _bootstrap_admin()
+    # Start background Redis subscriber for WS broadcasts from workers
+    if settings.redis_url:
+        asyncio.create_task(_redis_ws_subscriber())
     logger.info("Application startup complete")
 
 
+
+
+async def _redis_ws_subscriber() -> None:
+    """Subscribe to Redis pub/sub channel and relay messages to WebSocket clients.
+
+    Celery workers publish auth flow updates to Redis because they run in a
+    separate process and cannot access the uvicorn-resident WebSocket manager
+    directly.  This task bridges the gap.
+    """
+    import redis.asyncio as aioredis
+
+    try:
+        r = aioredis.from_url(settings.redis_url)
+        pubsub = r.pubsub()
+        await pubsub.subscribe(REDIS_WS_CHANNEL)
+        logger.info("Redis WS subscriber started on channel=%s", REDIS_WS_CHANNEL)
+        async for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
+            try:
+                payload = json.loads(message["data"])
+                user_id = payload.get("user_id")
+                if user_id is not None:
+                    await manager.send_to_user(user_id, payload)
+                else:
+                    await manager.broadcast(payload)
+            except Exception:  # noqa: BLE001
+                logger.exception("Error processing Redis WS message")
+    except asyncio.CancelledError:
+        logger.info("Redis WS subscriber stopped")
+    except Exception:  # noqa: BLE001
+        logger.exception("Redis WS subscriber crashed, WS relay disabled")
 
 
 def _bootstrap_admin() -> None:
