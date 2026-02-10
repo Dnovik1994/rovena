@@ -38,6 +38,14 @@ async def list_accounts(
     return [AccountResponse.model_validate(account) for account in accounts]
 
 
+def _resolve_user_id(db: Session, value: int) -> User | None:
+    """Resolve a value that could be users.id or users.telegram_id to a User."""
+    user = db.get(User, value)
+    if user:
+        return user
+    return db.query(User).filter(User.telegram_id == value).first()
+
+
 @router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
 async def create_account(
     payload: AccountCreate,
@@ -45,7 +53,20 @@ async def create_account(
     tariff_limits: dict[str, int] = Depends(get_tariff_limits),
     db: Session = Depends(get_db),
 ) -> AccountResponse:
-    if not _is_admin(current_user) and payload.user_id != current_user.id:
+    # Resolve user_id: default to current user; if provided, validate it exists
+    if payload.user_id is None:
+        resolved_user_id = current_user.id
+    else:
+        resolved_user = _resolve_user_id(db, payload.user_id)
+        if not resolved_user:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"User not found for user_id={payload.user_id}. "
+                "Provide a valid internal user ID.",
+            )
+        resolved_user_id = resolved_user.id
+
+    if not _is_admin(current_user) and resolved_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     # Enforce tariff account limit at creation time (not just at campaign start)
@@ -61,7 +82,7 @@ async def create_account(
     device_config = payload.device_config or generate_device_config()
 
     account = Account(
-        user_id=payload.user_id,
+        user_id=resolved_user_id,
         owner_id=current_user.id,
         telegram_id=payload.telegram_id,
         phone=payload.phone,

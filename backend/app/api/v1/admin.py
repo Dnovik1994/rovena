@@ -349,10 +349,17 @@ async def admin_create_checkout(
         )
 
     user = current_user
-    if payload.user_id:
+    if payload.user_id is not None:
         user = db.get(User, payload.user_id)
         if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            # Try resolving as telegram_id
+            user = db.query(User).filter(User.telegram_id == payload.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"User not found for user_id={payload.user_id}. "
+                "Provide a valid internal user ID.",
+            )
 
     stripe.api_key = settings.stripe_secret_key
     session = stripe.checkout.Session.create(

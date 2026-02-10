@@ -5,3 +5,4 @@ dist/
 
 # local backups
 docker-compose.prod.yml.bak.*
+__pycache__/

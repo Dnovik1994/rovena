@@ -17,7 +17,7 @@ class AccountStatus(str, Enum):
 
 class AccountCreate(SanitizedModel):
     telegram_id: int
-    user_id: int
+    user_id: int | None = None
     phone: str | None = Field(default=None, max_length=32)
     username: str | None = Field(default=None, max_length=255)
     first_name: str | None = Field(default=None, max_length=255)

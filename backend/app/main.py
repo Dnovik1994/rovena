@@ -22,6 +22,8 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 import stripe
 
+from sqlalchemy.exc import DataError, IntegrityError
+
 from app.api.v1 import router as api_router
 from app.api.v1.health import health_check as v1_health_check
 from app.core.logging import configure_logging, request_id_ctx_var
@@ -262,6 +264,32 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     return JSONResponse(
         status_code=429,
         content={"error": {"code": "429", "message": "Rate limit exceeded"}},
+    )
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
+    logger.warning(
+        "Database integrity error",
+        extra={"path": str(request.url.path), "error": str(exc.orig)},
+    )
+    sentry_sdk.capture_exception(exc)
+    return JSONResponse(
+        status_code=409,
+        content={"error": {"code": "409", "message": "Data conflict: a referenced resource does not exist or a unique constraint was violated"}},
+    )
+
+
+@app.exception_handler(DataError)
+async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
+    logger.warning(
+        "Database data error",
+        extra={"path": str(request.url.path), "error": str(exc.orig)},
+    )
+    sentry_sdk.capture_exception(exc)
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "422", "message": "Invalid data: a field value is out of range or malformed"}},
     )
 
 
