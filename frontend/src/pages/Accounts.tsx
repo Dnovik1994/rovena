@@ -222,6 +222,11 @@ const Accounts = (): JSX.Element => {
   );
 
   /* ── WebSocket for real-time updates ─── */
+  // Use a ref so the WS callback can read the latest pendingAccounts
+  // without causing the effect to re-run (which would reconnect the socket).
+  const pendingAccountsRef = useRef(pendingAccounts);
+  pendingAccountsRef.current = pendingAccounts;
+
   useEffect(() => {
     if (!token) return;
     const handle = connectStatusSocket(token, (message: StatusMessage) => {
@@ -246,7 +251,7 @@ const Accounts = (): JSX.Element => {
           ),
         );
         // Stop polling if WS already delivered the update
-        if (pendingAccounts.has(message.account_id)) {
+        if (pendingAccountsRef.current.has(message.account_id)) {
           if (pollTimersRef.current[message.account_id]) {
             clearTimeout(pollTimersRef.current[message.account_id]);
           }
@@ -274,7 +279,7 @@ const Accounts = (): JSX.Element => {
     return () => {
       handle.dispose();
     };
-  }, [token, load, pendingAccounts]);
+  }, [token, load]);
 
   /* ── Submit phone ─── */
   const onSubmitPhone = async (values: PhoneFormValues) => {

@@ -179,7 +179,7 @@ class TestStateMachine:
         # Mock the celery task to avoid actual execution
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -203,7 +203,7 @@ class TestStateMachine:
     def test_send_code_not_allowed_from_verified(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -231,7 +231,7 @@ class TestStateMachine:
     def test_confirm_code_without_flow_404(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.confirm_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -253,11 +253,11 @@ class TestStateMachine:
     def test_confirm_password_wrong_state(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.confirm_password_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -348,7 +348,7 @@ class TestWarmupGuard:
     def test_warmup_rejected_for_new_account(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.start_warming",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -369,7 +369,7 @@ class TestWarmupGuard:
     def test_warmup_allowed_for_verified(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.start_warming",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -402,7 +402,7 @@ class TestHealthCheckGuard:
     def test_health_check_rejected_for_new(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.account_health_check",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
 
         user = _create_user(db_session)
@@ -455,7 +455,7 @@ class TestAuthFlowPolling:
     def test_poll_init_state(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
         user = _create_user(db_session, telegram_id=5001)
         headers = _auth_headers(user)
@@ -484,7 +484,7 @@ class TestAuthFlowPolling:
     def test_poll_wait_code_state(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
         user = _create_user(db_session, telegram_id=5002)
         headers = _auth_headers(user)
@@ -521,7 +521,7 @@ class TestAuthFlowPolling:
     def test_poll_failed_state(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
         user = _create_user(db_session, telegram_id=5003)
         headers = _auth_headers(user)
@@ -557,7 +557,7 @@ class TestAuthFlowPolling:
     def test_poll_nonexistent_flow_404(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
         user = _create_user(db_session, telegram_id=5004)
         headers = _auth_headers(user)
@@ -577,7 +577,7 @@ class TestAuthFlowPolling:
     def test_poll_other_user_account_404(self, client, db_session, monkeypatch):
         monkeypatch.setattr(
             "app.api.v1.tg_accounts.send_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
         )
         user = _create_user(db_session, telegram_id=5005)
         headers = _auth_headers(user)
