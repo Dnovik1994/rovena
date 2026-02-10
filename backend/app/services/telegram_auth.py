@@ -47,13 +47,18 @@ def validate_init_data(init_data: str) -> dict[str, Any]:
     hash_prefix = hash_value[:8]
 
     data_check_string = _build_data_check_string(parsed)
+    # Telegram WebApp signature algorithm:
+    #   1) secret_key = HMAC_SHA256(key="WebAppData", msg=bot_token)
+    #   2) hash = HMAC_SHA256(key=secret_key, msg=data_check_string)
     secret_key = hmac.new(
-        b"WebAppData",
-        settings.telegram_bot_token.encode("utf-8"),
-        hashlib.sha256,
+        key=b"WebAppData",
+        msg=settings.telegram_bot_token.encode("utf-8"),
+        digestmod=hashlib.sha256,
     ).digest()
     calculated_hash = hmac.new(
-        secret_key, data_check_string.encode("utf-8"), hashlib.sha256
+        key=secret_key,
+        msg=data_check_string.encode("utf-8"),
+        digestmod=hashlib.sha256,
     ).hexdigest()
 
     if not hmac.compare_digest(calculated_hash, hash_value):
