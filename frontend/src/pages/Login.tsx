@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { apiFetch, API_PATHS, ApiError } from "../shared/api/client";
 import { useAuth } from "../stores/auth";
 import { parseJwtExpiry } from "../utils/authStorage";
-import { diagnoseInitData, isTelegramWebApp } from "../utils/telegram";
+import { diagnoseInitData, getTelegramWebApp, isTelegramWebApp } from "../utils/telegram";
 import TelegramDebugPanel from "../components/TelegramDebugPanel";
 
 const Login = (): JSX.Element => {
@@ -16,6 +16,12 @@ const Login = (): JSX.Element => {
     setLoading(true);
     setError(null);
     try {
+      const webapp = getTelegramWebApp();
+      if (import.meta.env.DEV) {
+        const initDataLength = webapp?.initData?.length ?? 0;
+        // eslint-disable-next-line no-console
+        console.log("Telegram initData length:", initDataLength, "non_empty:", initDataLength > 0);
+      }
       const status = diagnoseInitData();
 
       if (status.kind === "no_telegram") {

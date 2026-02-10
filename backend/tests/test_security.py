@@ -25,7 +25,7 @@ def _build_init_data(user_id: int, auth_date: int, bot_token: str) -> str:
         "user": payload,
     }
     data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(data.items()))
-    secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
+    secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
     hash_value = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
     data["hash"] = hash_value
     return urlencode(data)
@@ -49,9 +49,13 @@ def test_inactive_user_blocked(client):
 
 def test_init_data_replay_rejected(client):
     settings = get_settings()
+    previous_token = settings.telegram_bot_token
+    settings.telegram_bot_token = "test-token"
     settings.telegram_auth_ttl_seconds = 1
     old_auth_date = int(time.time()) - 120
     init_data = _build_init_data(98765, old_auth_date, settings.telegram_bot_token)
     response = client.post("/api/v1/auth/telegram", json={"init_data": init_data})
     assert response.status_code == 401
+    assert response.json()["error"]["reason_code"] == "auth_date_expired"
     settings.telegram_auth_ttl_seconds = 0
+    settings.telegram_bot_token = previous_token
