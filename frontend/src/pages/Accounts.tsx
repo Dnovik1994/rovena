@@ -192,17 +192,17 @@ const Accounts = (): JSX.Element => {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Accounts</h2>
-        <p className="text-sm text-slate-400">Назначенные аккаунты Telegram.</p>
+        <h2 className="page__title">Accounts</h2>
+        <p className="page__subtitle">Назначенные аккаунты Telegram.</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 rounded-2xl bg-slate-900/60 p-4">
         <div>
-          <label className="text-xs uppercase text-slate-400">User ID</label>
+          <label className="label">User ID</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             type="number"
             {...register("user_id")}
           />
@@ -211,9 +211,9 @@ const Accounts = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Telegram ID</label>
+          <label className="label">Telegram ID</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             type="number"
             {...register("telegram_id")}
           />
@@ -222,30 +222,30 @@ const Accounts = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Phone</label>
+          <label className="label">Phone</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("phone")}
           />
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Username</label>
+          <label className="label">Username</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("username")}
           />
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">First name</label>
+          <label className="label">First name</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("first_name")}
           />
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Status</label>
+          <label className="label">Status</label>
           <select
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("status")}
           >
             <option value="new">New</option>
@@ -258,12 +258,12 @@ const Accounts = (): JSX.Element => {
         </div>
         <button
           type="submit"
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           disabled={isSubmitting}
         >
           {isSubmitting ? "Сохраняем..." : "Добавить аккаунт"}
         </button>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p className="hint">{error}</p>}
         {verifyMessage && <p className="text-sm text-emerald-300">{verifyMessage}</p>}
       </form>
 

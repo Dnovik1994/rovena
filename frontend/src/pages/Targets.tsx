@@ -70,17 +70,17 @@ const Targets = (): JSX.Element => {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Targets</h2>
-        <p className="text-sm text-slate-400">Целевые группы и каналы.</p>
+        <h2 className="page__title">Targets</h2>
+        <p className="page__subtitle">Целевые группы и каналы.</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 rounded-2xl bg-slate-900/60 p-4">
         <div>
-          <label className="text-xs uppercase text-slate-400">Project ID</label>
+          <label className="label">Project ID</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             type="number"
             {...register("project_id")}
           />
@@ -89,26 +89,26 @@ const Targets = (): JSX.Element => {
           )}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Название</label>
+          <label className="label">Название</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("name")}
           />
           {errors.name && <p className="text-xs text-rose-400">Минимум 2 символа.</p>}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Ссылка</label>
+          <label className="label">Ссылка</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("link")}
             placeholder="https://t.me/group"
           />
           {errors.link && <p className="text-xs text-rose-400">Укажите ссылку.</p>}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Тип</label>
+          <label className="label">Тип</label>
           <select
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("type")}
           >
             <option value="group">Group</option>
@@ -117,12 +117,12 @@ const Targets = (): JSX.Element => {
         </div>
         <button
           type="submit"
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           disabled={isSubmitting}
         >
           {isSubmitting ? "Сохраняем..." : "Добавить цель"}
         </button>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p className="hint">{error}</p>}
       </form>
 
       {loading ? (
@@ -137,7 +137,7 @@ const Targets = (): JSX.Element => {
           {targets.map((target) => (
             <div
               key={target.id}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
+              className="card card__body"
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-semibold">{target.name}</h3>

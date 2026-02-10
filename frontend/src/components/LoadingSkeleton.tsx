@@ -9,8 +9,8 @@ interface LoadingSkeletonProps {
 
 const LoadingSkeleton = ({ rows = 4, label = "Загрузка..." }: LoadingSkeletonProps): JSX.Element => {
   return (
-    <div className="space-y-3">
-      <p className="text-xs uppercase text-slate-500">{label}</p>
+    <div className="loading" style={{ textAlign: "left" }}>
+      <p className="label">{label}</p>
       <SkeletonList rows={rows} />
     </div>
   );

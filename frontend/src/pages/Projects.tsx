@@ -73,28 +73,28 @@ const Projects = (): JSX.Element => {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Projects</h2>
-        <p className="text-sm text-slate-400">
+        <h2 className="page__title">Projects</h2>
+        <p className="page__subtitle">
           Добавляйте проекты и назначайте источники аудитории.
         </p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 rounded-2xl bg-slate-900/60 p-4">
         <div>
-          <label className="text-xs uppercase text-slate-400">Название проекта</label>
+          <label className="label">Название проекта</label>
           <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             {...register("name")}
             placeholder="Например, Crypto Community"
           />
           {errors.name && <p className="text-xs text-rose-400">Минимум 2 символа.</p>}
         </div>
         <div>
-          <label className="text-xs uppercase text-slate-400">Описание</label>
+          <label className="label">Описание</label>
           <textarea
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            className="input"
             rows={3}
             {...register("description")}
             placeholder="Кратко о проекте"
@@ -102,12 +102,12 @@ const Projects = (): JSX.Element => {
         </div>
         <button
           type="submit"
-          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="btn btn--primary"
           disabled={isSubmitting}
         >
           {isSubmitting ? "Сохраняем..." : "Создать проект"}
         </button>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p className="hint">{error}</p>}
       </form>
 
       {loading ? (
@@ -122,7 +122,7 @@ const Projects = (): JSX.Element => {
           {projects.map((project) => (
             <div
               key={project.id}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
+              className="card card__body"
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-semibold">{project.name}</h3>

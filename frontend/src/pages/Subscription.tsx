@@ -35,18 +35,18 @@ const Subscription = (): JSX.Element => {
   };
 
   if (!token) {
-    return <p className="text-sm text-slate-400">Нужна авторизация.</p>;
+    return <p className="page__subtitle">Нужна авторизация.</p>;
   }
 
   return (
-    <section className="space-y-6">
+    <section className="page">
       <div>
-        <h2 className="text-xl font-semibold">Подписка</h2>
-        <p className="text-sm text-slate-400">Текущий план и доступные тарифы.</p>
+        <h2 className="page__title">Подписка</h2>
+        <p className="page__subtitle">Текущий план и доступные тарифы.</p>
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-        <p className="text-xs uppercase text-slate-400">Текущий тариф</p>
+      <div className="card card__body">
+        <p className="label">Текущий тариф</p>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-lg font-semibold">{user?.tariff?.name ?? "Free"}</p>
@@ -66,13 +66,13 @@ const Subscription = (): JSX.Element => {
       {tariffsQuery.isLoading ? (
         <SkeletonList rows={3} />
       ) : tariffsQuery.isError ? (
-        <p className="text-sm text-rose-400">Не удалось загрузить тарифы.</p>
+        <p className="hint">Не удалось загрузить тарифы.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {(tariffsQuery.data ?? []).map((tariff) => (
             <div
               key={tariff.id}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
+              className="card card__body"
             >
               <h3 className="text-lg font-semibold">{tariff.name}</h3>
               <p className="text-xs text-slate-400">
@@ -97,7 +97,7 @@ const Subscription = (): JSX.Element => {
         </div>
       )}
 
-      {error && <p className="text-sm text-rose-400">{error}</p>}
+      {error && <p className="hint">{error}</p>}
     </section>
   );
 };

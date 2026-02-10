@@ -6,8 +6,8 @@ interface ToastProps {
 
 const Toast = ({ message }: ToastProps): JSX.Element => {
   return (
-    <div className="fixed right-4 top-4 z-50 rounded-xl bg-slate-950/90 px-4 py-2 text-xs text-slate-100 shadow-lg">
-      {message}
+    <div className="card" style={{ position: "fixed", right: 16, top: 16, zIndex: 50 }}>
+      <div className="card__body" style={{ padding: "10px 12px" }}>{message}</div>
     </div>
   );
 };
