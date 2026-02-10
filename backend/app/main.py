@@ -384,6 +384,16 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ws/status")
+async def ws_status_http() -> JSONResponse:
+    """Return 426 Upgrade Required when /ws/status is accessed via plain HTTP."""
+    return JSONResponse(
+        status_code=426,
+        content={"error": {"code": "426", "message": "WebSocket connection required. Use ws:// or wss:// protocol."}},
+        headers={"Upgrade": "websocket"},
+    )
+
+
 @app.websocket("/ws/status")
 async def websocket_status(websocket: WebSocket) -> None:
     await websocket.accept()

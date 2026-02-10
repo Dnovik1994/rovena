@@ -12,6 +12,7 @@ from app.api.v1 import (
     proxies,
     sources,
     targets,
+    tg_accounts,
     users,
 )
 
@@ -25,6 +26,7 @@ router.include_router(targets.router)
 router.include_router(contacts.router)
 router.include_router(campaigns.router)
 router.include_router(accounts.router)
+router.include_router(tg_accounts.router)
 router.include_router(proxies.router)
 router.include_router(admin.router, prefix="/admin")
 router.include_router(analytics.router)

@@ -5,6 +5,7 @@ import { Contact } from "../types/contact";
 import { Project } from "../types/project";
 import { Source } from "../types/source";
 import { Target } from "../types/target";
+import { TgAccount, SendCodeResponse, ConfirmCodeResponse, ConfirmPasswordResponse } from "../types/telegram_account";
 import { DashboardAnalytics } from "../types/analytics";
 import { apiFetch } from "../shared/api/client";
 
@@ -141,6 +142,91 @@ export const regenerateDeviceConfig = (token: string, id: number): Promise<Accou
 
 export const verifyAccount = (token: string, id: number): Promise<AccountVerifyResponse> => {
   return apiFetch<AccountVerifyResponse>(`/accounts/${id}/verify`, { method: "POST" }, token);
+};
+
+// ─── Telegram Accounts (new OTP flow) ───────────────────────────────
+
+export const fetchTgAccounts = (token: string): Promise<TgAccount[]> => {
+  return apiFetch<TgAccount[]>("/tg-accounts", {}, token);
+};
+
+export const createTgAccount = (
+  token: string,
+  data: { phone: string },
+): Promise<TgAccount> => {
+  return apiFetch<TgAccount>(
+    "/tg-accounts",
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+};
+
+export const getTgAccount = (token: string, id: number): Promise<TgAccount> => {
+  return apiFetch<TgAccount>(`/tg-accounts/${id}`, {}, token);
+};
+
+export const sendTgCode = (token: string, id: number): Promise<SendCodeResponse> => {
+  return apiFetch<SendCodeResponse>(
+    `/tg-accounts/${id}/send-code`,
+    { method: "POST" },
+    token,
+  );
+};
+
+export const confirmTgCode = (
+  token: string,
+  id: number,
+  data: { flow_id: string; code: string },
+): Promise<ConfirmCodeResponse> => {
+  return apiFetch<ConfirmCodeResponse>(
+    `/tg-accounts/${id}/confirm-code`,
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+};
+
+export const confirmTgPassword = (
+  token: string,
+  id: number,
+  data: { flow_id: string; password: string },
+): Promise<ConfirmPasswordResponse> => {
+  return apiFetch<ConfirmPasswordResponse>(
+    `/tg-accounts/${id}/confirm-password`,
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+};
+
+export const disconnectTgAccount = (token: string, id: number): Promise<TgAccount> => {
+  return apiFetch<TgAccount>(
+    `/tg-accounts/${id}/disconnect`,
+    { method: "POST" },
+    token,
+  );
+};
+
+export const tgHealthCheck = (token: string, id: number): Promise<TgAccount> => {
+  return apiFetch<TgAccount>(
+    `/tg-accounts/${id}/health-check`,
+    { method: "POST" },
+    token,
+  );
+};
+
+export const tgWarmup = (token: string, id: number): Promise<TgAccount> => {
+  return apiFetch<TgAccount>(
+    `/tg-accounts/${id}/warmup`,
+    { method: "POST" },
+    token,
+  );
+};
+
+export const tgRegenerateDevice = (token: string, id: number): Promise<TgAccount> => {
+  return apiFetch<TgAccount>(
+    `/tg-accounts/${id}/regenerate-device`,
+    { method: "POST" },
+    token,
+  );
 };
 
 export const fetchAdminStats = (token: string): Promise<AdminStats> => {

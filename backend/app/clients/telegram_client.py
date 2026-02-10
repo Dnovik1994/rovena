@@ -1,3 +1,4 @@
+import inspect
 import logging
 from typing import Any
 
@@ -5,11 +6,14 @@ from pyrogram import Client
 
 from app.core.settings import get_settings
 from app.clients.device_generator import generate_device_config
-from app.models.account import Account
 from app.models.proxy import Proxy
+from app.services.session_crypto import decrypt_session
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Collect valid Client.__init__ parameter names once at import time
+_CLIENT_INIT_PARAMS: set[str] = set(inspect.signature(Client.__init__).parameters.keys()) - {"self"}
 
 
 class TelegramClientDisabledError(RuntimeError):
@@ -31,54 +35,106 @@ def _build_proxy(proxy: Proxy | None) -> dict[str, Any] | None:
     return proxy_config
 
 
-def get_client(account: Account, proxy: Proxy | None = None) -> Client:
+def build_pyrogram_client_kwargs(
+    device_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build kwargs dict safe to pass to Client.__init__, filtering unknown params."""
+    if not device_config:
+        return {}
+    allowed_device_keys = {"device_model", "system_version", "app_version", "lang_code", "system_lang_code"}
+    raw = {k: device_config[k] for k in allowed_device_keys if device_config.get(k)}
+    # Filter to only params that Client.__init__ actually accepts
+    return {k: v for k, v in raw.items() if k in _CLIENT_INIT_PARAMS}
+
+
+def _ensure_enabled() -> None:
     if not settings.telegram_client_enabled:
         raise TelegramClientDisabledError()
     if not settings.telegram_api_id or not settings.telegram_api_hash:
         raise RuntimeError("TELEGRAM_API_ID/HASH not configured")
 
-    proxy_config = _build_proxy(proxy)
-    device_config = account.device_config or generate_device_config()
-    device_params = {
-        key: device_config.get(key)
-        for key in ["device_model", "system_version", "app_version", "lang_code", "system_lang_code"]
-        if device_config.get(key)
-    }
 
-    proxy_status = "enabled" if proxy_config else "none"
+def get_client(account: Any, proxy: Proxy | None = None) -> Client:
+    """Create Pyrogram client for an existing Account (legacy model)."""
+    _ensure_enabled()
+    proxy_config = _build_proxy(proxy)
+    device_config = getattr(account, "device_config", None) or generate_device_config()
+    device_params = build_pyrogram_client_kwargs(device_config)
+
     logger.info(
         "Pyrogram client init | account_id=%s | proxy=%s",
         account.id,
-        proxy_status,
+        "enabled" if proxy_config else "none",
     )
 
-    try:
-        return Client(
-            name=str(account.id),
-            api_id=int(settings.telegram_api_id),
-            api_hash=settings.telegram_api_hash,
-            proxy=proxy_config,
-            **device_params,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to initialize Pyrogram client", extra={"error": str(exc)})
-        raise
+    return Client(
+        name=str(account.id),
+        api_id=int(settings.telegram_api_id),
+        api_hash=settings.telegram_api_hash,
+        proxy=proxy_config,
+        **device_params,
+    )
+
+
+def create_tg_account_client(
+    account: Any,
+    proxy: Proxy | None = None,
+    *,
+    phone: str | None = None,
+    in_memory: bool = True,
+) -> Client:
+    """Create Pyrogram client for a TelegramAccount model.
+
+    If account has an encrypted session, load it via StringSession.
+    Otherwise create a new in-memory client for auth flow.
+    """
+    _ensure_enabled()
+    proxy_config = _build_proxy(proxy)
+    device_config = getattr(account, "device_config", None) or generate_device_config()
+    device_params = build_pyrogram_client_kwargs(device_config)
+
+    session_string = None
+    if getattr(account, "session_encrypted", None):
+        try:
+            session_string = decrypt_session(account.session_encrypted)
+        except Exception:
+            logger.warning("Failed to decrypt session for account %s", account.id)
+
+    logger.info(
+        "TG account client init | account_id=%s | has_session=%s | proxy=%s",
+        account.id,
+        bool(session_string),
+        "enabled" if proxy_config else "none",
+    )
+
+    kwargs: dict[str, Any] = {
+        "api_id": int(settings.telegram_api_id),
+        "api_hash": settings.telegram_api_hash,
+        "proxy": proxy_config,
+        "in_memory": in_memory,
+        **device_params,
+    }
+
+    if session_string:
+        kwargs["session_string"] = session_string
+        kwargs["name"] = f"tg-{account.id}"
+    else:
+        kwargs["name"] = f"tg-{account.id}"
+        if phone:
+            kwargs["phone_number"] = phone
+
+    # Final safety filter
+    kwargs = {k: v for k, v in kwargs.items() if k in _CLIENT_INIT_PARAMS}
+    # name is always needed
+    return Client(name=f"tg-{account.id}", **kwargs)
 
 
 def get_validator_client(proxy: Proxy) -> Client:
-    if not settings.telegram_client_enabled:
-        raise TelegramClientDisabledError()
-    if not settings.telegram_api_id or not settings.telegram_api_hash:
-        raise RuntimeError("TELEGRAM_API_ID/HASH not configured")
-
+    _ensure_enabled()
     proxy_config = _build_proxy(proxy)
-    try:
-        return Client(
-            name=f"validator-{proxy.id}",
-            api_id=int(settings.telegram_api_id),
-            api_hash=settings.telegram_api_hash,
-            proxy=proxy_config,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to initialize validator client", extra={"error": str(exc)})
-        raise
+    return Client(
+        name=f"validator-{proxy.id}",
+        api_id=int(settings.telegram_api_id),
+        api_hash=settings.telegram_api_hash,
+        proxy=proxy_config,
+    )
