@@ -4,10 +4,13 @@ import json
 import time
 from urllib.parse import urlencode
 
+import pytest
+
+from app.core.database import SessionLocal
 from app.core.security import create_access_token
 from app.core.settings import get_settings
-from app.core.database import SessionLocal
 from app.models.user import User
+from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
 
 def _build_init_data(user_id: int, auth_date: int, bot_token: str) -> str:
@@ -25,8 +28,16 @@ def _build_init_data(user_id: int, auth_date: int, bot_token: str) -> str:
         "user": payload,
     }
     data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(data.items()))
-    secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
-    hash_value = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+    secret_key = hmac.new(
+        key=b"WebAppData",
+        msg=bot_token.encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).digest()
+    hash_value = hmac.new(
+        key=secret_key,
+        msg=data_check_string.encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
     data["hash"] = hash_value
     return urlencode(data)
 
@@ -47,15 +58,58 @@ def test_inactive_user_blocked(client):
     assert response.json()["error"]["message"] == "User inactive"
 
 
+def test_validate_init_data_accepts_valid_signature():
+    settings = get_settings()
+    previous_token = settings.telegram_bot_token
+    previous_ttl = settings.telegram_auth_ttl_seconds
+
+    try:
+        settings.telegram_bot_token = "test-token"
+        settings.telegram_auth_ttl_seconds = 300
+        init_data = _build_init_data(12345, int(time.time()), settings.telegram_bot_token)
+
+        parsed = validate_init_data(init_data)
+
+        assert parsed["auth_date"]
+        assert parsed["query_id"] == "AAE"
+        assert "user" in parsed
+    finally:
+        settings.telegram_bot_token = previous_token
+        settings.telegram_auth_ttl_seconds = previous_ttl
+
+
+def test_validate_init_data_rejects_invalid_signature():
+    settings = get_settings()
+    previous_token = settings.telegram_bot_token
+    previous_ttl = settings.telegram_auth_ttl_seconds
+
+    try:
+        settings.telegram_bot_token = "test-token"
+        settings.telegram_auth_ttl_seconds = 300
+        init_data = _build_init_data(12345, int(time.time()), settings.telegram_bot_token)
+        tampered = init_data.replace("hash=", "hash=deadbeef", 1)
+
+        with pytest.raises(TelegramAuthError, match="Invalid initData signature"):
+            validate_init_data(tampered)
+    finally:
+        settings.telegram_bot_token = previous_token
+        settings.telegram_auth_ttl_seconds = previous_ttl
+
+
 def test_init_data_replay_rejected(client):
     settings = get_settings()
     previous_token = settings.telegram_bot_token
-    settings.telegram_bot_token = "test-token"
-    settings.telegram_auth_ttl_seconds = 1
-    old_auth_date = int(time.time()) - 120
-    init_data = _build_init_data(98765, old_auth_date, settings.telegram_bot_token)
-    response = client.post("/api/v1/auth/telegram", json={"init_data": init_data})
-    assert response.status_code == 401
-    assert response.json()["error"]["reason_code"] == "auth_date_expired"
-    settings.telegram_auth_ttl_seconds = 0
-    settings.telegram_bot_token = previous_token
+    previous_ttl = settings.telegram_auth_ttl_seconds
+
+    try:
+        settings.telegram_bot_token = "test-token"
+        settings.telegram_auth_ttl_seconds = 1
+        old_auth_date = int(time.time()) - 120
+        init_data = _build_init_data(98765, old_auth_date, settings.telegram_bot_token)
+        response = client.post("/api/v1/auth/telegram", json={"init_data": init_data})
+
+        assert response.status_code == 401
+        assert response.json()["error"]["reason_code"] == "auth_date_expired"
+    finally:
+        settings.telegram_auth_ttl_seconds = previous_ttl
+        settings.telegram_bot_token = previous_token

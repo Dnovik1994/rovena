@@ -58,7 +58,8 @@ async def auth_via_telegram(
         init_data = payload.init_data or ""
         metadata = _extract_init_data_metadata(init_data)
         logger.warning(
-            "Telegram auth failed",
+            "Telegram auth failed: %s",
+            str(exc),
             extra={
                 "reason_code": exc.reason_code,
                 "init_data_len": len(init_data),
