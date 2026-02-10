@@ -88,6 +88,9 @@ celery_app.conf.update(
     broker_transport_options={
         "fanout_prefix": True,
         "fanout_patterns": True,
+        "socket_connect_timeout": 5,
+        "socket_timeout": 5,
+        "visibility_timeout": 3600,
     },
 )
 logger.info("Task queue ready")

@@ -1,5 +1,11 @@
-"""API router for Telegram account management via phone + OTP flow."""
+"""API router for Telegram account management via phone + OTP flow.
 
+All endpoints use synchronous ``def`` so FastAPI runs them in a threadpool,
+keeping the async event loop free for WebSocket / background tasks.
+"""
+
+import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -11,7 +17,6 @@ from app.core.database import get_db
 from app.core.rbac import require_permission
 from app.core.rate_limit import limiter
 from app.core.settings import get_settings
-from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.models.user import User
@@ -31,6 +36,10 @@ from app.workers.tasks import account_health_check, start_warming
 
 router = APIRouter(prefix="/tg-accounts", tags=["tg-accounts"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# Maximum seconds a flow can stay in "init" state before auto-failing.
+_FLOW_INIT_TIMEOUT_SECONDS = 60
 
 
 def _is_admin(user: User) -> bool:
@@ -49,10 +58,36 @@ def _get_account_or_404(
     return account
 
 
+def _safe_dispatch(task, *args) -> None:
+    """Dispatch a Celery task with fail-fast behaviour.
+
+    If the broker (Redis) is unreachable, ``task.delay()`` may block
+    indefinitely.  We catch connection errors and raise 502 so the
+    frontend gets a clear signal instead of a timeout.
+    """
+    try:
+        t0 = time.monotonic()
+        task.delay(*args)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "event=task_dispatched task=%s elapsed_ms=%d",
+            task.name, elapsed_ms,
+        )
+    except Exception as exc:
+        logger.error(
+            "event=task_dispatch_failed task=%s error=%s",
+            task.name, str(exc)[:200],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Task queue unavailable. Please try again in a moment.",
+        ) from exc
+
+
 # ─── LIST ────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[TgAccountResponse])
-async def list_tg_accounts(
+def list_tg_accounts(
     current_user: User = Depends(require_permission("tg_accounts", "list")),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -68,7 +103,7 @@ async def list_tg_accounts(
 # ─── GET SINGLE ──────────────────────────────────────────────────────
 
 @router.get("/{account_id}", response_model=TgAccountResponse)
-async def get_tg_account(
+def get_tg_account(
     account_id: int,
     current_user: User = Depends(require_permission("tg_accounts", "list")),
     db: Session = Depends(get_db),
@@ -80,7 +115,7 @@ async def get_tg_account(
 # ─── CREATE (register phone) ────────────────────────────────────────
 
 @router.post("", response_model=TgAccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_tg_account(
+def create_tg_account(
     payload: TgAccountCreate,
     current_user: User = Depends(require_permission("tg_accounts", "create")),
     tariff_limits: dict[str, int] = Depends(get_tariff_limits),
@@ -132,7 +167,7 @@ async def create_tg_account(
 
 @router.post("/{account_id}/send-code", response_model=SendCodeResponse)
 @limiter.limit("3/minute")
-async def send_code(
+def send_code(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("tg_accounts", "send_code")),
@@ -173,8 +208,8 @@ async def send_code(
     db.commit()
     db.refresh(flow)
 
-    # Dispatch to worker
-    send_code_task.delay(account.id, flow.id)
+    # Dispatch to worker — fail fast if Redis is down
+    _safe_dispatch(send_code_task, account.id, flow.id)
 
     return SendCodeResponse(
         flow_id=flow.id,
@@ -186,7 +221,7 @@ async def send_code(
 # ─── AUTH FLOW STATUS (polling endpoint) ──────────────────────────────
 
 @router.get("/{account_id}/auth-flow/{flow_id}", response_model=AuthFlowStatusResponse)
-async def get_auth_flow_status(
+def get_auth_flow_status(
     account_id: int,
     flow_id: str,
     current_user: User = Depends(require_permission("tg_accounts", "list")),
@@ -209,6 +244,26 @@ async def get_auth_flow_status(
     db.refresh(flow)
     db.refresh(account)
 
+    # Auto-fail stale flows that stayed in "init" longer than the timeout.
+    # This means the worker never picked up the task (crashed, Redis down, etc.).
+    if flow.state == AuthFlowState.init and flow.created_at:
+        now = datetime.now(timezone.utc)
+        created = flow.created_at
+        # Ensure both datetimes are offset-aware for subtraction
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age_seconds = (now - created).total_seconds()
+        if age_seconds > _FLOW_INIT_TIMEOUT_SECONDS:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Timeout waiting for worker to process the request"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Verification timed out. Please try again."
+            db.commit()
+            logger.error(
+                "event=flow_init_timeout flow_id=%s account_id=%d age_seconds=%.0f",
+                flow.id, account.id, age_seconds,
+            )
+
     return AuthFlowStatusResponse(
         flow_id=flow.id,
         flow_state=flow.state.value if hasattr(flow.state, "value") else str(flow.state),
@@ -224,7 +279,7 @@ async def get_auth_flow_status(
 
 @router.post("/{account_id}/confirm-code", response_model=ConfirmCodeResponse)
 @limiter.limit("5/minute")
-async def confirm_code(
+def confirm_code(
     account_id: int,
     payload: ConfirmCodeRequest,
     request: Request,
@@ -262,8 +317,8 @@ async def confirm_code(
             detail="Too many verification attempts. Please start over.",
         )
 
-    # Dispatch to worker
-    confirm_code_task.delay(account.id, flow.id, payload.code)
+    # Dispatch to worker — fail fast if Redis is down
+    _safe_dispatch(confirm_code_task, account.id, flow.id, payload.code)
 
     return ConfirmCodeResponse(
         status=TgAccountResponse.model_validate(account).status,
@@ -275,7 +330,7 @@ async def confirm_code(
 
 @router.post("/{account_id}/confirm-password", response_model=ConfirmPasswordResponse)
 @limiter.limit("5/minute")
-async def confirm_password(
+def confirm_password(
     account_id: int,
     payload: ConfirmPasswordRequest,
     request: Request,
@@ -305,7 +360,8 @@ async def confirm_password(
             detail="Too many attempts. Please start over.",
         )
 
-    confirm_password_task.delay(account.id, flow.id, payload.password)
+    # Dispatch to worker — fail fast if Redis is down
+    _safe_dispatch(confirm_password_task, account.id, flow.id, payload.password)
 
     return ConfirmPasswordResponse(
         status=TgAccountResponse.model_validate(account).status,
@@ -316,7 +372,7 @@ async def confirm_password(
 # ─── DISCONNECT ──────────────────────────────────────────────────────
 
 @router.post("/{account_id}/disconnect", response_model=TgAccountResponse)
-async def disconnect_tg_account(
+def disconnect_tg_account(
     account_id: int,
     current_user: User = Depends(require_permission("tg_accounts", "disconnect")),
     db: Session = Depends(get_db),
@@ -342,7 +398,7 @@ async def disconnect_tg_account(
 
 @router.post("/{account_id}/health-check", response_model=TgAccountResponse)
 @limiter.limit("5/minute")
-async def tg_health_check(
+def tg_health_check(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("tg_accounts", "health_check")),
@@ -360,9 +416,7 @@ async def tg_health_check(
             detail="Account must be verified/active to run health check",
         )
 
-    # Reuse existing health check task via legacy Account compatibility
-    # The task just needs .id, .proxy_id, .device_config, .status, .owner_id
-    account_health_check.delay(account.id)
+    _safe_dispatch(account_health_check, account.id)
 
     return TgAccountResponse.model_validate(account)
 
@@ -371,7 +425,7 @@ async def tg_health_check(
 
 @router.post("/{account_id}/warmup", response_model=TgAccountResponse)
 @limiter.limit("5/minute")
-async def tg_warmup(
+def tg_warmup(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("tg_accounts", "warmup")),
@@ -403,7 +457,7 @@ async def tg_warmup(
         "target_actions": account.target_warming_actions,
     })
 
-    start_warming.delay(account.id)
+    _safe_dispatch(start_warming, account.id)
 
     return TgAccountResponse.model_validate(account)
 
@@ -411,7 +465,7 @@ async def tg_warmup(
 # ─── REGENERATE DEVICE ───────────────────────────────────────────────
 
 @router.post("/{account_id}/regenerate-device", response_model=TgAccountResponse)
-async def tg_regenerate_device(
+def tg_regenerate_device(
     account_id: int,
     current_user: User = Depends(require_permission("tg_accounts", "regenerate_device")),
     db: Session = Depends(get_db),

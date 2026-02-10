@@ -113,14 +113,19 @@ export const apiFetch = async <T>(
     window.dispatchEvent(new CustomEvent("app:toast", { detail: { message: "Rate limit exceeded" } }));
   }
 
-  if (response.status >= 500) {
-    if (!window.location.pathname.startsWith("/error")) {
-      window.location.href = `/error/${response.status}`;
-    }
-  }
-
   if (!response.ok) {
-    throw await parseApiError(response);
+    const apiErr = await parseApiError(response);
+
+    // For 502/503 (task queue unavailable) — throw immediately so callers
+    // can display inline errors instead of redirecting to an error page.
+    // Only redirect for other 5xx if not already on the error page.
+    if (response.status >= 500 && response.status !== 502 && response.status !== 503) {
+      if (!window.location.pathname.startsWith("/error")) {
+        window.location.href = `/error/${response.status}`;
+      }
+    }
+
+    throw apiErr;
   }
 
   return (await response.json()) as T;
