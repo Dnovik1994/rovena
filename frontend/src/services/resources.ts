@@ -5,7 +5,7 @@ import { Contact } from "../types/contact";
 import { Project } from "../types/project";
 import { Source } from "../types/source";
 import { Target } from "../types/target";
-import { TgAccount, SendCodeResponse, ConfirmCodeResponse, ConfirmPasswordResponse } from "../types/telegram_account";
+import { TgAccount, SendCodeResponse, ConfirmCodeResponse, ConfirmPasswordResponse, AuthFlowStatusResponse } from "../types/telegram_account";
 import { DashboardAnalytics } from "../types/analytics";
 import { apiFetch } from "../shared/api/client";
 
@@ -169,6 +169,18 @@ export const sendTgCode = (token: string, id: number): Promise<SendCodeResponse>
   return apiFetch<SendCodeResponse>(
     `/tg-accounts/${id}/send-code`,
     { method: "POST" },
+    token,
+  );
+};
+
+export const getAuthFlowStatus = (
+  token: string,
+  accountId: number,
+  flowId: string,
+): Promise<AuthFlowStatusResponse> => {
+  return apiFetch<AuthFlowStatusResponse>(
+    `/tg-accounts/${accountId}/auth-flow/${flowId}`,
+    {},
     token,
   );
 };

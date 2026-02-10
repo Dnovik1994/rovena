@@ -52,3 +52,13 @@ export interface ConfirmPasswordResponse {
   account: TgAccount | null;
   message: string;
 }
+
+export interface AuthFlowStatusResponse {
+  flow_id: string;
+  flow_state: string;
+  account_status: TgAccountStatus;
+  last_error: string | null;
+  sent_at: string | null;
+  expires_at: string | null;
+  attempts: number;
+}

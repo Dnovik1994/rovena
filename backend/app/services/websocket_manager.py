@@ -4,16 +4,23 @@ import logging
 from typing import Any
 
 from fastapi import WebSocket
+from redis import Redis
 
 logger = logging.getLogger(__name__)
 
 PING_INTERVAL_SECONDS = 30
 PING_TIMEOUT_SECONDS = 10
+REDIS_WS_CHANNEL = "ws:broadcast"
 
 
 class WebSocketManager:
     def __init__(self) -> None:
         self._connections: dict[WebSocket, int] = {}
+        self._redis_url: str | None = None
+
+    def configure_redis(self, redis_url: str) -> None:
+        """Set the Redis URL used for cross-process pub/sub."""
+        self._redis_url = redis_url
 
     async def connect(self, websocket: WebSocket, user_id: int, *, accept: bool = True) -> None:
         if accept:
@@ -56,11 +63,34 @@ class WebSocketManager:
             self._connections.pop(connection, None)
 
     def broadcast_sync(self, payload: dict[str, Any]) -> None:
+        """Broadcast from synchronous context (e.g. Celery tasks).
+
+        If we are inside the uvicorn process with connected clients,
+        dispatch directly.  Otherwise publish to Redis so the uvicorn
+        process can relay the message to WebSocket clients.
+        """
+        # Try direct dispatch first (works in the uvicorn process)
+        if self._connections:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._dispatch_sync(payload))
+                return
+            except RuntimeError:
+                pass
+
+        # Fallback: publish to Redis channel (works from Celery workers)
+        self._publish_to_redis(payload)
+
+    def _publish_to_redis(self, payload: dict[str, Any]) -> None:
+        if not self._redis_url:
+            logger.debug("broadcast_sync: no Redis URL configured, message dropped")
+            return
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._dispatch_sync(payload))
-        except RuntimeError:
-            asyncio.run(self._dispatch_sync(payload))
+            client = Redis.from_url(self._redis_url)
+            client.publish(REDIS_WS_CHANNEL, json.dumps(payload))
+            client.close()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to publish WS event to Redis")
 
     async def _dispatch_sync(self, payload: dict[str, Any]) -> None:
         """Route sync broadcasts to per-user delivery when user_id is present."""
