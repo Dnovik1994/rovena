@@ -117,15 +117,14 @@ def create_tg_account_client(
 
     if session_string:
         kwargs["session_string"] = session_string
-        kwargs["name"] = f"tg-{account.id}"
-    else:
-        kwargs["name"] = f"tg-{account.id}"
-        if phone:
-            kwargs["phone_number"] = phone
+    elif phone:
+        kwargs["phone_number"] = phone
 
-    # Final safety filter
+    # Final safety filter — keep only params that Client.__init__ accepts.
+    # "name" is passed explicitly below, so remove it from kwargs to avoid
+    # TypeError("got multiple values for keyword argument 'name'").
+    kwargs.pop("name", None)
     kwargs = {k: v for k, v in kwargs.items() if k in _CLIENT_INIT_PARAMS}
-    # name is always needed
     return Client(name=f"tg-{account.id}", **kwargs)
 
 

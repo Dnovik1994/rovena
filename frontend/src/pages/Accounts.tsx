@@ -166,6 +166,12 @@ const Accounts = (): JSX.Element => {
             next.delete(accountId);
             return next;
           });
+          setGlobalError(
+            "Verification timed out — the code was not sent. Check account error or try again.",
+          );
+          setActionMessage(null);
+          // Reload accounts to display any error the worker may have written
+          load();
           return;
         }
         attempt++;
