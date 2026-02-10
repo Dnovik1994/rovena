@@ -4,11 +4,24 @@ import asyncio
 import inspect
 import os
 import sys
+import types
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
+
+# Provide a minimal pyaes stub so pyrogram can be imported in test
+# environments where pyaes fails to build from source.
+if "pyaes" not in sys.modules:
+    try:
+        import pyaes  # noqa: F401
+    except ImportError:
+        _pyaes = types.ModuleType("pyaes")
+        _pyaes.AESModeOfOperationCTR = type(  # type: ignore[attr-defined]
+            "AESModeOfOperationCTR", (), {"__init__": lambda *a, **kw: None}
+        )
+        sys.modules["pyaes"] = _pyaes
 
 import pytest
 from sqlalchemy import create_engine

@@ -80,6 +80,7 @@ celery_app.conf.update(
     },
 )
 celery_app.conf.broker_connection_retry_on_startup = True
+celery_app.autodiscover_tasks(["app.workers"])
 logger.info("Task queue ready")
 
 __all__ = [
