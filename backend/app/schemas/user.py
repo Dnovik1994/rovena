@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.schemas.tariff import TariffResponse
 
@@ -14,6 +14,13 @@ class UserBase(BaseModel):
     role: str | None
     tariff: TariffResponse | None
     onboarding_completed: bool = False
+
+    @field_validator("onboarding_completed", mode="before")
+    @classmethod
+    def coerce_onboarding_completed(cls, value: bool | None) -> bool:
+        if value is None:
+            return False
+        return bool(value)
 
     class Config:
         from_attributes = True
