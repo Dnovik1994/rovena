@@ -52,7 +52,7 @@ def _get_account_or_404(
 # ─── LIST ────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[TgAccountResponse])
-async def list_tg_accounts(
+def list_tg_accounts(
     current_user: User = Depends(require_permission("tg_accounts", "list")),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -68,7 +68,7 @@ async def list_tg_accounts(
 # ─── GET SINGLE ──────────────────────────────────────────────────────
 
 @router.get("/{account_id}", response_model=TgAccountResponse)
-async def get_tg_account(
+def get_tg_account(
     account_id: int,
     current_user: User = Depends(require_permission("tg_accounts", "list")),
     db: Session = Depends(get_db),
@@ -80,7 +80,7 @@ async def get_tg_account(
 # ─── CREATE (register phone) ────────────────────────────────────────
 
 @router.post("", response_model=TgAccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_tg_account(
+def create_tg_account(
     payload: TgAccountCreate,
     current_user: User = Depends(require_permission("tg_accounts", "create")),
     tariff_limits: dict[str, int] = Depends(get_tariff_limits),
@@ -132,7 +132,7 @@ async def create_tg_account(
 
 @router.post("/{account_id}/send-code", response_model=SendCodeResponse)
 @limiter.limit("3/minute")
-async def send_code(
+def send_code(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("tg_accounts", "send_code")),
@@ -186,7 +186,7 @@ async def send_code(
 # ─── AUTH FLOW STATUS (polling endpoint) ──────────────────────────────
 
 @router.get("/{account_id}/auth-flow/{flow_id}", response_model=AuthFlowStatusResponse)
-async def get_auth_flow_status(
+def get_auth_flow_status(
     account_id: int,
     flow_id: str,
     current_user: User = Depends(require_permission("tg_accounts", "list")),
@@ -224,7 +224,7 @@ async def get_auth_flow_status(
 
 @router.post("/{account_id}/confirm-code", response_model=ConfirmCodeResponse)
 @limiter.limit("5/minute")
-async def confirm_code(
+def confirm_code(
     account_id: int,
     payload: ConfirmCodeRequest,
     request: Request,
@@ -275,7 +275,7 @@ async def confirm_code(
 
 @router.post("/{account_id}/confirm-password", response_model=ConfirmPasswordResponse)
 @limiter.limit("5/minute")
-async def confirm_password(
+def confirm_password(
     account_id: int,
     payload: ConfirmPasswordRequest,
     request: Request,
@@ -316,7 +316,7 @@ async def confirm_password(
 # ─── DISCONNECT ──────────────────────────────────────────────────────
 
 @router.post("/{account_id}/disconnect", response_model=TgAccountResponse)
-async def disconnect_tg_account(
+def disconnect_tg_account(
     account_id: int,
     current_user: User = Depends(require_permission("tg_accounts", "disconnect")),
     db: Session = Depends(get_db),
@@ -342,7 +342,7 @@ async def disconnect_tg_account(
 
 @router.post("/{account_id}/health-check", response_model=TgAccountResponse)
 @limiter.limit("5/minute")
-async def tg_health_check(
+def tg_health_check(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("tg_accounts", "health_check")),
@@ -371,7 +371,7 @@ async def tg_health_check(
 
 @router.post("/{account_id}/warmup", response_model=TgAccountResponse)
 @limiter.limit("5/minute")
-async def tg_warmup(
+def tg_warmup(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("tg_accounts", "warmup")),
@@ -411,7 +411,7 @@ async def tg_warmup(
 # ─── REGENERATE DEVICE ───────────────────────────────────────────────
 
 @router.post("/{account_id}/regenerate-device", response_model=TgAccountResponse)
-async def tg_regenerate_device(
+def tg_regenerate_device(
     account_id: int,
     current_user: User = Depends(require_permission("tg_accounts", "regenerate_device")),
     db: Session = Depends(get_db),
