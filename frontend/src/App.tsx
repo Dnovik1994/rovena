@@ -27,23 +27,44 @@ const Subscription = lazy(() => import("./pages/Subscription"));
 const AppRoutes = (): JSX.Element => {
   const { token, user, setUser, onboardingNeeded, setOnboardingNeeded } = useAuth();
   const location = useLocation();
+  const [profileError, setProfileError] = React.useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
       setUser(null);
       setOnboardingNeeded(false);
+      setProfileError(null);
       return;
     }
+    setProfileError(null);
     apiFetch<UserProfile>("/me", {}, token)
       .then((data) => {
         setUser(data);
         setOnboardingNeeded(!data.onboarding_completed);
       })
-      .catch(() => {
+      .catch((err) => {
+        const status = err?.status ?? err?.code ?? "unknown";
+        const message = err?.message ?? "unknown error";
+        console.error("[/me] failed to load profile", { status, message });
+        // Keep token — do not silently discard the session.
+        // Show degraded state instead so the user knows something is wrong.
         setUser(null);
         setOnboardingNeeded(false);
+        setProfileError(`Не удалось загрузить профиль (${status})`);
       });
   }, [token, setOnboardingNeeded, setUser]);
+
+  if (token && profileError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+        <div className="rounded-2xl bg-red-900/40 border border-red-700 p-6 text-center text-sm text-red-200 max-w-md">
+          <p className="font-semibold mb-2">Ошибка загрузки профиля</p>
+          <p>{profileError}</p>
+          <p className="mt-3 text-xs text-red-300">Попробуйте обновить страницу. Если проблема сохраняется — обратитесь в поддержку.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (token && onboardingNeeded && location.pathname !== "/onboarding") {
     return <Navigate to="/onboarding" replace />;

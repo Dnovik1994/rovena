@@ -102,12 +102,9 @@ export const apiFetch = async <T>(
     }
   }
 
-  if (response.status === 403) {
-    clearStoredTokens();
-    if (window.location.pathname !== "/") {
-      window.location.href = "/";
-    }
-  }
+  // 403 = forbidden (no permissions) — do NOT clear tokens.
+  // The UI layer should handle "access denied" presentation.
+  // Tokens are only cleared on 401 (via refresh flow above).
 
   if (response.status === 429) {
     window.dispatchEvent(new CustomEvent("app:toast", { detail: { message: "Rate limit exceeded" } }));
