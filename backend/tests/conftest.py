@@ -21,6 +21,9 @@ if "pyaes" not in sys.modules:
         _pyaes.AESModeOfOperationCTR = type(  # type: ignore[attr-defined]
             "AESModeOfOperationCTR", (), {"__init__": lambda *a, **kw: None}
         )
+        _pyaes.AESModeOfOperationIGE = type(  # type: ignore[attr-defined]
+            "AESModeOfOperationIGE", (), {"__init__": lambda *a, **kw: None}
+        )
         sys.modules["pyaes"] = _pyaes
 
 import pytest

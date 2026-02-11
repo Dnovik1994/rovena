@@ -441,3 +441,85 @@ def test_admin_user_update_syncs_is_admin(client):
     assert resp.status_code == status.HTTP_200_OK
     assert resp.json()["role"] == "user"
     assert resp.json()["is_admin"] is False
+
+
+def test_admin_users_list_derives_is_admin_from_role(client):
+    """GET /admin/users must derive is_admin from role, not the DB column.
+    When the DB has is_admin=False but role=admin, the response must show is_admin=True."""
+    # Create an admin to make requests
+    admin = _create_user(telegram_id=20001, is_admin=True)
+    token = create_access_token(str(admin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create user with stale is_admin=False but role=admin
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=20002,
+            username="stale_list_user",
+            role=UserRole.admin,
+            is_admin=False,  # stale DB value
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        stale_uid = user.id
+
+    resp = client.get("/api/v1/admin/users", headers=headers)
+    assert resp.status_code == status.HTTP_200_OK
+    items = resp.json()["items"]
+    stale_item = next((u for u in items if u["id"] == stale_uid), None)
+    assert stale_item is not None
+    # is_admin must be derived from role (True), not the stale DB column (False).
+    assert stale_item["is_admin"] is True
+    assert stale_item["role"] == "admin"
+
+
+def test_admin_user_detail_derives_is_admin_from_role(client):
+    """GET /admin/users/{id} must derive is_admin from role, not the DB column."""
+    admin = _create_user(telegram_id=20003, is_admin=True)
+    token = create_access_token(str(admin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=20004,
+            username="stale_detail_user",
+            role=UserRole.superadmin,
+            is_admin=False,  # stale
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        uid = user.id
+
+    resp = client.get(f"/api/v1/admin/users/{uid}", headers=headers)
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert data["is_admin"] is True
+    assert data["role"] == "superadmin"
+
+
+def test_bootstrap_logs_warning_when_user_not_found(monkeypatch, caplog):
+    """Bootstrap must log a warning (not info) when the configured user is not in DB."""
+    import logging
+    from app import main
+
+    monkeypatch.setattr(main.settings, "admin_user_id", 999999)
+    monkeypatch.setattr(main.settings, "admin_telegram_id", None)
+
+    with caplog.at_level(logging.WARNING):
+        main._bootstrap_admin()
+
+    assert any("target user not found" in r.message for r in caplog.records)
+    assert any(r.levelno == logging.WARNING for r in caplog.records if "target user not found" in r.message)
+
+
+def test_bootstrap_noop_when_env_not_set(monkeypatch):
+    """Bootstrap must do nothing (no errors) when neither admin_user_id nor admin_telegram_id is set."""
+    from app import main
+
+    monkeypatch.setattr(main.settings, "admin_user_id", None)
+    monkeypatch.setattr(main.settings, "admin_telegram_id", None)
+
+    # Must not raise
+    main._bootstrap_admin()

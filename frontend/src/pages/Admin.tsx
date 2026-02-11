@@ -333,12 +333,12 @@ const Admin = (): JSX.Element => {
                       onClick={() =>
                         updateUserMutation.mutate({
                           id: user.id,
-                          role: user.role === "admin" ? "user" : "admin",
+                          role: user.role === "admin" || user.role === "superadmin" ? "user" : "admin",
                         })
                       }
                       className="rounded-full border border-indigo-400 px-3 py-1 text-indigo-200"
                     >
-                      Toggle Admin
+                      {user.role === "admin" || user.role === "superadmin" ? "Revoke Admin" : "Grant Admin"}
                     </button>
                     <select
                       className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1"
