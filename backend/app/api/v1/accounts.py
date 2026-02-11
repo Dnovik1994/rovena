@@ -1,3 +1,5 @@
+import logging
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -7,6 +9,7 @@ from app.core.rbac import require_permission
 from app.core.database import get_db
 from app.api.deps import get_tariff_limits
 from app.clients.device_generator import generate_device_config
+from app.core.metrics import verify_account_duration_seconds
 from app.models.account import Account, AccountStatus
 from app.models.user import User
 from app.core.rate_limit import limiter
@@ -16,6 +19,8 @@ from app.workers.tasks import account_health_check, start_warming
 from pyrogram.errors import SessionPasswordNeeded
 from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.models.proxy import Proxy
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["accounts"])
 
@@ -216,11 +221,20 @@ async def verify_account(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Telegram client disabled",
         ) from exc
+
+    t0 = time.monotonic()
     try:
         async with client:
             me = await client.get_me()
     except SessionPasswordNeeded:
+        elapsed = time.monotonic() - t0
+        logger.info("event=verify_account_done account_id=%d result=needs_password elapsed_s=%.3f", account_id, elapsed)
+        verify_account_duration_seconds.observe(elapsed)
         return AccountVerifyResponse(needs_password=True, account=None)
+
+    elapsed = time.monotonic() - t0
+    verify_account_duration_seconds.observe(elapsed)
+    logger.info("event=verify_account_done account_id=%d result=ok elapsed_s=%.3f", account_id, elapsed)
 
     account.telegram_id = me.id
     account.username = me.username
@@ -230,13 +244,16 @@ async def verify_account(
     db.commit()
     db.refresh(account)
 
-    manager.broadcast_sync(
+    # Use async send_to_user to avoid blocking the event loop with
+    # synchronous Redis publish.
+    await manager.send_to_user(
+        current_user.id,
         {
             "type": "account_update",
             "user_id": current_user.id,
             "account_id": account.id,
             "status": account.status,
-        }
+        },
     )
 
     return AccountVerifyResponse(needs_password=False, account=AccountResponse.model_validate(account))

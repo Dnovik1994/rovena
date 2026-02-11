@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.metrics import telegram_auth_reject_total
 from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
@@ -57,6 +58,7 @@ def auth_via_telegram(
     except TelegramAuthError as exc:
         init_data = payload.init_data or ""
         metadata = _extract_init_data_metadata(init_data)
+        telegram_auth_reject_total.labels(reason=exc.reason_code).inc()
         logger.warning(
             "Telegram auth failed: %s",
             str(exc),
