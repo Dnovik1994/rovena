@@ -3,7 +3,7 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
-from app.core.tz import ensure_utc
+from app.core.tz import is_expired
 
 from celery import current_task
 
@@ -308,7 +308,7 @@ async def _run_account_health_check(account_id: int) -> None:
                 await client.get_me()
             account.last_activity_at = datetime.now(timezone.utc)
             if account.status == AccountStatus.cooldown and account.cooldown_until:
-                if ensure_utc(account.cooldown_until) <= datetime.now(timezone.utc):
+                if is_expired(account.cooldown_until):
                     account.status = AccountStatus.active
             db.commit()
             manager.broadcast_sync(
@@ -457,7 +457,6 @@ def perform_warming_action(account_id: int) -> None:
 @celery_app.task
 def check_cooldowns() -> None:
     _log_task_started()
-    now = datetime.now(timezone.utc)
     with SessionLocal() as db:
         accounts = (
             db.query(Account)
@@ -466,7 +465,7 @@ def check_cooldowns() -> None:
             .all()
         )
         for account in accounts:
-            if account.cooldown_until and ensure_utc(account.cooldown_until) <= now:
+            if account.cooldown_until and is_expired(account.cooldown_until):
                 account.status = AccountStatus.active
                 manager.broadcast_sync(
                     {

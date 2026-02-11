@@ -8,7 +8,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from app.core.tz import ensure_utc
+from app.core.tz import ensure_utc, is_expired
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -300,7 +300,7 @@ def confirm_code(
             detail=f"Flow is in state '{flow.state.value}', expected 'wait_code'",
         )
 
-    if ensure_utc(flow.expires_at) and ensure_utc(flow.expires_at) < datetime.now(timezone.utc):
+    if is_expired(flow.expires_at):
         flow.state = AuthFlowState.expired
         db.commit()
         raise HTTPException(
@@ -321,6 +321,9 @@ def confirm_code(
 
     return ConfirmCodeResponse(
         status=TgAccountResponse.model_validate(account).status,
+        flow_id=payload.flow_id,
+        state="processing",
+        next_step="poll",
         message="Verifying code...",
     )
 
@@ -351,6 +354,14 @@ def confirm_password(
             detail=f"Flow is in state '{flow.state.value}', expected 'wait_password'",
         )
 
+    if is_expired(flow.expires_at):
+        flow.state = AuthFlowState.expired
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Verification flow expired. Please start over.",
+        )
+
     if flow.attempts >= settings.auth_flow_max_attempts:
         flow.state = AuthFlowState.failed
         db.commit()
@@ -364,6 +375,9 @@ def confirm_password(
 
     return ConfirmPasswordResponse(
         status=TgAccountResponse.model_validate(account).status,
+        flow_id=payload.flow_id,
+        state="processing",
+        next_step="poll",
         message="Verifying 2FA password...",
     )
 

@@ -10,7 +10,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from app.core.tz import ensure_utc
+from app.core.tz import ensure_utc, is_expired, utcnow
 
 from pyrogram.errors import (
     BadRequest,
@@ -225,7 +225,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             log.warning("event=confirm_code_bad_state state=%s %s", flow.state, ctx)
             return
 
-        if ensure_utc(flow.expires_at) and ensure_utc(flow.expires_at) < datetime.now(timezone.utc):
+        if is_expired(flow.expires_at):
             flow.state = AuthFlowState.expired
             flow.last_error = "Flow expired"
             account.status = TelegramAccountStatus.error
@@ -306,6 +306,8 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             account.last_error = None
             flow.state = AuthFlowState.wait_password
             flow.last_error = None
+            # Extend TTL so the user has time to enter the 2FA password
+            flow.expires_at = utcnow() + timedelta(seconds=settings.auth_flow_ttl_seconds)
 
             # Save the partial session so we can continue with password
             if client is not None:
@@ -400,6 +402,16 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             flow.last_error = f"Invalid flow state for password: {flow.state}"
             db.commit()
             log.warning("event=confirm_password_bad_state state=%s %s", flow.state, ctx)
+            return
+
+        if is_expired(flow.expires_at):
+            flow.state = AuthFlowState.expired
+            flow.last_error = "Flow expired"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Verification flow expired"
+            db.commit()
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
             return
 
         flow.attempts += 1
