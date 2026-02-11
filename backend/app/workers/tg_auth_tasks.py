@@ -10,6 +10,8 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
+from app.core.tz import ensure_utc
+
 from pyrogram.errors import (
     BadRequest,
     FloodWait,
@@ -223,7 +225,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             log.warning("event=confirm_code_bad_state state=%s %s", flow.state, ctx)
             return
 
-        if flow.expires_at and flow.expires_at < datetime.now(timezone.utc):
+        if ensure_utc(flow.expires_at) and ensure_utc(flow.expires_at) < datetime.now(timezone.utc):
             flow.state = AuthFlowState.expired
             flow.last_error = "Flow expired"
             account.status = TelegramAccountStatus.error

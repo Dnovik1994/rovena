@@ -3,6 +3,8 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
+from app.core.tz import ensure_utc
+
 from celery import current_task
 
 from app.clients.telegram_client import TelegramClientDisabledError, get_client
@@ -306,7 +308,7 @@ async def _run_account_health_check(account_id: int) -> None:
                 await client.get_me()
             account.last_activity_at = datetime.now(timezone.utc)
             if account.status == AccountStatus.cooldown and account.cooldown_until:
-                if account.cooldown_until <= datetime.now(timezone.utc):
+                if ensure_utc(account.cooldown_until) <= datetime.now(timezone.utc):
                     account.status = AccountStatus.active
             db.commit()
             manager.broadcast_sync(
@@ -464,7 +466,7 @@ def check_cooldowns() -> None:
             .all()
         )
         for account in accounts:
-            if account.cooldown_until and account.cooldown_until <= now:
+            if account.cooldown_until and ensure_utc(account.cooldown_until) <= now:
                 account.status = AccountStatus.active
                 manager.broadcast_sync(
                     {
