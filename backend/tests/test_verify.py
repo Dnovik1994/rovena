@@ -24,7 +24,8 @@ class DummyClient:
         return DummyMe()
 
 
-def test_verify_account(monkeypatch, client):
+def test_verify_account_dispatches_task(monkeypatch, client):
+    """Legacy verify endpoint now dispatches to Celery and returns 200 immediately."""
     with SessionLocal() as db:
         user = User(telegram_id=1111, username="owner")
         db.add(user)
@@ -43,7 +44,15 @@ def test_verify_account(monkeypatch, client):
 
     token = create_access_token(str(user.id))
 
-    monkeypatch.setattr("app.api.v1.accounts.get_client", lambda *_args, **_kwargs: DummyClient())
+    # Mock the Celery task dispatch
+    dispatched = []
+    monkeypatch.setattr(
+        "app.api.v1.accounts.legacy_verify_account",
+        type("FakeTask", (), {
+            "name": "legacy_verify_account",
+            "delay": lambda self, *args: dispatched.append(args),
+        })(),
+    )
 
     response = client.post(
         f"/api/v1/accounts/{account.id}/verify",
@@ -53,4 +62,6 @@ def test_verify_account(monkeypatch, client):
     assert response.status_code == status.HTTP_200_OK
     payload = response.json()
     assert payload["needs_password"] is False
-    assert payload["account"]["status"] == "verified"
+    # Task was dispatched
+    assert len(dispatched) == 1
+    assert dispatched[0] == (account.id,)

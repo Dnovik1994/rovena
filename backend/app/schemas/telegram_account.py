@@ -106,3 +106,15 @@ class AuthFlowStatusResponse(BaseModel):
     sent_at: datetime | None = None
     expires_at: datetime | None = None
     attempts: int = 0
+
+
+class VerifyAccountResponse(BaseModel):
+    account_id: int
+    verify_status: str
+    verify_reason: str | None = None
+    verifying: bool = False
+    message: str = ""
+    account_status: TgAccountStatus
+
+    class Config:
+        from_attributes = True

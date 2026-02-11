@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -15,8 +16,7 @@ from app.models.user import User
 from app.core.rate_limit import limiter
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountVerifyResponse
 from app.services.websocket_manager import manager
-from app.workers.tasks import account_health_check, start_warming
-from pyrogram.errors import SessionPasswordNeeded
+from app.workers.tasks import account_health_check, start_warming, legacy_verify_account
 from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.models.proxy import Proxy
 
@@ -197,14 +197,55 @@ def start_account_warming(
     return AccountResponse.model_validate(account)
 
 
+_DISPATCH_TIMEOUT_SECONDS = 10
+
+
+def _safe_dispatch(task, *args) -> None:
+    """Dispatch a Celery task with a bounded timeout."""
+    exc_holder: list[BaseException | None] = [None]
+    done = threading.Event()
+
+    def _publish() -> None:
+        try:
+            task.delay(*args)
+        except BaseException as e:
+            exc_holder[0] = e
+        finally:
+            done.set()
+
+    t0 = time.monotonic()
+    thread = threading.Thread(target=_publish, daemon=True)
+    thread.start()
+
+    if not done.wait(timeout=_DISPATCH_TIMEOUT_SECONDS):
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.error("event=task_dispatch_timeout task=%s elapsed_ms=%d", task.name, elapsed_ms)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Task dispatch timed out. Please try again.",
+        )
+
+    if exc_holder[0] is not None:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.error(
+            "event=task_dispatch_failed task=%s error=%s elapsed_ms=%d",
+            task.name, str(exc_holder[0])[:200], elapsed_ms,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Task queue unavailable. Please try again in a moment.",
+        )
+
+
 @router.post("/accounts/{account_id}/verify", response_model=AccountVerifyResponse)
 @limiter.limit("5/minute")
-async def verify_account(
+def verify_account(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("accounts", "verify")),
     db: Session = Depends(get_db),
 ) -> AccountVerifyResponse:
+    """Non-blocking verify: dispatches to Celery worker, returns immediately."""
     query = db.query(Account).filter(Account.id == account_id)
     if not _is_admin(current_user):
         query = query.filter(Account.owner_id == current_user.id)
@@ -213,47 +254,11 @@ async def verify_account(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
-    proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-    try:
-        client = get_client(account, proxy)
-    except TelegramClientDisabledError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Telegram client disabled",
-        ) from exc
+    _safe_dispatch(legacy_verify_account, account.id)
 
-    t0 = time.monotonic()
-    try:
-        async with client:
-            me = await client.get_me()
-    except SessionPasswordNeeded:
-        elapsed = time.monotonic() - t0
-        logger.info("event=verify_account_done account_id=%d result=needs_password elapsed_s=%.3f", account_id, elapsed)
-        verify_account_duration_seconds.observe(elapsed)
-        return AccountVerifyResponse(needs_password=True, account=None)
-
-    elapsed = time.monotonic() - t0
-    verify_account_duration_seconds.observe(elapsed)
-    logger.info("event=verify_account_done account_id=%d result=ok elapsed_s=%.3f", account_id, elapsed)
-
-    account.telegram_id = me.id
-    account.username = me.username
-    account.first_name = me.first_name
-    account.status = AccountStatus.verified
-    account.last_activity_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(account)
-
-    # Use async send_to_user to avoid blocking the event loop with
-    # synchronous Redis publish.
-    await manager.send_to_user(
-        current_user.id,
-        {
-            "type": "account_update",
-            "user_id": current_user.id,
-            "account_id": account.id,
-            "status": account.status,
-        },
+    logger.info(
+        "event=verify_account_dispatched account_id=%d user_id=%d",
+        account_id, current_user.id,
     )
 
     return AccountVerifyResponse(needs_password=False, account=AccountResponse.model_validate(account))

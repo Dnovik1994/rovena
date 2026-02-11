@@ -23,6 +23,7 @@ from app.core.settings import get_settings
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.models.user import User
+from app.models.telegram_account import VerifyStatus
 from app.schemas.telegram_account import (
     AuthFlowStatusResponse,
     ConfirmCodeRequest,
@@ -32,9 +33,10 @@ from app.schemas.telegram_account import (
     SendCodeResponse,
     TgAccountCreate,
     TgAccountResponse,
+    VerifyAccountResponse,
 )
 from app.services.websocket_manager import manager
-from app.workers.tg_auth_tasks import confirm_code_task, confirm_password_task, send_code_task
+from app.workers.tg_auth_tasks import confirm_code_task, confirm_password_task, send_code_task, verify_account_task
 from app.workers.tasks import account_health_check, start_warming
 
 router = APIRouter(prefix="/tg-accounts", tags=["tg-accounts"])
@@ -409,6 +411,71 @@ def confirm_password(
         state="processing",
         next_step="poll",
         message="Verifying 2FA password...",
+    )
+
+
+# ─── VERIFY (session health check, idempotent) ──────────────────────
+
+@router.post("/{account_id}/verify", response_model=VerifyAccountResponse)
+@limiter.limit("5/minute")
+def verify_tg_account(
+    account_id: int,
+    request: Request,
+    current_user: User = Depends(require_permission("tg_accounts", "verify")),
+    db: Session = Depends(get_db),
+) -> VerifyAccountResponse:
+    """Start or poll a verify job for the account.
+
+    Idempotent: if a verify is already running (lease active), returns the
+    current status instead of starting a duplicate task.
+    """
+    account = _get_account_or_404(db, account_id, current_user)
+
+    # Must have a session to verify
+    allowed_states = {
+        TelegramAccountStatus.verified,
+        TelegramAccountStatus.active,
+        TelegramAccountStatus.cooldown,
+        TelegramAccountStatus.warming,
+        TelegramAccountStatus.error,
+    }
+    if account.status not in allowed_states:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot verify in state '{account.status.value}'. "
+            f"Account must have an active session.",
+        )
+
+    # Check if lease is already held (idempotent return)
+    if account.verifying:
+        from app.core.tz import ensure_utc
+        from app.models.telegram_account import VERIFY_LEASE_TTL_SECONDS
+        now = datetime.now(timezone.utc)
+        started = ensure_utc(account.verifying_started_at) if account.verifying_started_at else None
+        if started and (now - started).total_seconds() < VERIFY_LEASE_TTL_SECONDS:
+            logger.info(
+                "event=verify_already_running account_id=%d task_id=%s",
+                account.id, account.verifying_task_id,
+            )
+            return VerifyAccountResponse(
+                account_id=account.id,
+                verify_status=account.verify_status or VerifyStatus.running.value,
+                verify_reason=account.verify_reason,
+                verifying=True,
+                message="Verification is already in progress",
+                account_status=account.status,
+            )
+
+    # Dispatch verify task to Celery worker
+    _safe_dispatch(verify_account_task, account.id)
+
+    return VerifyAccountResponse(
+        account_id=account.id,
+        verify_status=VerifyStatus.pending.value,
+        verify_reason=None,
+        verifying=False,
+        message="Verification task dispatched",
+        account_status=account.status,
     )
 
 
