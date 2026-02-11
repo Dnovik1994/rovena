@@ -76,6 +76,9 @@ class ConfirmCodeRequest(BaseModel):
 
 class ConfirmCodeResponse(BaseModel):
     status: TgAccountStatus
+    flow_id: str = ""
+    state: str = ""
+    next_step: str = ""
     needs_password: bool = False
     account: TgAccountResponse | None = None
     message: str = ""
@@ -88,6 +91,9 @@ class ConfirmPasswordRequest(BaseModel):
 
 class ConfirmPasswordResponse(BaseModel):
     status: TgAccountStatus
+    flow_id: str = ""
+    state: str = ""
+    next_step: str = ""
     account: TgAccountResponse | None = None
     message: str = ""
 
