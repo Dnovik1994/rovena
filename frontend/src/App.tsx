@@ -74,8 +74,10 @@ const AppRoutes = (): JSX.Element => {
     return <Login />;
   }
 
+  const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+
   return (
-    <AppShell isAdmin={user?.role === "admin" || user?.role === "superadmin"}>
+    <AppShell isAdmin={isAdmin}>
       <Suspense fallback={<div className="rounded-2xl bg-slate-900/60 p-4 text-sm text-slate-300">Загрузка...</div>}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -86,7 +88,7 @@ const AppRoutes = (): JSX.Element => {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/subscription" element={<Subscription />} />
-          <Route path="/admin" element={<Admin />} />
+          <Route path="/admin" element={isAdmin ? <Admin /> : <Navigate to="/" replace />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/error/:code" element={<ErrorPage />} />
           <Route path="*" element={<NotFound />} />

@@ -94,7 +94,7 @@ def admin_users(
             "id": user.id,
             "telegram_id": user.telegram_id,
             "username": user.username,
-            "is_admin": user.is_admin,
+            "is_admin": user.has_admin_access,
             "is_active": user.is_active,
             "role": user.role.value if user.role else None,
             "tariff": (
@@ -129,7 +129,7 @@ def admin_user_detail(
         "username": user.username,
         "first_name": user.first_name or "",
         "last_name": user.last_name or "",
-        "is_admin": user.is_admin,
+        "is_admin": user.has_admin_access,
         "is_active": user.is_active,
         "role": user.role.value if user.role else None,
         "tariff": (
@@ -177,7 +177,7 @@ async def admin_user_update(
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "is_admin": user.is_admin,
+        "is_admin": user.has_admin_access,
         "is_active": user.is_active,
         "role": user.role.value if user.role else None,
         "tariff": (
@@ -219,7 +219,7 @@ async def admin_user_tariff_update(
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "is_admin": user.is_admin,
+        "is_admin": user.has_admin_access,
         "is_active": user.is_active,
         "role": user.role.value if user.role else None,
         "onboarding_completed": user.onboarding_completed,

@@ -235,7 +235,12 @@ def _bootstrap_admin() -> None:
             user = db.query(User).filter(User.telegram_id == admin_telegram_id).first()
 
         if not user:
-            logger.info("Admin bootstrap skipped; target user not found")
+            logger.warning(
+                "Admin bootstrap skipped; target user not found in DB "
+                "(admin_user_id=%s, admin_telegram_id=%s)",
+                admin_user_id,
+                admin_telegram_id,
+            )
             return
 
         # Only promote — never downgrade a superadmin to admin.
