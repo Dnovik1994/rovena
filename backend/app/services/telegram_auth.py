@@ -22,9 +22,46 @@ class TelegramAuthError(ValueError):
         self.hash_prefix = hash_prefix
 
 
-def _build_data_check_string(data: dict[str, Any]) -> str:
-    items = [f"{key}={value}" for key, value in sorted(data.items())]
-    return "\n".join(items)
+def _parse_init_data_pairs(init_data: str) -> tuple[list[tuple[str, str]], str]:
+    """Parse initData into (data_pairs, hash_value).
+
+    Uses parse_qsl to preserve all key-value pairs (no dict() dedup).
+    Rejects initData with duplicate keys — Telegram spec does not define
+    them, so duplicates indicate tampering or a malformed payload.
+    """
+    try:
+        pairs = parse_qsl(init_data, strict_parsing=True)
+    except ValueError as exc:
+        raise TelegramAuthError("Malformed initData", "parse_failed") from exc
+
+    hash_value: str | None = None
+    data_pairs: list[tuple[str, str]] = []
+    for key, value in pairs:
+        if key == "hash":
+            hash_value = value
+        else:
+            data_pairs.append((key, value))
+
+    if not hash_value:
+        raise TelegramAuthError("Missing hash in initData", "missing_hash")
+
+    # Reject duplicate keys (policy: duplicates are not part of the Telegram
+    # spec and may indicate parameter injection).
+    seen_keys = [k for k, _ in data_pairs]
+    if len(seen_keys) != len(set(seen_keys)):
+        raise TelegramAuthError(
+            "Duplicate keys in initData",
+            "parse_failed",
+            hash_prefix=hash_value[:8],
+        )
+
+    return data_pairs, hash_value
+
+
+def _build_data_check_string(pairs: list[tuple[str, str]]) -> str:
+    """Build data_check_string per Telegram spec: sort by key, join with \\n."""
+    sorted_pairs = sorted(pairs, key=lambda p: p[0])
+    return "\n".join(f"{key}={value}" for key, value in sorted_pairs)
 
 
 def validate_init_data(init_data: str) -> dict[str, Any]:
@@ -37,16 +74,10 @@ def validate_init_data(init_data: str) -> dict[str, Any]:
     if not init_data:
         raise TelegramAuthError("Missing initData", "missing_init_data")
 
-    try:
-        parsed = dict(parse_qsl(init_data, strict_parsing=True))
-    except ValueError as exc:
-        raise TelegramAuthError("Malformed initData", "parse_failed") from exc
-    hash_value = parsed.pop("hash", None)
-    if not hash_value:
-        raise TelegramAuthError("Missing hash in initData", "missing_hash")
+    data_pairs, hash_value = _parse_init_data_pairs(init_data)
     hash_prefix = hash_value[:8]
 
-    data_check_string = _build_data_check_string(parsed)
+    data_check_string = _build_data_check_string(data_pairs)
     # Telegram WebApp signature algorithm:
     #   1) secret_key = HMAC_SHA256(key="WebAppData", msg=bot_token)
     #   2) hash = HMAC_SHA256(key=secret_key, msg=data_check_string)
@@ -67,6 +98,8 @@ def validate_init_data(init_data: str) -> dict[str, Any]:
             "hmac_mismatch",
             hash_prefix=hash_prefix,
         )
+
+    parsed = dict(data_pairs)
 
     if settings.telegram_auth_ttl_seconds > 0:
         auth_date_raw = parsed.get("auth_date")

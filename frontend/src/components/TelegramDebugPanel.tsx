@@ -10,10 +10,15 @@ const TelegramDebugPanel = (): JSX.Element | null => {
   }
 
   const info = getTelegramDebugInfo();
+  const isDev = import.meta.env.DEV;
+  const mask = (v: string | number | undefined | null) =>
+    isDev ? v : "***";
 
   return (
     <div className="mt-4 w-full rounded-lg border border-slate-700 bg-slate-900 p-3 text-left text-xs text-slate-400">
-      <p className="mb-2 font-semibold text-slate-300">Telegram Debug</p>
+      <p className="mb-2 font-semibold text-slate-300">
+        Telegram Debug {!isDev && "(production — PII masked)"}
+      </p>
       <table className="w-full">
         <tbody>
           <tr>
@@ -32,15 +37,15 @@ const TelegramDebugPanel = (): JSX.Element | null => {
           </tr>
           <tr>
             <td className="pr-2 text-slate-500">user id</td>
-            <td>{info.userId}</td>
+            <td>{mask(info.userId)}</td>
           </tr>
           <tr>
             <td className="pr-2 text-slate-500">auth_date</td>
-            <td>{info.authDate}</td>
+            <td>{mask(info.authDate)}</td>
           </tr>
           <tr>
             <td className="pr-2 text-slate-500">query_id</td>
-            <td>{info.queryId}</td>
+            <td>{mask(info.queryId)}</td>
           </tr>
           <tr>
             <td className="pr-2 text-slate-500">platform</td>

@@ -25,7 +25,7 @@ def _is_admin(user: User) -> bool:
 
 
 @router.get("/accounts", response_model=list[AccountResponse])
-async def list_accounts(
+def list_accounts(
     current_user: User = Depends(require_permission("accounts", "list")),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -47,7 +47,7 @@ def _resolve_user_id(db: Session, value: int) -> User | None:
 
 
 @router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_account(
+def create_account(
     payload: AccountCreate,
     current_user: User = Depends(require_permission("accounts", "create")),
     tariff_limits: dict[str, int] = Depends(get_tariff_limits),
@@ -103,7 +103,7 @@ async def create_account(
 
 
 @router.patch("/accounts/{account_id}", response_model=AccountResponse)
-async def update_account(
+def update_account(
     account_id: int,
     payload: AccountUpdate,
     current_user: User = Depends(require_permission("accounts", "update")),
@@ -134,7 +134,7 @@ async def update_account(
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_account(
+def delete_account(
     account_id: int,
     current_user: User = Depends(require_permission("accounts", "delete")),
     db: Session = Depends(get_db),
@@ -154,7 +154,7 @@ async def delete_account(
 
 @router.post("/accounts/{account_id}/start-warming", response_model=AccountResponse)
 @limiter.limit("5/minute")
-async def start_account_warming(
+def start_account_warming(
     account_id: int,
     request: Request,
     current_user: User = Depends(require_permission("accounts", "start_warming")),
@@ -243,7 +243,7 @@ async def verify_account(
 
 
 @router.post("/accounts/{account_id}/regenerate-device", response_model=AccountResponse)
-async def regenerate_device_config(
+def regenerate_device_config(
     account_id: int,
     current_user: User = Depends(require_permission("accounts", "update")),
     db: Session = Depends(get_db),

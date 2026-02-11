@@ -12,7 +12,7 @@ router = APIRouter(tags=["sources"])
 
 
 @router.get("/sources", response_model=list[SourceResponse])
-async def list_sources(
+def list_sources(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -30,7 +30,7 @@ async def list_sources(
 
 
 @router.post("/sources", response_model=SourceResponse, status_code=status.HTTP_201_CREATED)
-async def create_source(
+def create_source(
     payload: SourceCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -57,7 +57,7 @@ async def create_source(
 
 
 @router.patch("/sources/{source_id}", response_model=SourceResponse)
-async def update_source(
+def update_source(
     source_id: int,
     payload: SourceUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -87,7 +87,7 @@ async def update_source(
 
 
 @router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_source(
+def delete_source(
     source_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),

@@ -1,9 +1,12 @@
+import logging
 from functools import lru_cache
 import json
 from typing import List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -32,7 +35,7 @@ class Settings(BaseSettings):
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
     telegram_client_enabled: bool | None = None
-    telegram_auth_ttl_seconds: int = 0
+    telegram_auth_ttl_seconds: int = 300
     session_enc_key: str = ""
     auth_flow_ttl_seconds: int = 300
     auth_flow_max_attempts: int = 5
@@ -104,10 +107,21 @@ def get_settings() -> Settings:
         if settings.stripe_secret_key or settings.stripe_webhook_secret:
             if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
                 raise ValueError("Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET!")
+        if settings.telegram_auth_ttl_seconds <= 0:
+            raise ValueError(
+                "TELEGRAM_AUTH_TTL_SECONDS must be > 0 in production "
+                "(replay protection). Recommended: 300."
+            )
         if not settings.cors_origins or settings.cors_origins == ["*"]:
             raise ValueError("Set CORS_ORIGINS for production!")
         settings.cors_origins = settings.cors_origins or []
     else:
+        if settings.telegram_auth_ttl_seconds <= 0:
+            logger.warning(
+                "TELEGRAM_AUTH_TTL_SECONDS=%d — initData replay protection "
+                "disabled. This is acceptable for local development only.",
+                settings.telegram_auth_ttl_seconds,
+            )
         settings.cors_origins = ["*"]
 
     settings.cors_allow_credentials = bool(settings.cors_origins) and settings.cors_origins != ["*"]

@@ -16,6 +16,8 @@ const TelegramWebAppGuard = ({ children }: TelegramWebAppGuardProps): JSX.Elemen
   const [showDebug, setShowDebug] = useState(debugEnabled);
 
   const debugInfo = debugEnabled ? getTelegramDebugInfo() : null;
+  const isDev = import.meta.env.DEV;
+  const mask = (v: string | undefined | null) => (isDev ? (v ?? "N/A") : "***");
   const debugRows = debugEnabled
     ? [
         { label: "userAgent", value: navigator.userAgent },
@@ -23,9 +25,9 @@ const TelegramWebAppGuard = ({ children }: TelegramWebAppGuardProps): JSX.Elemen
         { label: "isTelegramWebApp", value: String(debugInfo?.isTelegramWebApp ?? false) },
         { label: "initData length", value: String(debugInfo?.initDataLength ?? 0) },
         { label: "initDataUnsafe keys", value: String(debugInfo?.initDataUnsafeKeys ?? 0) },
-        { label: "user id", value: debugInfo?.userId ?? "N/A" },
-        { label: "auth_date", value: debugInfo?.authDate ?? "N/A" },
-        { label: "query_id", value: debugInfo?.queryId ?? "N/A" },
+        { label: "user id", value: mask(debugInfo?.userId) },
+        { label: "auth_date", value: mask(debugInfo?.authDate) },
+        { label: "query_id", value: mask(debugInfo?.queryId) },
       ]
     : [];
   const telegramType = typeof window.Telegram;

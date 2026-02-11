@@ -11,7 +11,7 @@ router = APIRouter(tags=["projects"])
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
-async def list_projects(
+def list_projects(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -29,7 +29,7 @@ async def list_projects(
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-async def create_project(
+def create_project(
     payload: ProjectCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -46,7 +46,7 @@ async def create_project(
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
-async def update_project(
+def update_project(
     project_id: int,
     payload: ProjectUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -76,7 +76,7 @@ async def update_project(
 
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_project(
+def delete_project(
     project_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
