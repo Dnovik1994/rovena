@@ -1,7 +1,7 @@
 """add telegram_accounts and telegram_auth_flows tables
 
 Revision ID: 0018_add_telegram_accounts_auth_flows
-Revises: 0017_add_performance_indexes
+Revises: 0017b_widen_alembic_version_num
 Create Date: 2026-02-10 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 from sqlalchemy import inspect as sa_inspect
 
 revision = "0018_add_telegram_accounts_auth_flows"
-down_revision = "0017_add_performance_indexes"
+down_revision = "0017b_widen_alembic_version_num"
 branch_labels = None
 depends_on = None
 

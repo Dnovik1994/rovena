@@ -366,7 +366,8 @@ services:
       start_period: 10s
 
   cron:
-    image: alpine:3.20
+    build:
+      context: ./cron
     restart: unless-stopped
     logging: *default-logging
     networks:
@@ -379,7 +380,6 @@ services:
     volumes:
       - ./crontab.txt:/etc/crontabs/root:ro
       - backups:/backups
-    command: sh -c "apk add --no-cache mysql-client redis && crond -f -l 2"
     depends_on:
       db:
         condition: service_healthy
