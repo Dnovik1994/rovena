@@ -8,6 +8,8 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from app.core.tz import ensure_utc
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
@@ -248,10 +250,7 @@ def get_auth_flow_status(
     # This means the worker never picked up the task (crashed, Redis down, etc.).
     if flow.state == AuthFlowState.init and flow.created_at:
         now = datetime.now(timezone.utc)
-        created = flow.created_at
-        # Ensure both datetimes are offset-aware for subtraction
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
+        created = ensure_utc(flow.created_at)
         age_seconds = (now - created).total_seconds()
         if age_seconds > _FLOW_INIT_TIMEOUT_SECONDS:
             flow.state = AuthFlowState.failed
@@ -301,7 +300,7 @@ def confirm_code(
             detail=f"Flow is in state '{flow.state.value}', expected 'wait_code'",
         )
 
-    if flow.expires_at and flow.expires_at < datetime.now(timezone.utc):
+    if ensure_utc(flow.expires_at) and ensure_utc(flow.expires_at) < datetime.now(timezone.utc):
         flow.state = AuthFlowState.expired
         db.commit()
         raise HTTPException(
