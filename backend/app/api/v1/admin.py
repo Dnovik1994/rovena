@@ -35,12 +35,12 @@ class AdminCheckoutRequest(BaseModel):
 
 
 @router.get("/me", response_model=UserResponse)
-async def admin_me(
+def admin_me(
     current_user: User = Depends(get_current_admin),
 ) -> UserResponse:
     return UserResponse.model_validate(current_user)
 @router.get("/stats")
-async def admin_stats(
+def admin_stats(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
@@ -67,7 +67,7 @@ async def admin_stats(
 
 
 @router.get("/users")
-async def admin_users(
+def admin_users(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
     search: str | None = Query(default=None, max_length=100),
@@ -115,7 +115,7 @@ async def admin_users(
 
 
 @router.get("/users/{user_id}")
-async def admin_user_detail(
+def admin_user_detail(
     user_id: int,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
@@ -327,7 +327,7 @@ async def admin_tariff_delete(
 
 
 @router.post("/subscriptions/create-checkout")
-async def admin_create_checkout(
+def admin_create_checkout(
     payload: AdminCheckoutRequest,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
@@ -383,7 +383,7 @@ async def admin_create_checkout(
 
 
 @router.get("/proxies")
-async def admin_proxies(
+def admin_proxies(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
     limit: int = Query(default=50, ge=1, le=200),
@@ -407,7 +407,7 @@ async def admin_proxies(
 
 
 @router.get("/proxies/{proxy_id}")
-async def admin_proxy_detail(
+def admin_proxy_detail(
     proxy_id: int,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
@@ -428,7 +428,7 @@ async def admin_proxy_detail(
 
 
 @router.post("/proxies/{proxy_id}/validate")
-async def admin_proxy_validate(
+def admin_proxy_validate(
     proxy_id: int,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
@@ -447,7 +447,7 @@ async def admin_proxy_validate(
 
 
 @router.get("/accounts")
-async def admin_accounts(
+def admin_accounts(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
     limit: int = Query(default=50, ge=1, le=200),

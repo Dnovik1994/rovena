@@ -12,7 +12,7 @@ router = APIRouter(tags=["contacts"])
 
 
 @router.get("/contacts", response_model=list[ContactResponse])
-async def list_contacts(
+def list_contacts(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -30,7 +30,7 @@ async def list_contacts(
 
 
 @router.post("/contacts", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
-async def create_contact(
+def create_contact(
     payload: ContactCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -61,7 +61,7 @@ async def create_contact(
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactResponse)
-async def update_contact(
+def update_contact(
     contact_id: int,
     payload: ContactUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -95,7 +95,7 @@ async def update_contact(
 
 
 @router.delete("/contacts/{contact_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_contact(
+def delete_contact(
     contact_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),

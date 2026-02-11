@@ -12,7 +12,7 @@ router = APIRouter(tags=["targets"])
 
 
 @router.get("/targets", response_model=list[TargetResponse])
-async def list_targets(
+def list_targets(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
@@ -30,7 +30,7 @@ async def list_targets(
 
 
 @router.post("/targets", response_model=TargetResponse, status_code=status.HTTP_201_CREATED)
-async def create_target(
+def create_target(
     payload: TargetCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -57,7 +57,7 @@ async def create_target(
 
 
 @router.patch("/targets/{target_id}", response_model=TargetResponse)
-async def update_target(
+def update_target(
     target_id: int,
     payload: TargetUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -87,7 +87,7 @@ async def update_target(
 
 
 @router.delete("/targets/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_target(
+def delete_target(
     target_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),

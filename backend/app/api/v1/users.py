@@ -11,7 +11,7 @@ router = APIRouter(tags=["users"])
 
 
 @router.get("/me", response_model=UserResponse)
-async def read_me(current_user: User = Depends(get_current_active_user)) -> UserResponse:
+def read_me(current_user: User = Depends(get_current_active_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
 
 

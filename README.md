@@ -17,7 +17,7 @@ cp .env.example .env
 
 2. Заполните `.env`:
 - `TELEGRAM_BOT_TOKEN` — токен бота для проверки initData.
-- `TELEGRAM_AUTH_TTL_SECONDS` — TTL initData (секунды). Установите `0`, чтобы отключить проверку при локальной разработке.
+- `TELEGRAM_AUTH_TTL_SECONDS` — TTL initData (секунды, по умолчанию 300). **Production: обязательно > 0** (защита от replay). Установите `0` только для локальной разработки.
 - `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` — данные приложения Telegram (my.telegram.org).
 - `SENTRY_DSN` — DSN для Sentry (опционально, если используете мониторинг).
 - `STRIPE_SECRET_KEY` и `STRIPE_WEBHOOK_SECRET` — ключи Stripe для подписок.
@@ -532,9 +532,20 @@ touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
 
 ## Production Checklist
 
+### Обязательные env-переменные для production
+
+| Переменная | Требование |
+|---|---|
+| `PRODUCTION` | `true` |
+| `JWT_SECRET` | Сильный секрет (`openssl rand -hex 32`) |
+| `DATABASE_URL` | Не дефолтный |
+| `TELEGRAM_BOT_TOKEN` | Токен бота |
+| `TELEGRAM_AUTH_TTL_SECONDS` | > 0 (рекомендуется 300) |
+| `CORS_ORIGINS` | JSON-список реальных доменов |
+
 - DNS указывает на сервер и порты 80/443 открыты.
 - `PRODUCTION=true` и валидные secrets в `.env`.
-- Traefik выпускает и обновляет сертификаты Let’s Encrypt автоматически.
+- Traefik выпускает и обновляет сертификаты Let's Encrypt автоматически.
 - Firewall: разрешены 80/443, админ IP whitelist.
 - Ротация бэкапов и мониторинг `/backups`.
 - UFW: `ufw allow 80` + `ufw allow 443` + `ufw allow OpenSSH`.

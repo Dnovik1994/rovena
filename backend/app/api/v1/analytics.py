@@ -26,7 +26,7 @@ def _build_series(
 
 
 @router.get("/analytics/dashboard", response_model=DashboardAnalyticsResponse)
-async def dashboard_analytics(
+def dashboard_analytics(
     window_days: int = Query(default=14, ge=7, le=60),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),

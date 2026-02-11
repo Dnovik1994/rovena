@@ -47,7 +47,7 @@ def _extract_init_data_metadata(init_data: str) -> dict[str, Any]:
 
 @router.post("/auth/telegram", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def auth_via_telegram(
+def auth_via_telegram(
     request: Request,
     payload: TelegramAuthRequest,
     db: Session = Depends(get_db),
@@ -125,7 +125,7 @@ async def auth_via_telegram(
 
 @router.post("/auth/refresh", response_model=TokenResponse)
 @limiter.limit("20/minute")
-async def refresh_access_token(
+def refresh_access_token(
     request: Request,
     payload: RefreshTokenRequest,
     db: Session = Depends(get_db),
