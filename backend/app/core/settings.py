@@ -2,6 +2,7 @@ import logging
 from functools import lru_cache
 import json
 from typing import List
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,6 +49,8 @@ class Settings(BaseSettings):
     admin_telegram_id: int | None = None
     admin_email: str = ""
 
+    dev_allow_localhost: bool = False
+
     proxy_config_path: str = "/app/3proxy.cfg"
     proxy_base_port: int = 10000
     proxy_reload_cmd: str = ""
@@ -90,8 +93,111 @@ class Settings(BaseSettings):
         return "/api/v1"
 
 
-@lru_cache
+def _is_localhost(url: str) -> bool:
+    """Return True if *url* points to a localhost address."""
+    try:
+        hostname = urlparse(url).hostname or ""
+    except Exception:
+        return False
+    return hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
 
+
+def validate_settings(settings: Settings) -> None:
+    """Production preflight checks.
+
+    In production mode — raises ``ValueError`` on misconfiguration.
+    In development mode — logs warnings but never blocks startup.
+    """
+    errors: list[str] = []
+
+    if settings.production:
+        # -- CORS_ORIGINS --
+        if not settings.cors_origins:
+            errors.append(
+                "CORS_ORIGINS is empty. "
+                "Set it to your frontend domain(s), e.g. "
+                f'CORS_ORIGINS=\'["{settings.web_base_url}"]\'.'
+            )
+        elif settings.cors_origins == ["*"] or "*" in settings.cors_origins:
+            errors.append(
+                "CORS_ORIGINS contains wildcard '*'. "
+                "Wildcard is not allowed in production — specify exact origin(s)."
+            )
+
+        # -- WEB_BASE_URL --
+        if not settings.web_base_url:
+            errors.append(
+                "WEB_BASE_URL is empty. "
+                "Set it to your Telegram Mini App URL, e.g. "
+                "WEB_BASE_URL=https://kass.freestorms.top"
+            )
+        elif settings.cors_origins and settings.web_base_url not in settings.cors_origins:
+            errors.append(
+                f"WEB_BASE_URL={settings.web_base_url!r} is not listed in "
+                f"CORS_ORIGINS={settings.cors_origins!r}. "
+                "The frontend origin must be in the allowed list."
+            )
+
+        # -- Localhost in production --
+        if not settings.dev_allow_localhost:
+            localhost_origins = [o for o in (settings.cors_origins or []) if _is_localhost(o)]
+            if localhost_origins:
+                errors.append(
+                    f"CORS_ORIGINS contains localhost URL(s): {localhost_origins}. "
+                    "Remove them or set DEV_ALLOW_LOCALHOST=true to override."
+                )
+            if settings.web_base_url and _is_localhost(settings.web_base_url):
+                errors.append(
+                    f"WEB_BASE_URL={settings.web_base_url!r} points to localhost. "
+                    "Set a real domain or DEV_ALLOW_LOCALHOST=true to override."
+                )
+
+        # -- TELEGRAM_AUTH_TTL_SECONDS --
+        if settings.telegram_auth_ttl_seconds <= 0:
+            errors.append(
+                "TELEGRAM_AUTH_TTL_SECONDS must be > 0 in production "
+                "(replay protection). Recommended: 300."
+            )
+
+        # -- ADMIN_TELEGRAM_ID (if admin bootstrap is intended) --
+        if settings.admin_telegram_id is not None:
+            if not isinstance(settings.admin_telegram_id, int):
+                errors.append(
+                    f"ADMIN_TELEGRAM_ID={settings.admin_telegram_id!r} "
+                    "must be a numeric Telegram user ID."
+                )
+
+        if errors:
+            msg = "Production preflight failed:\n  • " + "\n  • ".join(errors)
+            raise ValueError(msg)
+
+    else:
+        # Development mode — warn but don't block
+        if settings.cors_origins and "*" in settings.cors_origins:
+            logger.warning(
+                "CORS_ORIGINS contains wildcard '*' — acceptable in development only."
+            )
+        if settings.telegram_auth_ttl_seconds <= 0:
+            logger.warning(
+                "TELEGRAM_AUTH_TTL_SECONDS=%d — initData replay protection "
+                "disabled. This is acceptable for local development only.",
+                settings.telegram_auth_ttl_seconds,
+            )
+
+    # Log effective config (no secrets)
+    logger.info(
+        "Effective config | ENVIRONMENT=%s | WEB_BASE_URL=%s | "
+        "CORS_ORIGINS=%s | TELEGRAM_AUTH_TTL_SECONDS=%d | "
+        "admin_id_present=%s",
+        settings.environment,
+        settings.web_base_url,
+        settings.cors_origins,
+        settings.telegram_auth_ttl_seconds,
+        settings.admin_telegram_id is not None,
+    )
+
+
+@lru_cache
 def get_settings() -> Settings:
     settings = Settings()
     if settings.telegram_client_enabled is None:
@@ -107,25 +213,14 @@ def get_settings() -> Settings:
         if settings.stripe_secret_key or settings.stripe_webhook_secret:
             if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
                 raise ValueError("Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET!")
-        if settings.telegram_auth_ttl_seconds <= 0:
-            raise ValueError(
-                "TELEGRAM_AUTH_TTL_SECONDS must be > 0 in production "
-                "(replay protection). Recommended: 300."
-            )
-        if not settings.cors_origins or settings.cors_origins == ["*"]:
-            raise ValueError(
-                "CORS_ORIGINS must include your frontend domain(s) in production. "
-                f"Example: CORS_ORIGINS='[\"{settings.web_base_url}\"]'. "
-                "Wildcard '*' is not allowed."
-            )
+
+        # Full preflight validation (CORS, WEB_BASE_URL, TTL, admin, localhost)
+        validate_settings(settings)
+
         settings.cors_origins = settings.cors_origins or []
     else:
-        if settings.telegram_auth_ttl_seconds <= 0:
-            logger.warning(
-                "TELEGRAM_AUTH_TTL_SECONDS=%d — initData replay protection "
-                "disabled. This is acceptable for local development only.",
-                settings.telegram_auth_ttl_seconds,
-            )
+        # Development preflight (warnings only)
+        validate_settings(settings)
         settings.cors_origins = ["*"]
 
     settings.cors_allow_credentials = bool(settings.cors_origins) and settings.cors_origins != ["*"]

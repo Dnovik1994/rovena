@@ -131,6 +131,7 @@ async def on_startup() -> None:
         settings.cors_origins,
         settings.cors_allow_credentials,
     )
+    logger.info("Config preflight passed (validated in get_settings)")
     # Configure WS manager with Redis for cross-process pub/sub
     if settings.redis_url:
         manager.configure_redis(settings.redis_url)
