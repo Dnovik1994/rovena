@@ -23,6 +23,17 @@ while [[ "$attempt" -le "$max_retries" ]]; do
       log "Alembic downgrade to 0014 failed."
       exit 1
     fi
+  elif echo "$upgrade_output" | grep -Eqi "Data too long for column.*version_num|1406.*version_num"; then
+    log "Detected version_num column too narrow, widening to VARCHAR(128)..."
+    python -c "
+from sqlalchemy import create_engine, text
+from app.core.settings import get_settings
+engine = create_engine(get_settings().database_url)
+with engine.connect() as conn:
+    conn.execute(text('ALTER TABLE alembic_version MODIFY version_num VARCHAR(128) NOT NULL'))
+    conn.commit()
+print('version_num widened successfully')
+" 2>&1 && log "Column widened, retrying migration." || log "Column widen failed, retrying anyway."
   else
     log "Alembic upgrade failed with unexpected error:"
     echo "$upgrade_output"
