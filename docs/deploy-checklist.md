@@ -12,7 +12,7 @@ Use this checklist before and after the first production run.
 - [ ] `.env` is filled with all required secrets (JWT_SECRET, TELEGRAM keys, Stripe, Sentry).
 - [ ] `PRODUCTION=true`.
 - [ ] `TELEGRAM_AUTH_TTL_SECONDS` > 0 (recommended 300). App will refuse to start if <= 0 in production.
-- [ ] `CORS_ORIGINS` set to real domain(s), e.g. `["https://kass.freestorms.top"]`.
+- [ ] `CORS_ORIGINS` set to real domain(s), e.g. `["https://kass.freestorms.top"]`. Must match `WEB_BASE_URL`. Wildcard `*` is rejected in production.
 - [ ] `DOMAIN` и `LE_EMAIL` заданы в `.env`.
 - [ ] `letsencrypt/acme.json` создан и имеет права `600`.
 

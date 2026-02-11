@@ -113,7 +113,11 @@ def get_settings() -> Settings:
                 "(replay protection). Recommended: 300."
             )
         if not settings.cors_origins or settings.cors_origins == ["*"]:
-            raise ValueError("Set CORS_ORIGINS for production!")
+            raise ValueError(
+                "CORS_ORIGINS must include your frontend domain(s) in production. "
+                f"Example: CORS_ORIGINS='[\"{settings.web_base_url}\"]'. "
+                "Wildcard '*' is not allowed."
+            )
         settings.cors_origins = settings.cors_origins or []
     else:
         if settings.telegram_auth_ttl_seconds <= 0:

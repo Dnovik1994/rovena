@@ -126,6 +126,11 @@ async def on_startup() -> None:
         resolved_port,
         settings.api_v1_prefix,
     )
+    logger.info(
+        "CORS config | origins=%s | credentials=%s",
+        settings.cors_origins,
+        settings.cors_allow_credentials,
+    )
     # Configure WS manager with Redis for cross-process pub/sub
     if settings.redis_url:
         manager.configure_redis(settings.redis_url)
