@@ -223,3 +223,30 @@ def test_non_admin_user_denied_admin_endpoint_after_login(client, monkeypatch):
     assert stats_resp.status_code == status.HTTP_403_FORBIDDEN
 
     get_settings.cache_clear()
+
+
+def test_403_does_not_invalidate_session(client):
+    """After receiving 403 on an admin endpoint the same token must still
+    work for regular user endpoints.  The frontend relies on this: it must
+    NOT clear tokens on 403 (only on 401)."""
+    user = _create_user(telegram_id=44001, is_admin=False)
+    token = create_access_token(str(user.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. 403 on admin endpoint
+    resp_admin = client.get("/api/v1/admin/stats", headers=headers)
+    assert resp_admin.status_code == status.HTTP_403_FORBIDDEN
+
+    # 2. Regular /me still works with the same token
+    resp_me = client.get("/api/v1/me", headers=headers)
+    assert resp_me.status_code == status.HTTP_200_OK
+    assert resp_me.json()["id"] == user.id
+
+
+def test_401_on_invalid_token(client):
+    """An invalid/expired token must return 401, signalling the frontend
+    to attempt a token refresh (and clear tokens if refresh fails)."""
+    headers = {"Authorization": "Bearer invalid-token-value"}
+
+    resp = client.get("/api/v1/me", headers=headers)
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED

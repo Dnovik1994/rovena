@@ -289,7 +289,7 @@ class SecurityHeadersMiddleware:
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 mutable = MutableHeaders(scope=message)
-                csp = "default-src 'self'; frame-ancestors 'self'; base-uri 'self';"
+                csp = "default-src 'self'; frame-ancestors 'self' https://web.telegram.org https://t.me; base-uri 'self';"
                 if settings.production:
                     csp = f"{csp} upgrade-insecure-requests;"
                 mutable["X-Content-Type-Options"] = "nosniff"
