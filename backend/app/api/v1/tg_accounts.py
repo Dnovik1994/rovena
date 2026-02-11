@@ -5,6 +5,7 @@ keeping the async event loop free for WebSocket / background tasks.
 """
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -60,30 +61,59 @@ def _get_account_or_404(
     return account
 
 
-def _safe_dispatch(task, *args) -> None:
-    """Dispatch a Celery task with fail-fast behaviour.
+_DISPATCH_TIMEOUT_SECONDS = 10
 
-    If the broker (Redis) is unreachable, ``task.delay()`` may block
-    indefinitely.  We catch connection errors and raise 502 so the
-    frontend gets a clear signal instead of a timeout.
+
+def _safe_dispatch(task, *args) -> None:
+    """Dispatch a Celery task with a bounded timeout.
+
+    ``task.delay()`` acquires a connection from the Celery broker pool.
+    If the single pool connection is stale or contended, the call can
+    block indefinitely.  We run the publish in a daemon thread and
+    enforce a hard timeout so the HTTP request always finishes.
     """
-    try:
-        t0 = time.monotonic()
-        task.delay(*args)
+    exc_holder: list[BaseException | None] = [None]
+    done = threading.Event()
+
+    def _publish() -> None:
+        try:
+            task.delay(*args)
+        except BaseException as e:
+            exc_holder[0] = e
+        finally:
+            done.set()
+
+    t0 = time.monotonic()
+    thread = threading.Thread(target=_publish, daemon=True)
+    thread.start()
+
+    if not done.wait(timeout=_DISPATCH_TIMEOUT_SECONDS):
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        logger.info(
-            "event=task_dispatched task=%s elapsed_ms=%d",
+        logger.error(
+            "event=task_dispatch_timeout task=%s elapsed_ms=%d",
             task.name, elapsed_ms,
         )
-    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Task dispatch timed out. Please try again.",
+        )
+
+    if exc_holder[0] is not None:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.error(
-            "event=task_dispatch_failed task=%s error=%s",
-            task.name, str(exc)[:200],
+            "event=task_dispatch_failed task=%s error=%s elapsed_ms=%d",
+            task.name, str(exc_holder[0])[:200], elapsed_ms,
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Task queue unavailable. Please try again in a moment.",
-        ) from exc
+        )
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        "event=task_dispatched task=%s elapsed_ms=%d",
+        task.name, elapsed_ms,
+    )
 
 
 # ─── LIST ────────────────────────────────────────────────────────────

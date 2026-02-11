@@ -51,10 +51,11 @@ async def get_current_user_id(
     return user_id_int
 
 
-async def get_current_active_user(
+def get_current_active_user(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ) -> User:
+    """Synchronous so FastAPI runs it in a threadpool, keeping the event loop free."""
     user = db.get(User, current_user_id)
     if not user:
         raise unauthorized("User not found")
@@ -63,7 +64,7 @@ async def get_current_active_user(
     return user
 
 
-async def get_current_admin(
+def get_current_admin(
     current_user: User = Depends(get_current_active_user),
 ) -> User:
     if not current_user.is_admin:

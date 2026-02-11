@@ -25,6 +25,19 @@ services:
       - --entrypoints.websecure.address=:443
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # ── Timeouts: prevent indefinite hangs when backend is slow ──
+      - --entrypoints.websecure.transport.respondingTimeouts.readTimeout=60s
+      - --entrypoints.websecure.transport.respondingTimeouts.writeTimeout=60s
+      - --serversTransport.forwardingTimeouts.dialTimeout=10s
+      - --serversTransport.forwardingTimeouts.responseHeaderTimeout=30s
+      # ── Access logs: JSON for structured debugging ──
+      - --accesslog=true
+      - --accesslog.format=json
+      - --accesslog.fields.headers.defaultmode=drop
+      - --accesslog.fields.headers.names.User-Agent=keep
+      - --accesslog.fields.headers.names.Content-Type=keep
+      - --accesslog.fields.headers.names.X-Request-ID=keep
+      # ── TLS / ACME ──
       - --certificatesresolvers.le.acme.httpchallenge=true
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${LE_EMAIL}
