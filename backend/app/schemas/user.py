@@ -1,6 +1,8 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.schemas.tariff import TariffResponse
+
+_ADMIN_ROLE_VALUES: frozenset[str] = frozenset({"admin", "superadmin"})
 
 
 class UserBase(BaseModel):
@@ -21,6 +23,12 @@ class UserBase(BaseModel):
         if value is None:
             return False
         return bool(value)
+
+    @model_validator(mode="after")
+    def derive_is_admin_from_role(self) -> "UserBase":
+        """is_admin is always derived from role — single source of truth."""
+        self.is_admin = (self.role or "") in _ADMIN_ROLE_VALUES
+        return self
 
     class Config:
         from_attributes = True

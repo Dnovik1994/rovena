@@ -12,7 +12,7 @@ from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.proxy import Proxy, ProxyStatus
 from app.models.tariff import Tariff
-from app.models.user import User, UserRole
+from app.models.user import ADMIN_ROLES, User, UserRole
 from app.schemas.tariff import TariffCreate, TariffResponse, TariffUpdate, UserTariffUpdate
 from app.schemas.user import UserResponse
 
@@ -161,11 +161,13 @@ async def admin_user_update(
         user.is_active = payload.is_active
     if payload.role is not None:
         try:
-            user.role = UserRole(payload.role)
+            new_role = UserRole(payload.role)
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role"
             ) from exc
+        user.role = new_role
+        user.is_admin = new_role in ADMIN_ROLES
     db.commit()
     db.refresh(user)
     await delete(f"user:{user.id}")

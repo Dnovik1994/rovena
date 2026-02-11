@@ -17,7 +17,7 @@ from app.core.security import (
     decode_refresh_token,
     hash_token,
 )
-from app.models.user import User, UserRole
+from app.models.user import ADMIN_ROLES, User, UserRole
 from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
@@ -111,21 +111,23 @@ def auth_via_telegram(
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     should_be_admin = _is_configured_admin(telegram_id)
     if not user:
+        role = UserRole.admin if should_be_admin else UserRole.user
         user = User(
             telegram_id=telegram_id,
             username=user_payload.get("username"),
             first_name=user_payload.get("first_name"),
             last_name=user_payload.get("last_name"),
-            is_admin=should_be_admin,
+            is_admin=role in ADMIN_ROLES,
             is_active=True,
-            role=UserRole.admin if should_be_admin else UserRole.user,
+            role=role,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-    elif user.is_admin != should_be_admin:
-        user.is_admin = should_be_admin
-        user.role = UserRole.admin if should_be_admin else user.role
+    elif should_be_admin and user.role not in ADMIN_ROLES:
+        # Only promote — never downgrade an existing admin/superadmin.
+        user.role = UserRole.admin
+        user.is_admin = True
         db.commit()
         db.refresh(user)
 
@@ -138,6 +140,8 @@ def auth_via_telegram(
         access_token=access_token,
         refresh_token=refresh_token,
         onboarding_needed=onboarding_needed,
+        is_admin=user.has_admin_access,
+        role=user.role.value if user.role else None,
     )
 
 
@@ -175,4 +179,9 @@ def refresh_access_token(
     new_refresh_token = create_refresh_token(str(user.id))
     user.refresh_token = hash_token(new_refresh_token)
     db.commit()
-    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=new_refresh_token,
+        is_admin=user.has_admin_access,
+        role=user.role.value if user.role else None,
+    )

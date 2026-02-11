@@ -75,7 +75,7 @@ const AppRoutes = (): JSX.Element => {
   }
 
   return (
-    <AppShell isAdmin={user?.is_admin ?? false}>
+    <AppShell isAdmin={user?.role === "admin" || user?.role === "superadmin"}>
       <Suspense fallback={<div className="rounded-2xl bg-slate-900/60 p-4 text-sm text-slate-300">Загрузка...</div>}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
