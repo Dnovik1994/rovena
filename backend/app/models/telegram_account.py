@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -19,6 +19,32 @@ class TelegramAccountStatus(str, Enum):
     warming = "warming"
     active = "active"
     cooldown = "cooldown"
+
+
+class VerifyStatus(str, Enum):
+    """Unified status for the verify pipeline."""
+    pending = "pending"
+    running = "running"
+    needs_password = "needs_password"
+    ok = "ok"
+    failed = "failed"
+    cooldown = "cooldown"
+
+
+class VerifyReasonCode(str, Enum):
+    """Normalized error reason codes for verify failures."""
+    floodwait = "floodwait"
+    bad_proxy = "bad_proxy"
+    invalid_code = "invalid_code"
+    password_required = "password_required"
+    network = "network"
+    client_disabled = "client_disabled"
+    phone_invalid = "phone_invalid"
+    code_expired = "code_expired"
+    unknown = "unknown"
+
+
+VERIFY_LEASE_TTL_SECONDS = 900  # 15 minutes
 
 
 class TelegramAccount(Base):
@@ -44,6 +70,13 @@ class TelegramAccount(Base):
     proxy_id: Mapped[int | None] = mapped_column(ForeignKey("proxies.id"), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ── Verify lease/lock fields ──
+    verifying: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    verifying_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verifying_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verify_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verify_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     warming_actions_completed: Mapped[int] = mapped_column(Integer, default=0)
     target_warming_actions: Mapped[int] = mapped_column(Integer, default=10)
     warming_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -61,3 +94,39 @@ class TelegramAccount(Base):
     )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def acquire_verify_lease(self, task_id: str) -> bool:
+        """Try to acquire a verify lease. Returns True if acquired.
+
+        The caller must check the return value and only proceed with
+        verification if True. The DB session must be committed by the caller.
+        """
+        now = datetime.now(timezone.utc)
+
+        # If already verifying, check if the lease has expired
+        if self.verifying and self.verifying_started_at:
+            from app.core.tz import ensure_utc
+            started = ensure_utc(self.verifying_started_at)
+            elapsed = (now - started).total_seconds()
+            if elapsed < VERIFY_LEASE_TTL_SECONDS:
+                return False  # Lease is still active
+
+        # Acquire the lease
+        self.verifying = True
+        self.verifying_started_at = now
+        self.verifying_task_id = task_id
+        self.verify_status = VerifyStatus.running.value
+        self.verify_reason = None
+        return True
+
+    def release_verify_lease(
+        self,
+        status: VerifyStatus,
+        reason: VerifyReasonCode | None = None,
+    ) -> None:
+        """Release the verify lease and record the outcome."""
+        self.verifying = False
+        self.verifying_started_at = None
+        self.verifying_task_id = None
+        self.verify_status = status.value
+        self.verify_reason = reason.value if reason else None

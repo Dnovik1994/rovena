@@ -2,12 +2,16 @@
 
 Each task handles one step of the OTP sign-in flow:
   send_code  -> confirm_code -> (optionally) confirm_password
+
+Plus a standalone verify_account task that validates existing sessions
+with lease-based idempotency.
 """
 
 import asyncio
 import logging
 import re
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.core.tz import ensure_utc, is_expired, utcnow
@@ -23,9 +27,23 @@ from pyrogram.errors import (
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.core.database import SessionLocal
+from app.core.metrics import (
+    active_verifications,
+    floodwait_seconds_hist,
+    proxy_marked_unhealthy_total,
+    verify_account_duration_seconds,
+    verify_fail_total,
+    verify_lease_acquired_total,
+    verify_lease_rejected_total,
+)
 from app.core.settings import get_settings
-from app.models.proxy import Proxy
-from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
+from app.models.proxy import Proxy, ProxyStatus
+from app.models.telegram_account import (
+    TelegramAccount,
+    TelegramAccountStatus,
+    VerifyReasonCode,
+    VerifyStatus,
+)
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.services.session_crypto import encrypt_session
 from app.services.websocket_manager import manager
@@ -38,6 +56,9 @@ settings = get_settings()
 # (Celery workers are separate processes with no WS clients)
 if settings.redis_url:
     manager.configure_redis(settings.redis_url)
+
+# ── Max network retries with jitter ──
+_MAX_NETWORK_RETRIES = 2
 
 
 def _mask_phone(phone: str) -> str:
@@ -74,6 +95,32 @@ def _broadcast_flow_update(flow: TelegramAuthFlow, account_id: int, owner_user_i
         "flow_id": flow.id,
         "state": flow.state.value if hasattr(flow.state, "value") else str(flow.state),
     })
+
+
+def _handle_floodwait(account: TelegramAccount, exc: FloodWait, db) -> None:
+    """Unified FloodWait handling: set cooldown + record metrics."""
+    wait_s = int(exc.value)
+    floodwait_seconds_hist.observe(wait_s)
+    account.status = TelegramAccountStatus.cooldown
+    account.cooldown_until = utcnow() + timedelta(seconds=wait_s)
+    account.last_error = f"FloodWait: {wait_s}s"
+    db.commit()
+
+
+def _mark_proxy_unhealthy(proxy: Proxy | None, db) -> None:
+    """Mark proxy as errored when it causes connection failures."""
+    if proxy is None:
+        return
+    proxy.status = ProxyStatus.error
+    proxy.last_check = utcnow()
+    db.commit()
+    proxy_marked_unhealthy_total.inc()
+
+
+def _is_network_error(exc: Exception) -> bool:
+    """Heuristic to identify network/timeout errors."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in ("timeout", "connection", "network", "eof", "reset", "refused"))
 
 
 # ─── send_code ───────────────────────────────────────────────────────
@@ -147,6 +194,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             account.status = TelegramAccountStatus.error
             account.last_error = "Telegram client disabled"
             db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.client_disabled.value).inc()
             log.warning("event=send_code_failed reason=client_disabled %s", ctx)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -156,29 +204,36 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             account.status = TelegramAccountStatus.error
             account.last_error = "Invalid phone number"
             db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_invalid.value).inc()
             log.warning("event=send_code_failed reason=phone_invalid %s", ctx)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except FloodWait as exc:
             flow.state = AuthFlowState.failed
             flow.last_error = f"FloodWait: retry after {exc.value}s"
-            account.last_error = f"FloodWait: {exc.value}s"
-            db.commit()
+            _handle_floodwait(account, exc, db)
+            verify_fail_total.labels(reason=VerifyReasonCode.floodwait.value).inc()
             log.warning("event=send_code_failed reason=flood_wait wait_s=%s %s", exc.value, ctx)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
             elapsed = int((time.monotonic() - t0) * 1000)
+
+            reason = VerifyReasonCode.network if _is_network_error(exc) else VerifyReasonCode.unknown
+            if reason == VerifyReasonCode.network and proxy:
+                _mark_proxy_unhealthy(proxy, db)
+
             log.exception(
-                "event=send_code_failed reason=exception %s error=%s elapsed_ms=%d",
-                ctx, err_msg, elapsed,
+                "event=send_code_failed reason=%s %s error=%s elapsed_ms=%d",
+                reason.value, ctx, err_msg, elapsed,
             )
             flow.state = AuthFlowState.failed
             flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
             account.last_error = err_msg
             db.commit()
+            verify_fail_total.labels(reason=reason.value).inc()
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
@@ -326,6 +381,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             flow.last_error = "Invalid verification code"
             account.last_error = "Invalid verification code"
             db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.invalid_code.value).inc()
             log.warning("event=confirm_code_failed reason=code_invalid %s", ctx)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -335,29 +391,36 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             account.status = TelegramAccountStatus.error
             account.last_error = "Verification code expired"
             db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.code_expired.value).inc()
             log.warning("event=confirm_code_failed reason=code_expired %s", ctx)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except FloodWait as exc:
             flow.last_error = f"FloodWait: retry after {exc.value}s"
-            account.last_error = f"FloodWait: {exc.value}s"
-            db.commit()
+            _handle_floodwait(account, exc, db)
+            verify_fail_total.labels(reason=VerifyReasonCode.floodwait.value).inc()
             log.warning("event=confirm_code_failed reason=flood_wait wait_s=%s %s", exc.value, ctx)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
             elapsed = int((time.monotonic() - t0) * 1000)
+
+            reason = VerifyReasonCode.network if _is_network_error(exc) else VerifyReasonCode.unknown
+            if reason == VerifyReasonCode.network and proxy:
+                _mark_proxy_unhealthy(proxy, db)
+
             log.exception(
-                "event=confirm_code_failed reason=exception %s error=%s elapsed_ms=%d",
-                ctx, err_msg, elapsed,
+                "event=confirm_code_failed reason=%s %s error=%s elapsed_ms=%d",
+                reason.value, ctx, err_msg, elapsed,
             )
             flow.state = AuthFlowState.failed
             flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
             account.last_error = err_msg
             db.commit()
+            verify_fail_total.labels(reason=reason.value).inc()
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
@@ -478,13 +541,14 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
                 flow.last_error = err
                 account.last_error = err
             db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.unknown.value).inc()
             log.warning("event=confirm_password_failed reason=bad_request %s", ctx)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
         except FloodWait as exc:
             flow.last_error = f"FloodWait: retry after {exc.value}s"
-            account.last_error = f"FloodWait: {exc.value}s"
-            db.commit()
+            _handle_floodwait(account, exc, db)
+            verify_fail_total.labels(reason=VerifyReasonCode.floodwait.value).inc()
             log.warning(
                 "event=confirm_password_failed reason=flood_wait wait_s=%s %s",
                 exc.value, ctx,
@@ -494,15 +558,21 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
             elapsed = int((time.monotonic() - t0) * 1000)
+
+            reason = VerifyReasonCode.network if _is_network_error(exc) else VerifyReasonCode.unknown
+            if reason == VerifyReasonCode.network and proxy:
+                _mark_proxy_unhealthy(proxy, db)
+
             log.exception(
-                "event=confirm_password_failed reason=exception %s error=%s elapsed_ms=%d",
-                ctx, err_msg, elapsed,
+                "event=confirm_password_failed reason=%s %s error=%s elapsed_ms=%d",
+                reason.value, ctx, err_msg, elapsed,
             )
             flow.state = AuthFlowState.failed
             flow.last_error = err_msg
             account.status = TelegramAccountStatus.error
             account.last_error = err_msg
             db.commit()
+            verify_fail_total.labels(reason=reason.value).inc()
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
@@ -523,4 +593,158 @@ def confirm_password_task(self, account_id: int, flow_id: str, password: str) ->
     logger.info(
         "event=confirm_password_task_finished account_id=%s flow_id=%s",
         account_id, flow_id,
+    )
+
+
+# ─── verify_account (session health check with lease) ───────────────
+
+async def _run_verify_account(account_id: int, task_id: str) -> None:
+    """Verify an existing TelegramAccount session is still valid.
+
+    Uses a DB-level lease (verifying/verifying_started_at/verifying_task_id)
+    to guarantee at most one concurrent verification per account.
+    """
+    t0 = time.monotonic()
+    log = logger.getChild("verify_account")
+    ctx = {"account_id": account_id, "task_id": task_id}
+
+    with SessionLocal() as db:
+        account = db.get(TelegramAccount, account_id)
+        if not account:
+            log.warning("event=verify_account_not_found %s", ctx)
+            return
+
+        ctx["user_id"] = account.owner_user_id
+        ctx["proxy_id"] = account.proxy_id
+
+        # ── Acquire lease ──
+        if not account.acquire_verify_lease(task_id):
+            verify_lease_rejected_total.inc()
+            log.info(
+                "event=verify_account_lease_rejected existing_task_id=%s %s",
+                account.verifying_task_id, ctx,
+            )
+            return
+
+        db.commit()
+        verify_lease_acquired_total.inc()
+        active_verifications.inc()
+        log.info("event=verify_account_lease_acquired %s", ctx)
+
+        proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+        client = None
+
+        try:
+            client = create_tg_account_client(account, proxy, phone=account.phone_e164)
+
+            t_connect = time.monotonic()
+            await client.connect()
+            log.info(
+                "event=verify_client_connected %s elapsed_ms=%d",
+                ctx, int((time.monotonic() - t_connect) * 1000),
+            )
+
+            t_get_me = time.monotonic()
+            me = await client.get_me()
+            log.info(
+                "event=verify_get_me_ok %s elapsed_ms=%d",
+                ctx, int((time.monotonic() - t_get_me) * 1000),
+            )
+
+            # Success
+            account.tg_user_id = me.id
+            account.tg_username = getattr(me, "username", None)
+            account.first_name = getattr(me, "first_name", None)
+            account.last_name = getattr(me, "last_name", None)
+            account.status = TelegramAccountStatus.verified
+            account.verified_at = utcnow()
+            account.last_seen_at = utcnow()
+            account.last_error = None
+            account.release_verify_lease(VerifyStatus.ok)
+            db.commit()
+
+            elapsed = time.monotonic() - t0
+            verify_account_duration_seconds.observe(elapsed)
+            log.info(
+                "event=verify_account_ok %s result=ok elapsed_ms=%d",
+                ctx, int(elapsed * 1000),
+            )
+            _broadcast_account_update(account)
+
+        except TelegramClientDisabledError:
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Telegram client disabled"
+            account.release_verify_lease(VerifyStatus.failed, VerifyReasonCode.client_disabled)
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.client_disabled.value).inc()
+            log.warning("event=verify_account_failed reason=client_disabled %s", ctx)
+            _broadcast_account_update(account)
+
+        except SessionPasswordNeeded:
+            account.status = TelegramAccountStatus.password_required
+            account.last_error = None
+            account.release_verify_lease(VerifyStatus.needs_password, VerifyReasonCode.password_required)
+            db.commit()
+
+            elapsed = time.monotonic() - t0
+            verify_account_duration_seconds.observe(elapsed)
+            log.info(
+                "event=verify_account_done %s result=needs_password elapsed_ms=%d",
+                ctx, int(elapsed * 1000),
+            )
+            _broadcast_account_update(account)
+
+        except FloodWait as exc:
+            wait_s = int(exc.value)
+            _handle_floodwait(account, exc, db)
+            account.release_verify_lease(VerifyStatus.cooldown, VerifyReasonCode.floodwait)
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.floodwait.value).inc()
+            log.warning(
+                "event=verify_account_failed reason=floodwait wait_s=%d %s",
+                wait_s, ctx,
+            )
+            _broadcast_account_update(account)
+
+        except Exception as exc:
+            err_msg = _sanitize_error(str(exc)[:500])
+            elapsed = time.monotonic() - t0
+
+            reason = VerifyReasonCode.network if _is_network_error(exc) else VerifyReasonCode.unknown
+            if reason == VerifyReasonCode.network and proxy:
+                _mark_proxy_unhealthy(proxy, db)
+
+            account.status = TelegramAccountStatus.error
+            account.last_error = err_msg
+            account.release_verify_lease(VerifyStatus.failed, reason)
+            db.commit()
+            verify_fail_total.labels(reason=reason.value).inc()
+            verify_account_duration_seconds.observe(elapsed)
+            log.exception(
+                "event=verify_account_failed reason=%s %s error=%s elapsed_ms=%d",
+                reason.value, ctx, err_msg, int(elapsed * 1000),
+            )
+            _broadcast_account_update(account)
+
+        finally:
+            active_verifications.dec()
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+
+@celery_app.task(bind=True, max_retries=_MAX_NETWORK_RETRIES, default_retry_delay=5)
+def verify_account_task(self, account_id: int) -> None:
+    """Celery wrapper for verify_account with lease-based idempotency."""
+    task_id = self.request.id or str(uuid.uuid4())
+    logger.info(
+        "event=verify_account_task_started account_id=%s task_id=%s",
+        account_id, task_id,
+    )
+    asyncio.run(_run_verify_account(account_id, task_id))
+    logger.info(
+        "event=verify_account_task_finished account_id=%s task_id=%s",
+        account_id, task_id,
     )

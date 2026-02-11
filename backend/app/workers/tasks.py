@@ -491,3 +491,78 @@ def sync_3proxy_config() -> None:
 def validate_proxy_task(proxy_id: int) -> None:
     _log_task_started()
     asyncio.run(validate_proxy(proxy_id))
+
+
+@celery_app.task
+def legacy_verify_account(account_id: int) -> None:
+    """Async-safe verify for legacy Account model.
+
+    Replaces the old blocking verify_account endpoint by offloading
+    the Pyrogram get_me() call to a Celery worker.
+    """
+    _log_task_started(account_id=account_id)
+    asyncio.run(_run_legacy_verify(account_id))
+
+
+async def _run_legacy_verify(account_id: int) -> None:
+    from app.core.metrics import verify_account_duration_seconds, verify_fail_total
+    import time as _time
+
+    t0 = _time.monotonic()
+    with SessionLocal() as db:
+        account = db.get(Account, account_id)
+        if not account:
+            logger.info("event=legacy_verify_not_found account_id=%d", account_id)
+            return
+
+        proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+        try:
+            client = get_client(account, proxy)
+        except TelegramClientDisabledError:
+            logger.warning("event=legacy_verify_failed reason=client_disabled account_id=%d", account_id)
+            verify_fail_total.labels(reason="client_disabled").inc()
+            return
+
+        try:
+            async with client:
+                me = await client.get_me()
+        except FloodWait as exc:
+            elapsed = _time.monotonic() - t0
+            verify_account_duration_seconds.observe(elapsed)
+            verify_fail_total.labels(reason="floodwait").inc()
+            _set_account_cooldown(db, account, int(exc.value))
+            logger.warning(
+                "event=legacy_verify_failed reason=floodwait wait_s=%d account_id=%d elapsed_s=%.3f",
+                exc.value, account_id, elapsed,
+            )
+            return
+        except Exception as exc:
+            elapsed = _time.monotonic() - t0
+            verify_account_duration_seconds.observe(elapsed)
+            verify_fail_total.labels(reason="unknown").inc()
+            logger.exception(
+                "event=legacy_verify_failed reason=exception account_id=%d error=%s elapsed_s=%.3f",
+                account_id, str(exc)[:200], elapsed,
+            )
+            return
+
+        elapsed = _time.monotonic() - t0
+        verify_account_duration_seconds.observe(elapsed)
+        logger.info(
+            "event=legacy_verify_ok account_id=%d result=ok elapsed_s=%.3f",
+            account_id, elapsed,
+        )
+
+        account.telegram_id = me.id
+        account.username = me.username
+        account.first_name = me.first_name
+        account.status = AccountStatus.verified
+        account.last_activity_at = datetime.now(timezone.utc)
+        db.commit()
+
+        manager.broadcast_sync({
+            "type": "account_update",
+            "user_id": account.owner_id,
+            "account_id": account.id,
+            "status": account.status.value if hasattr(account.status, "value") else str(account.status),
+        })

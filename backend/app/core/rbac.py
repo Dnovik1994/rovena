@@ -32,6 +32,7 @@ POLICY: dict[str, dict[str, list[str]]] = {
         "confirm_password": ["user", "admin", "superadmin"],
         "disconnect": ["user", "admin", "superadmin"],
         "health_check": ["user", "admin", "superadmin"],
+        "verify": ["user", "admin", "superadmin"],
         "warmup": ["user", "admin", "superadmin"],
         "regenerate_device": ["user", "admin", "superadmin"],
     },

@@ -26,16 +26,16 @@ class TestVerifyAccountAsyncBroadcast:
     instead of manager.broadcast_sync (blocks event loop with sync Redis).
     """
 
-    def test_verify_account_calls_send_to_user_not_broadcast_sync(self):
-        """Static check: verify_account source uses send_to_user, not broadcast_sync."""
+    def test_verify_account_dispatches_to_celery_not_blocking(self):
+        """Static check: verify_account is non-blocking — dispatches to Celery worker."""
         from pathlib import Path
 
         # Read source directly to avoid heavy import chain (pyrogram/cryptography)
         src = Path(__file__).resolve().parent.parent / "app" / "api" / "v1" / "accounts.py"
         source = src.read_text()
 
-        # Find the verify_account function body
-        start = source.find("async def verify_account")
+        # Find the verify_account function body (now sync def, not async)
+        start = source.find("def verify_account")
         assert start != -1, "verify_account function not found"
         # Find the next top-level function/class definition to bound the search
         next_def = source.find("\n@router.", start + 1)
@@ -43,12 +43,12 @@ class TestVerifyAccountAsyncBroadcast:
             next_def = len(source)
         func_body = source[start:next_def]
 
-        assert "await manager.send_to_user" in func_body, (
-            "verify_account should use 'await manager.send_to_user' "
-            "to avoid blocking the event loop"
+        # Should dispatch to Celery, NOT call Pyrogram directly
+        assert "legacy_verify_account" in func_body, (
+            "verify_account should dispatch to legacy_verify_account Celery task"
         )
-        assert "broadcast_sync" not in func_body, (
-            "verify_account should NOT use broadcast_sync in async context"
+        assert "async with client" not in func_body, (
+            "verify_account should NOT run blocking Pyrogram calls in HTTP handler"
         )
 
 
