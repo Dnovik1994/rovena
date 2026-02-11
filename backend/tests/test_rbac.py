@@ -2,11 +2,12 @@ from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
-from app.models.user import User
+from app.models.user import User, UserRole
 
 
 def _create_user(db: Session, telegram_id: int, is_admin: bool = False) -> User:
-    user = User(telegram_id=telegram_id, username=f"user{telegram_id}", is_admin=is_admin)
+    role = UserRole.admin if is_admin else UserRole.user
+    user = User(telegram_id=telegram_id, username=f"user{telegram_id}", is_admin=is_admin, role=role)
     db.add(user)
     db.commit()
     db.refresh(user)

@@ -45,10 +45,7 @@ def require_permission(resource: str, action: str) -> Callable:
     allowed_roles = POLICY.get(resource, {}).get(action, [])
 
     def _dependency(current_user: User = Depends(get_current_active_user)) -> User:
-        role = current_user.role
-        if current_user.is_admin and role == "user":
-            role = "admin"
-        if role not in allowed_roles:
+        if current_user.role not in allowed_roles:
             raise forbidden("Access denied")
         return current_user
 

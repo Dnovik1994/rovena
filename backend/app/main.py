@@ -220,6 +220,8 @@ async def _redis_ws_subscriber() -> None:
 
 
 def _bootstrap_admin() -> None:
+    from app.models.user import ADMIN_ROLES, UserRole
+
     admin_user_id = settings.admin_user_id
     admin_telegram_id = settings.admin_telegram_id
     if admin_user_id is None and admin_telegram_id is None:
@@ -236,21 +238,21 @@ def _bootstrap_admin() -> None:
             logger.info("Admin bootstrap skipped; target user not found")
             return
 
-        changed = False
-        if not user.is_admin:
-            user.is_admin = True
-            changed = True
-        if getattr(user, "role", None) and user.role.value != "admin":
-            from app.models.user import UserRole
+        # Only promote — never downgrade a superadmin to admin.
+        if user.role in ADMIN_ROLES:
+            # Already has admin access; just ensure is_admin flag is in sync.
+            if not user.is_admin:
+                user.is_admin = True
+                db.commit()
+                logger.info("Admin bootstrap: synced is_admin flag", extra={"user_id": user.id})
+            else:
+                logger.info("Admin bootstrap already up to date", extra={"user_id": user.id})
+            return
 
-            user.role = UserRole.admin
-            changed = True
-
-        if changed:
-            db.commit()
-            logger.info("Admin bootstrap applied", extra={"user_id": user.id})
-        else:
-            logger.info("Admin bootstrap already up to date", extra={"user_id": user.id})
+        user.role = UserRole.admin
+        user.is_admin = True
+        db.commit()
+        logger.info("Admin bootstrap applied", extra={"user_id": user.id})
 
 class RequestIdMiddleware:
     def __init__(self, app_instance: FastAPI):

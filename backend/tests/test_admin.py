@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from fastapi import status
 
 from app.core.security import create_access_token
-from app.models.user import User, UserRole
+from app.models.user import ADMIN_ROLES, User, UserRole
 from app.core.database import SessionLocal
 
 
@@ -250,3 +250,194 @@ def test_401_on_invalid_token(client):
 
     resp = client.get("/api/v1/me", headers=headers)
     assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# ─── Unified admin authorization (role as source of truth) ──────────
+
+
+def test_role_admin_grants_admin_access(client):
+    """User with role=admin can access admin endpoints (role is source of truth)."""
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=10001,
+            username="role_admin",
+            role=UserRole.admin,
+            is_admin=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        uid = user.id
+
+    token = create_access_token(str(uid))
+    resp = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == status.HTTP_200_OK
+
+
+def test_role_superadmin_grants_admin_access(client):
+    """User with role=superadmin can access admin endpoints."""
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=10002,
+            username="role_superadmin",
+            role=UserRole.superadmin,
+            is_admin=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        uid = user.id
+
+    token = create_access_token(str(uid))
+    resp = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == status.HTTP_200_OK
+
+
+def test_role_user_with_is_admin_flag_denied(client):
+    """is_admin=True but role=user must NOT grant admin access (role is source of truth)."""
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=10003,
+            username="stale_flag",
+            role=UserRole.user,
+            is_admin=True,  # stale flag — should be ignored
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        uid = user.id
+
+    token = create_access_token(str(uid))
+    resp = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_login_does_not_downgrade_existing_admin(client, monkeypatch):
+    """Login with ADMIN_TELEGRAM_ID unset must NOT downgrade existing admin."""
+    from app.core.settings import get_settings
+
+    admin_tid = 10004
+    # Create an admin user first.
+    _create_user(telegram_id=admin_tid, is_admin=True)
+
+    # Login with ADMIN_TELEGRAM_ID pointing to a different user.
+    get_settings.cache_clear()
+    monkeypatch.setenv("ADMIN_TELEGRAM_ID", "99999")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-bot-token")
+    monkeypatch.setenv("TELEGRAM_AUTH_TTL_SECONDS", "300")
+    get_settings.cache_clear()
+
+    init_data = _make_init_data(admin_tid)
+    resp = client.post("/api/v1/auth/telegram", json={"init_data": init_data})
+    assert resp.status_code == status.HTTP_200_OK
+
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.telegram_id == admin_tid).first()
+        assert user is not None
+        # Must still be admin — not downgraded.
+        assert user.role == UserRole.admin
+        assert user.is_admin is True
+
+    get_settings.cache_clear()
+
+
+def test_bootstrap_does_not_downgrade_superadmin(monkeypatch):
+    """Bootstrap must not downgrade a superadmin to admin."""
+    from app import main
+
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=10005,
+            username="superadmin_user",
+            role=UserRole.superadmin,
+            is_admin=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        uid = user.id
+
+    monkeypatch.setattr(main.settings, "admin_user_id", uid)
+    monkeypatch.setattr(main.settings, "admin_telegram_id", None)
+
+    main._bootstrap_admin()
+
+    with SessionLocal() as db:
+        refreshed = db.get(User, uid)
+        assert refreshed is not None
+        # Must remain superadmin, not downgraded to admin.
+        assert refreshed.role == UserRole.superadmin
+        assert refreshed.is_admin is True
+
+
+def test_me_returns_is_admin_consistent_with_role(client):
+    """/me must return is_admin derived from role, not from the DB column."""
+    # Create user with role=admin but is_admin=False (inconsistent DB state).
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=10006,
+            username="inconsistent",
+            role=UserRole.admin,
+            is_admin=False,  # DB out of sync
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        uid = user.id
+
+    token = create_access_token(str(uid))
+    resp = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    # is_admin must be derived from role, so True even though DB says False.
+    assert data["is_admin"] is True
+    assert data["role"] == "admin"
+
+
+def test_token_response_includes_role_and_is_admin(client, monkeypatch):
+    """TokenResponse from login must include is_admin and role fields."""
+    from app.core.settings import get_settings
+
+    admin_tid = 10007
+    get_settings.cache_clear()
+    monkeypatch.setenv("ADMIN_TELEGRAM_ID", str(admin_tid))
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-bot-token")
+    monkeypatch.setenv("TELEGRAM_AUTH_TTL_SECONDS", "300")
+    get_settings.cache_clear()
+
+    init_data = _make_init_data(admin_tid)
+    resp = client.post("/api/v1/auth/telegram", json={"init_data": init_data})
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert data["is_admin"] is True
+    assert data["role"] == "admin"
+
+    get_settings.cache_clear()
+
+
+def test_admin_user_update_syncs_is_admin(client):
+    """Changing role via admin PATCH must keep is_admin in sync."""
+    admin = _create_user(telegram_id=10008, is_admin=True)
+    target = _create_user(telegram_id=10009, is_admin=False)
+    token = create_access_token(str(admin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Promote to admin
+    resp = client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={"role": "admin"},
+        headers=headers,
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert resp.json()["role"] == "admin"
+    assert resp.json()["is_admin"] is True
+
+    # Demote back to user
+    resp = client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={"role": "user"},
+        headers=headers,
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert resp.json()["role"] == "user"
+    assert resp.json()["is_admin"] is False

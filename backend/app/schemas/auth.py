@@ -20,3 +20,5 @@ class TokenResponse(BaseModel):
     refresh_token: str | None = None
     onboarding_needed: bool | None = None
     token_type: str = "bearer"
+    is_admin: bool | None = None
+    role: str | None = None

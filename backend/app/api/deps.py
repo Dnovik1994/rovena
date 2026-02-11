@@ -67,7 +67,7 @@ def get_current_active_user(
 def get_current_admin(
     current_user: User = Depends(get_current_active_user),
 ) -> User:
-    if not current_user.is_admin:
+    if not current_user.has_admin_access:
         raise forbidden("Admin access required")
     return current_user
 

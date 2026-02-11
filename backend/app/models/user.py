@@ -13,6 +13,9 @@ class UserRole(str, Enum):
     superadmin = "superadmin"
 
 
+ADMIN_ROLES: frozenset[UserRole] = frozenset({UserRole.admin, UserRole.superadmin})
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -34,3 +37,8 @@ class User(Base):
     )
 
     tariff = relationship("Tariff", back_populates="users")
+
+    @property
+    def has_admin_access(self) -> bool:
+        """Single source of truth: admin access is determined by role."""
+        return self.role in ADMIN_ROLES
