@@ -136,9 +136,13 @@ async def on_startup() -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
     _bootstrap_admin()
-    # Start background Redis subscriber for WS broadcasts from workers
+    # Start background Redis subscriber for WS broadcasts from workers.
+    # Store the task reference to prevent GC from destroying it
+    # ("Task was destroyed but it is pending!" warning).
     if settings.redis_url:
-        asyncio.create_task(_redis_ws_subscriber())
+        app.state.ws_subscriber_task = asyncio.create_task(
+            _redis_ws_subscriber(), name="redis-ws-subscriber"
+        )
     logger.info("Application startup complete")
 
 
@@ -150,30 +154,59 @@ async def _redis_ws_subscriber() -> None:
     Celery workers publish auth flow updates to Redis because they run in a
     separate process and cannot access the uvicorn-resident WebSocket manager
     directly.  This task bridges the gap.
+
+    Reconnects automatically on connection errors to survive transient Redis
+    outages without leaving WS relay permanently disabled.
     """
     import redis.asyncio as aioredis
 
-    try:
-        r = aioredis.from_url(settings.redis_url)
-        pubsub = r.pubsub()
-        await pubsub.subscribe(REDIS_WS_CHANNEL)
-        logger.info("Redis WS subscriber started on channel=%s", REDIS_WS_CHANNEL)
-        async for message in pubsub.listen():
-            if message["type"] != "message":
-                continue
-            try:
-                payload = json.loads(message["data"])
-                user_id = payload.get("user_id")
-                if user_id is not None:
-                    await manager.send_to_user(user_id, payload)
-                else:
-                    await manager.broadcast(payload)
-            except Exception:  # noqa: BLE001
-                logger.exception("Error processing Redis WS message")
-    except asyncio.CancelledError:
-        logger.info("Redis WS subscriber stopped")
-    except Exception:  # noqa: BLE001
-        logger.exception("Redis WS subscriber crashed, WS relay disabled")
+    backoff = 1
+    max_backoff = 30
+
+    while True:
+        r = None
+        pubsub = None
+        try:
+            r = aioredis.from_url(settings.redis_url)
+            pubsub = r.pubsub()
+            await pubsub.subscribe(REDIS_WS_CHANNEL)
+            logger.info("Redis WS subscriber started on channel=%s", REDIS_WS_CHANNEL)
+            backoff = 1  # reset on successful connection
+
+            async for message in pubsub.listen():
+                if message["type"] != "message":
+                    continue
+                try:
+                    payload = json.loads(message["data"])
+                    user_id = payload.get("user_id")
+                    if user_id is not None:
+                        await manager.send_to_user(user_id, payload)
+                    else:
+                        await manager.broadcast(payload)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Error processing Redis WS message")
+
+        except asyncio.CancelledError:
+            logger.info("Redis WS subscriber stopped")
+            return
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Redis WS subscriber error, reconnecting in %ds", backoff
+            )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+        finally:
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe(REDIS_WS_CHANNEL)
+                    await pubsub.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            if r is not None:
+                try:
+                    await r.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def _bootstrap_admin() -> None:

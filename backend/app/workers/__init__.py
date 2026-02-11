@@ -79,7 +79,8 @@ celery_app = Celery(
 )
 celery_app.conf.update(
     broker_connection_retry_on_startup=True,
-    broker_pool_limit=1,
+    broker_pool_limit=10,
+    broker_connection_timeout=10,
     worker_concurrency=celery_concurrency,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
@@ -90,6 +91,7 @@ celery_app.conf.update(
         "fanout_patterns": True,
         "socket_connect_timeout": 5,
         "socket_timeout": 5,
+        "retry_on_timeout": False,
     },
 )
 logger.info("Task queue ready")
