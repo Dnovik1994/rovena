@@ -141,6 +141,11 @@ async def on_startup() -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
     _bootstrap_admin()
+    logger.info(
+        "Admin config | admin_user_id_configured=%s | admin_telegram_id_configured=%s",
+        settings.admin_user_id is not None,
+        settings.admin_telegram_id is not None,
+    )
     # Start background Redis subscriber for WS broadcasts from workers.
     # Store the task reference to prevent GC from destroying it
     # ("Task was destroyed but it is pending!" warning).

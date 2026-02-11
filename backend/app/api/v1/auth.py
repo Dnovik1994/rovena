@@ -17,13 +17,23 @@ from app.core.security import (
     decode_refresh_token,
     hash_token,
 )
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
+
+
+def _is_configured_admin(telegram_id: int) -> bool:
+    """Check whether *telegram_id* matches the configured ADMIN_TELEGRAM_ID."""
+    from app.core.settings import get_settings
+
+    admin_tid = get_settings().admin_telegram_id
+    if admin_tid is None:
+        return False
+    return telegram_id == admin_tid
 
 
 def _extract_init_data_metadata(init_data: str) -> dict[str, Any]:
@@ -99,17 +109,23 @@ def auth_via_telegram(
         ) from exc
 
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    should_be_admin = _is_configured_admin(telegram_id)
     if not user:
         user = User(
             telegram_id=telegram_id,
             username=user_payload.get("username"),
             first_name=user_payload.get("first_name"),
             last_name=user_payload.get("last_name"),
-            is_admin=False,
+            is_admin=should_be_admin,
             is_active=True,
-            role="user",
+            role=UserRole.admin if should_be_admin else UserRole.user,
         )
         db.add(user)
+        db.commit()
+        db.refresh(user)
+    elif user.is_admin != should_be_admin:
+        user.is_admin = should_be_admin
+        user.role = UserRole.admin if should_be_admin else user.role
         db.commit()
         db.refresh(user)
 
