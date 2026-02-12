@@ -158,29 +158,29 @@ services:
       com.prometheus.scrape: "true"
       com.prometheus.port: "8000"
       traefik.enable: "true"
+      traefik.docker.network: app
       # основной API
       traefik.http.routers.kass-api.rule: Host(`kass.freestorms.top`) && PathPrefix(`/api/v1`)
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "100"
-      traefik.http.routers.kass-api.service: kass-api
+      traefik.http.routers.kass-api.service: kass-api-svc
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
-      traefik.http.services.kass-api.loadbalancer.server.port: "8000"
+      traefik.http.services.kass-api-svc.loadbalancer.server.port: "8000"
 
       # health (вне /api/v1)
       traefik.http.routers.kass-health.rule: Host(`kass.freestorms.top`) && Path(`/health`)
       traefik.http.routers.kass-health.entrypoints: websecure
       traefik.http.routers.kass-health.priority: "110"
-      traefik.http.routers.kass-health.service: kass-health
+      traefik.http.routers.kass-health.service: kass-api-svc
       traefik.http.routers.kass-health.tls: "true"
       traefik.http.routers.kass-health.tls.certresolver: le
-      traefik.http.services.kass-health.loadbalancer.server.port: "8000"
 
       # WebSocket /ws/* → backend (must not fall through to frontend catch-all)
       traefik.http.routers.kass-ws.rule: Host(`kass.freestorms.top`) && PathPrefix(`/ws`)
       traefik.http.routers.kass-ws.entrypoints: websecure
       traefik.http.routers.kass-ws.priority: "110"
-      traefik.http.routers.kass-ws.service: kass-api
+      traefik.http.routers.kass-ws.service: kass-api-svc
       traefik.http.routers.kass-ws.tls: "true"
       traefik.http.routers.kass-ws.tls.certresolver: le
 
@@ -231,6 +231,9 @@ services:
       CELERY_APP: ${CELERY_APP:-app.workers}
       PRODUCTION: "true"
       ENVIRONMENT: production
+      WEB_BASE_URL: "https://${DOMAIN:-kass.freestorms.top}"
+      CORS_ORIGINS: '["https://${DOMAIN:-kass.freestorms.top}"]'
+      DEV_ALLOW_LOCALHOST: "false"
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     command: celery -A app.workers worker --loglevel=info
@@ -300,13 +303,14 @@ services:
       start_period: 10s
     labels:
       traefik.enable: "true"
-      traefik.http.routers.kass.rule: "Host(`kass.freestorms.top`)"
-      traefik.http.routers.kass.entrypoints: websecure
-      traefik.http.routers.kass.priority: "10"
-      traefik.http.routers.kass.service: kass
-      traefik.http.routers.kass.tls: "true"
-      traefik.http.routers.kass.tls.certresolver: le
-      traefik.http.services.kass.loadbalancer.server.port: "5173"
+      traefik.docker.network: app
+      traefik.http.routers.kass-ui.rule: "Host(`kass.freestorms.top`)"
+      traefik.http.routers.kass-ui.entrypoints: websecure
+      traefik.http.routers.kass-ui.priority: "10"
+      traefik.http.routers.kass-ui.service: kass-ui-svc
+      traefik.http.routers.kass-ui.tls: "true"
+      traefik.http.routers.kass-ui.tls.certresolver: le
+      traefik.http.services.kass-ui-svc.loadbalancer.server.port: "5173"
 
   prometheus:
     image: prom/prometheus:v2.54.1
