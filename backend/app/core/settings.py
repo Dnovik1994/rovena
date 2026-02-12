@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     health_check_timeout_seconds: float = 2.0
     health_queue_warn_threshold: int = 100
 
+    ws_broadcast_concurrency: int = 100
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> List[str]:
