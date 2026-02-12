@@ -14,14 +14,6 @@ if [[ "${WAIT_FOR_DEPS:-1}" == "1" ]]; then
   /app/scripts/wait-for-deps.sh
 fi
 
-if [[ "${WAIT_FOR_DB_TABLES:-1}" == "1" ]]; then
-  /app/scripts/wait-for-db.sh
-fi
-
-if [[ "${WAIT_FOR_REDIS:-1}" == "1" ]]; then
-  /app/scripts/wait-for-redis.sh
-fi
-
 if [[ $# -eq 0 ]]; then
   uvicorn_host="${UVICORN_HOST:-${HOST:-0.0.0.0}}"
   uvicorn_port="${UVICORN_PORT:-${PORT:-8000}}"

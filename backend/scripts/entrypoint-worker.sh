@@ -19,14 +19,6 @@ if [[ "${WAIT_FOR_DEPS:-1}" == "1" ]]; then
   /app/scripts/wait-for-deps.sh
 fi
 
-if [[ "${WAIT_FOR_DB_TABLES:-1}" == "1" ]]; then
-  /app/scripts/wait-for-db.sh
-fi
-
-if [[ "${WAIT_FOR_REDIS:-1}" == "1" ]]; then
-  /app/scripts/wait-for-redis.sh
-fi
-
 if [[ $# -eq 0 ]]; then
   set -- celery -A "${CELERY_APP:-app.workers:celery_app}" worker \
     --loglevel=info \
