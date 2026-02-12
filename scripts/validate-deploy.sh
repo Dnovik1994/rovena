@@ -71,8 +71,8 @@ db_version=$($COMPOSE exec -T backend python -c \
    print(e.connect().execute(text('SELECT version_num FROM alembic_version')).scalar())" \
   2>/dev/null | tr -d '[:space:]') || db_version="error"
 
-alembic_head=$($COMPOSE exec -T backend alembic heads 2>/dev/null \
-  | grep -oE '^[0-9a-f]+' | head -1) || alembic_head="error"
+alembic_head=$($COMPOSE exec -T backend sh -lc "alembic heads 2>/dev/null | head -n1 | awk '{print \$1}'" \
+  2>/dev/null | tr -d '[:space:]') || alembic_head="error"
 
 if [ -n "$db_version" ] && [ "$db_version" != "error" ] && \
    [ -n "$alembic_head" ] && [ "$alembic_head" != "error" ] && \
