@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 from sqlalchemy import create_engine
@@ -56,7 +57,11 @@ def get_db() -> Session:
 async def get_cached_user(db: Session, user_id: int):
     from app.models.user import User
 
-    user = db.get(User, user_id)
+    def _load_user(uid: int):
+        with SessionLocal() as s:
+            return s.get(User, uid)
+
+    user = await asyncio.to_thread(_load_user, user_id)
     if not user:
         return None
 
@@ -84,7 +89,11 @@ async def get_cached_tariff(db: Session, tariff_id: int):
     if cached:
         return Tariff(**cached)
 
-    tariff = db.get(Tariff, tariff_id)
+    def _load_tariff(tid: int):
+        with SessionLocal() as s:
+            return s.get(Tariff, tid)
+
+    tariff = await asyncio.to_thread(_load_tariff, tariff_id)
     if not tariff:
         return None
     payload = {
