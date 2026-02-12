@@ -193,10 +193,10 @@ while `https://kass.freestorms.top/api/v1/health` works fine.
    Traefik may not associate the router with the loadbalancer.
 
 **Current routing architecture (docker-compose.prod.yml):**
-- `kass-api` (priority 100): `Host(…) && PathPrefix(/api/v1)` → backend:8000
+- `kass-api` (priority 20): `Host(…) && PathPrefix(/api/v1)` → backend:8000
 - `kass-health` (priority 110): `Host(…) && Path(/health)` → backend:8000
 - `kass-ws` (priority 110): `Host(…) && PathPrefix(/ws)` → backend:8000
-- `kass-ui` (priority 10): `Host(…)` → frontend:5173 (catch-all)
+- `kass-web` (priority 10): `Host(…)` → frontend:5173 (catch-all)
 
 **Debug commands:**
 ```bash
