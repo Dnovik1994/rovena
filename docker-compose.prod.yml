@@ -231,6 +231,9 @@ services:
       CELERY_APP: ${CELERY_APP:-app.workers}
       PRODUCTION: "true"
       ENVIRONMENT: production
+      WEB_BASE_URL: "https://${DOMAIN:-kass.freestorms.top}"
+      CORS_ORIGINS: '["https://${DOMAIN:-kass.freestorms.top}"]'
+      DEV_ALLOW_LOCALHOST: "false"
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
     command: celery -A app.workers worker --loglevel=info
