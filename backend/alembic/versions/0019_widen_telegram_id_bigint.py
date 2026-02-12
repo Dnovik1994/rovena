@@ -4,7 +4,7 @@ Telegram user IDs can exceed 2^31 (≈2.1 billion), which overflows a
 signed 32-bit INT column.  This migration widens the column to BIGINT
 so that the full range of Telegram user IDs is supported.
 
-Revision ID: 0019
+Revision ID: 0019_widen_telegram_id_bigint
 Revises: 0018_add_telegram_accounts_auth_flows
 Create Date: 2026-02-11 00:00:00.000000
 """
