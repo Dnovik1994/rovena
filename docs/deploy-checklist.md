@@ -57,11 +57,60 @@ docker compose -f docker-compose.prod.yml logs backend | grep "Effective config"
 - [ ] `DOMAIN` и `LE_EMAIL` заданы в `.env`.
 - [ ] `letsencrypt/acme.json` создан и имеет права `600`.
 
+## Database migrations (backend-only + advisory lock)
+
+Migrations run **only from the backend** container. The worker **never** runs
+migrations — its entrypoint forces `RUN_MIGRATIONS=0`.
+
+Safety mechanisms:
+1. **Single-runner**: `entrypoint-worker.sh` exports `RUN_MIGRATIONS=0`, so
+   `wait-for-db.sh` and `wait-for-deps.sh` skip migrations in the worker.
+2. **MySQL advisory lock**: `run-migrations.sh` acquires
+   `GET_LOCK('alembic_migration_lock', 120)` before running `alembic upgrade head`.
+   If a second process tries concurrently, it blocks until the lock is released
+   (or times out after 120 s and exits non-zero).
+3. **Post-migration checks**: after upgrade, the script verifies
+   `alembic_version` has exactly 1 row and the revision matches `alembic heads`.
+
+If you see `alembic_version` with 2+ rows, that means a previous concurrent run
+corrupted state. Fix manually:
+
+```sql
+-- Check current state
+SELECT * FROM alembic_version;
+-- Keep only the correct head; delete the stale row(s)
+DELETE FROM alembic_version WHERE version_num != '<correct_head>';
+```
+
+Smoke test — verify no concurrent corruption:
+
+```bash
+# Start backend + worker simultaneously
+docker compose -f docker-compose.prod.yml up -d backend worker
+
+# Wait for startup, then check
+docker compose -f docker-compose.prod.yml exec backend \
+  python -c "
+from sqlalchemy import create_engine, text
+from app.core.settings import get_settings
+engine = create_engine(get_settings().database_url)
+with engine.connect() as conn:
+    rows = conn.execute(text('SELECT * FROM alembic_version')).fetchall()
+    assert len(rows) == 1, f'Expected 1 row, got {len(rows)}: {rows}'
+    print(f'OK: single revision {rows[0][0]}')
+"
+
+# Verify idempotency
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+# Should print "no new revisions" or equivalent
+```
+
 ## Deploy steps
 - [ ] `git pull origin main`
 - [ ] `docker compose -f docker-compose.prod.yml pull`
 - [ ] `docker compose -f docker-compose.prod.yml up -d --build`
-- [ ] `docker compose -f docker-compose.prod.yml exec backend alembic upgrade head`
+- [ ] Migrations run automatically on backend startup (do NOT run from worker).
+- [ ] Verify: `docker compose -f docker-compose.prod.yml logs backend | grep "Post-migration checks passed"`
 - [ ] Проверить Traefik логи на успешный выпуск сертификата.
 - [ ] `ufw status` shows ports 22, 80, 443 open.
 

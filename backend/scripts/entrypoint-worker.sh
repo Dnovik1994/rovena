@@ -10,14 +10,13 @@ if [[ "${COMMIT_SHA:-unknown}" == "unknown" ]] && command -v git >/dev/null 2>&1
   export COMMIT_SHA
 fi
 
+# Workers must NEVER run migrations — only the backend does.
+# Force RUN_MIGRATIONS=0 so wait-for-db.sh also skips migrations.
+export RUN_MIGRATIONS=0
+log "Migrations disabled for worker (backend-only responsibility)."
+
 if [[ "${WAIT_FOR_DEPS:-1}" == "1" ]]; then
   /app/scripts/wait-for-deps.sh
-fi
-
-if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
-  /app/scripts/run-migrations.sh
-else
-  log "Skipping migrations (RUN_MIGRATIONS=${RUN_MIGRATIONS:-0})."
 fi
 
 if [[ "${WAIT_FOR_DB_TABLES:-1}" == "1" ]]; then
