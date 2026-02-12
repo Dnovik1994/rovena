@@ -13,3 +13,11 @@ def test_csp_allows_telegram_frame_ancestors(client):
     assert "frame-ancestors" in csp
     assert "https://web.telegram.org" in csp
     assert "https://t.me" in csp
+
+
+def test_csp_allows_telegram_script_src(client):
+    """CSP must allow loading the Telegram WebApp SDK from telegram.org."""
+    response = client.get("/health")
+    csp = response.headers["Content-Security-Policy"]
+    assert "script-src" in csp
+    assert "https://telegram.org" in csp
