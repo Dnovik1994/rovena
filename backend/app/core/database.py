@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from app.core.cache import set_json
+from app.core.cache import get_json, set_json
 from app.core.settings import get_settings
 
 settings = get_settings()

@@ -144,6 +144,9 @@ services:
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       PRODUCTION: "true"
       ENVIRONMENT: production
+      WEB_BASE_URL: "https://${DOMAIN:-kass.freestorms.top}"
+      CORS_ORIGINS: '["https://${DOMAIN:-kass.freestorms.top}"]'
+      DEV_ALLOW_LOCALHOST: "false"
       UVICORN_HOST: ${UVICORN_HOST:-0.0.0.0}
       UVICORN_PORT: ${UVICORN_PORT:-8000}
       BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8000/api/v1/health}
@@ -378,9 +381,9 @@ services:
     networks:
       - data
     environment:
-      MYSQL_DATABASE: rovena
-      MYSQL_USER: rovena
-      MYSQL_PASSWORD: rovena
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       REDIS_URL: redis://redis:6379/0
     volumes:
       - ./crontab.txt:/etc/crontabs/root:ro

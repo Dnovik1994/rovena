@@ -46,9 +46,14 @@ PRODUCTION=true
 docker compose -f docker-compose.prod.yml logs backend | grep "Effective config"
 ```
 
-- [ ] `WEB_BASE_URL` is set to the real Telegram Mini App URL.
+- [ ] `DOMAIN` is set in `.env` (e.g. `kass.freestorms.top`). The prod compose derives
+      `WEB_BASE_URL` and `CORS_ORIGINS` from it automatically.
+- [ ] `WEB_BASE_URL` is set to the real Telegram Mini App URL (overridden by compose).
 - [ ] `CORS_ORIGINS` includes `WEB_BASE_URL`. Wildcard `*` is rejected in production.
 - [ ] `DEV_ALLOW_LOCALHOST` is **not** set (or `false`) in real production.
+- [ ] **No localhost** in `WEB_BASE_URL` or `CORS_ORIGINS` — the worker will crash on
+      `validate_settings()` if localhost is present and `DEV_ALLOW_LOCALHOST` is false.
+- [ ] Verify with: `docker compose -f docker-compose.prod.yml logs worker | grep "Effective config"`
 - [ ] `DOMAIN` и `LE_EMAIL` заданы в `.env`.
 - [ ] `letsencrypt/acme.json` создан и имеет права `600`.
 
