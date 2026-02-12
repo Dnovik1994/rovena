@@ -151,6 +151,43 @@ docker compose --env-file .env -f docker-compose.prod.yml logs --tail=200 traefi
 bash scripts/verify-traefik-docker-provider.sh
 ```
 
+### Troubleshooting: Traefik returns 404 on `/` (frontend not routed)
+
+**Symptom:** `curl https://kass.freestorms.top/` returns `404 page not found` (text/plain),
+while `https://kass.freestorms.top/api/v1/health` works fine.
+
+**Cause:** Traefik has no matching router for the frontend. Common reasons:
+1. **Frontend container not running** — check `docker compose ps frontend`.
+2. **Old labels still cached** — if the router was renamed (e.g. `kass` → `kass-ui`),
+   a `--force-recreate` is needed.
+3. **Network mismatch** — frontend must be on the same Docker network as Traefik
+   (`app`), and `traefik.docker.network: app` must be set in the labels.
+4. **Missing `traefik.http.routers.<name>.service`** — without explicit service binding,
+   Traefik may not associate the router with the loadbalancer.
+
+**Current routing architecture (docker-compose.prod.yml):**
+- `kass-api` (priority 100): `Host(…) && PathPrefix(/api/v1)` → backend:8000
+- `kass-health` (priority 110): `Host(…) && Path(/health)` → backend:8000
+- `kass-ws` (priority 110): `Host(…) && PathPrefix(/ws)` → backend:8000
+- `kass-ui` (priority 10): `Host(…)` → frontend:5173 (catch-all)
+
+**Debug commands:**
+```bash
+# Check if frontend router is registered
+docker compose --env-file .env -f docker-compose.prod.yml config \
+  | grep -E 'kass-ui|kass-api|routers\.|services\.'
+
+# Force recreate to pick up new labels
+docker compose --env-file .env -f docker-compose.prod.yml up -d --force-recreate frontend
+
+# Check Traefik access logs for RouterName
+docker compose --env-file .env -f docker-compose.prod.yml logs --tail=200 traefik \
+  | grep -E 'RouterName|kass-ui|kass-api|entryPointName'
+
+# Verify the response
+curl -fsSI https://kass.freestorms.top/ | head -20
+```
+
 ## Production deploy checklist
 
 1. Проверить конфигурацию compose:
