@@ -95,7 +95,45 @@ print('version_num widened successfully')
 done
 
 # ---------------------------------------------------------------------------
-# Post-migration consistency checks.
+# Post-migration: self-heal version table then enforce consistency.
+#
+# Scenario this fixes: DDL for a migration was applied (e.g. column type
+# changed) but the process crashed before the alembic_version row was
+# updated.  `alembic upgrade head` sees "nothing to do" because the DDL
+# already matches, yet the version row still points to the previous
+# revision.  We detect this and stamp the correct head.
+# ---------------------------------------------------------------------------
+log "Computing HEAD revision..."
+alembic_head=$(alembic heads 2>&1 | grep -oP '^\S+' | head -n1) || true
+
+if [[ -z "$alembic_head" ]]; then
+  log "CRITICAL: Unable to determine alembic HEAD revision."
+  exit 1
+fi
+log "Alembic HEAD: ${alembic_head}"
+
+db_version=$(python -c "
+from sqlalchemy import create_engine, text
+from app.core.settings import get_settings
+engine = create_engine(get_settings().database_url)
+with engine.connect() as conn:
+    rev = conn.execute(text('SELECT version_num FROM alembic_version')).scalar()
+    print(rev)
+" 2>&1)
+log "DB version:   ${db_version}"
+
+if [[ "$db_version" != "$alembic_head" ]]; then
+  log "MISMATCH: DB version '${db_version}' != HEAD '${alembic_head}'."
+  log "DDL is already applied — stamping version table to HEAD..."
+  if ! alembic stamp "$alembic_head" 2>&1; then
+    log "CRITICAL: alembic stamp failed."
+    exit 1
+  fi
+  log "Stamp succeeded."
+fi
+
+# ---------------------------------------------------------------------------
+# Strict consistency checks — must pass or we abort.
 # ---------------------------------------------------------------------------
 log "Running post-migration consistency checks..."
 
@@ -116,8 +154,7 @@ if [[ "$row_count" != "1" ]]; then
 fi
 log "OK: alembic_version has exactly 1 row."
 
-# Verify the DB revision matches alembic's single head.
-db_revision=$(python -c "
+final_version=$(python -c "
 from sqlalchemy import create_engine, text
 from app.core.settings import get_settings
 engine = create_engine(get_settings().database_url)
@@ -126,13 +163,10 @@ with engine.connect() as conn:
     print(rev)
 " 2>&1)
 
-alembic_head=$(alembic heads 2>&1 | grep -oP '^\S+' | head -n1) || true
-
-if [[ -n "$alembic_head" && "$db_revision" != "$alembic_head" ]]; then
-  log "WARNING: DB revision '${db_revision}' does not match alembic head '${alembic_head}'."
-  log "This may indicate a migration was partially applied."
-  # Non-fatal: the upgrade succeeded, but heads may differ if there are branches.
-  # Log a warning but do not block startup.
+if [[ "$final_version" != "$alembic_head" ]]; then
+  log "CRITICAL: Final DB version '${final_version}' still does not match HEAD '${alembic_head}'."
+  log "Self-heal failed — manual intervention required."
+  exit 1
 fi
-
-log "Post-migration checks passed (revision: ${db_revision})."
+log "OK: alembic_version matches HEAD (${final_version})."
+log "Post-migration checks passed."
