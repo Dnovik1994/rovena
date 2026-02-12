@@ -5,11 +5,14 @@
 #   ./deploy-bootstrap.sh --wipe-volumes --force   # wipe volumes (skip confirmation)
 set -euo pipefail
 
+# WARNING: The rovena_mysql-data Docker volume holds all production MySQL data.
+# It must NEVER be removed without an explicit wipe confirmation (--wipe-volumes).
+# Unconditional volume deletion will cause total production data loss.
+
 COMMIT_SHA="$(git rev-parse --short HEAD)"
 export COMMIT_SHA
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"${SCRIPT_DIR}/pre-deploy-clean.sh"
 
 WIPE_VOLUMES=false
 FORCE=false
@@ -22,6 +25,9 @@ for arg in "$@"; do
     FORCE=true
   fi
 done
+
+# Clean up legacy volumes (safe — does not touch mysql-data)
+"${SCRIPT_DIR}/pre-deploy-clean.sh"
 
 if [ "$WIPE_VOLUMES" = true ]; then
   if [ "$FORCE" != true ]; then
