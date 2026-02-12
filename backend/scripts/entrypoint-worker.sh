@@ -29,7 +29,11 @@ if [[ "${WAIT_FOR_REDIS:-1}" == "1" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-  set -- celery -A "${CELERY_APP:-app.workers}" worker --loglevel=info
+  set -- celery -A "${CELERY_APP:-app.workers:celery_app}" worker \
+    --loglevel=info \
+    --hostname "celery@%h" \
+    --pool "${CELERY_POOL:-solo}" \
+    --concurrency "${CELERY_CONCURRENCY:-1}"
 fi
 
 terminate() {
