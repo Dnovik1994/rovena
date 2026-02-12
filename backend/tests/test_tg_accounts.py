@@ -635,7 +635,7 @@ class TestWsRouting:
         resp = client.get("/ws/status")
         assert resp.status_code == 426
         data = resp.json()
-        assert data["error"]["code"] == "426"
+        assert data["error"]["code"] == "UPGRADE_REQUIRED"
         assert "WebSocket" in data["error"]["message"]
 
     def test_ws_upgrade_accepted(self, client, db_session):

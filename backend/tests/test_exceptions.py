@@ -45,5 +45,6 @@ def test_global_exception_handler(client, monkeypatch):
     response = client.get("/api/v1/projects", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 500
     payload = response.json()
-    assert payload["type"] == "internal_error"
+    assert "type" not in payload, "must not return {\"type\": \"internal_error\"}"
+    assert payload == {"error": {"code": "INTERNAL_ERROR", "message": "Internal error", "status": 500}}
     assert captured["called"] is True
