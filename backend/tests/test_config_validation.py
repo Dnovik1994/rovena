@@ -189,3 +189,35 @@ class TestDevelopmentWarns:
         )
         with caplog.at_level(logging.WARNING):
             validate_settings(settings)  # must not raise
+
+
+# ── Worker role skips browser checks ──────────────────────────────
+
+
+class TestWorkerRoleSkipsBrowserChecks:
+    """Workers don't serve browsers, so CORS / WEB_BASE_URL checks are irrelevant."""
+
+    def test_worker_ignores_empty_cors(self):
+        settings = _make_settings({"app_role": "worker", "cors_origins": []})
+        validate_settings(settings)  # must not raise
+
+    def test_worker_ignores_localhost_web_base_url(self):
+        settings = _make_settings(
+            {
+                "app_role": "worker",
+                "web_base_url": "http://localhost:5173",
+                "cors_origins": ["http://localhost:5173"],
+            }
+        )
+        validate_settings(settings)  # must not raise
+
+    def test_worker_still_checks_ttl(self):
+        settings = _make_settings(
+            {"app_role": "worker", "telegram_auth_ttl_seconds": 0}
+        )
+        with pytest.raises(ValueError, match="TELEGRAM_AUTH_TTL_SECONDS"):
+            validate_settings(settings)
+
+    def test_cron_ignores_empty_cors(self):
+        settings = _make_settings({"app_role": "cron", "cors_origins": []})
+        validate_settings(settings)  # must not raise

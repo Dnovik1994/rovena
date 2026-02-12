@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     admin_telegram_id: int | None = None
     admin_email: str = ""
 
+    app_role: str = "backend"
     dev_allow_localhost: bool = False
 
     proxy_config_path: str = "/app/3proxy.cfg"
@@ -111,46 +112,52 @@ def validate_settings(settings: Settings) -> None:
     errors: list[str] = []
 
     if settings.production:
-        # -- CORS_ORIGINS --
-        if not settings.cors_origins:
-            errors.append(
-                "CORS_ORIGINS is empty. "
-                "Set it to your frontend domain(s), e.g. "
-                f'CORS_ORIGINS=\'["{settings.web_base_url}"]\'.'
-            )
-        elif settings.cors_origins == ["*"] or "*" in settings.cors_origins:
-            errors.append(
-                "CORS_ORIGINS contains wildcard '*'. "
-                "Wildcard is not allowed in production — specify exact origin(s)."
-            )
+        # Browser-facing checks only apply to the HTTP backend role.
+        # Workers and cron containers never serve browsers, so
+        # CORS_ORIGINS / WEB_BASE_URL are irrelevant for them.
+        _needs_browser_checks = settings.app_role not in ("worker", "cron")
 
-        # -- WEB_BASE_URL --
-        if not settings.web_base_url:
-            errors.append(
-                "WEB_BASE_URL is empty. "
-                "Set it to your Telegram Mini App URL, e.g. "
-                "WEB_BASE_URL=https://kass.freestorms.top"
-            )
-        elif settings.cors_origins and settings.web_base_url not in settings.cors_origins:
-            errors.append(
-                f"WEB_BASE_URL={settings.web_base_url!r} is not listed in "
-                f"CORS_ORIGINS={settings.cors_origins!r}. "
-                "The frontend origin must be in the allowed list."
-            )
+        if _needs_browser_checks:
+            # -- CORS_ORIGINS --
+            if not settings.cors_origins:
+                errors.append(
+                    "CORS_ORIGINS is empty. "
+                    "Set it to your frontend domain(s), e.g. "
+                    f'CORS_ORIGINS=\'["{settings.web_base_url}"]\'.'
+                )
+            elif settings.cors_origins == ["*"] or "*" in settings.cors_origins:
+                errors.append(
+                    "CORS_ORIGINS contains wildcard '*'. "
+                    "Wildcard is not allowed in production — specify exact origin(s)."
+                )
 
-        # -- Localhost in production --
-        if not settings.dev_allow_localhost:
-            localhost_origins = [o for o in (settings.cors_origins or []) if _is_localhost(o)]
-            if localhost_origins:
+            # -- WEB_BASE_URL --
+            if not settings.web_base_url:
                 errors.append(
-                    f"CORS_ORIGINS contains localhost URL(s): {localhost_origins}. "
-                    "Remove them or set DEV_ALLOW_LOCALHOST=true to override."
+                    "WEB_BASE_URL is empty. "
+                    "Set it to your Telegram Mini App URL, e.g. "
+                    "WEB_BASE_URL=https://kass.freestorms.top"
                 )
-            if settings.web_base_url and _is_localhost(settings.web_base_url):
+            elif settings.cors_origins and settings.web_base_url not in settings.cors_origins:
                 errors.append(
-                    f"WEB_BASE_URL={settings.web_base_url!r} points to localhost. "
-                    "Set a real domain or DEV_ALLOW_LOCALHOST=true to override."
+                    f"WEB_BASE_URL={settings.web_base_url!r} is not listed in "
+                    f"CORS_ORIGINS={settings.cors_origins!r}. "
+                    "The frontend origin must be in the allowed list."
                 )
+
+            # -- Localhost in production --
+            if not settings.dev_allow_localhost:
+                localhost_origins = [o for o in (settings.cors_origins or []) if _is_localhost(o)]
+                if localhost_origins:
+                    errors.append(
+                        f"CORS_ORIGINS contains localhost URL(s): {localhost_origins}. "
+                        "Remove them or set DEV_ALLOW_LOCALHOST=true to override."
+                    )
+                if settings.web_base_url and _is_localhost(settings.web_base_url):
+                    errors.append(
+                        f"WEB_BASE_URL={settings.web_base_url!r} points to localhost. "
+                        "Set a real domain or DEV_ALLOW_LOCALHOST=true to override."
+                    )
 
         # -- TELEGRAM_AUTH_TTL_SECONDS --
         if settings.telegram_auth_ttl_seconds <= 0:
