@@ -257,8 +257,9 @@ touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
 # Subsequent deploys (preserves data):
 # ./scripts/deploy-bootstrap.sh
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
-docker compose logs -f cron  # check backups
-curl https://YOUR_DOMAIN/health  # must 200
+
+# Post-deploy validation (containers, health, migrations, worker):
+./scripts/validate-deploy.sh
 ```
 
 > **WARNING:** Never run `docker compose -f docker-compose.prod.yml down -v` directly.
