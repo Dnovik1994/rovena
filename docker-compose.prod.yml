@@ -166,16 +166,16 @@ services:
       traefik.http.routers.kass-api.rule: Host(`kass.freestorms.top`) && PathPrefix(`/api/v1`)
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "100"
-      traefik.http.routers.kass-api.service: kass-api-svc
+      traefik.http.routers.kass-api.service: kass-api
       traefik.http.routers.kass-api.tls: "true"
       traefik.http.routers.kass-api.tls.certresolver: le
-      traefik.http.services.kass-api-svc.loadbalancer.server.port: "8000"
+      traefik.http.services.kass-api.loadbalancer.server.port: "8000"
 
       # health (вне /api/v1)
       traefik.http.routers.kass-health.rule: Host(`kass.freestorms.top`) && Path(`/health`)
       traefik.http.routers.kass-health.entrypoints: websecure
       traefik.http.routers.kass-health.priority: "110"
-      traefik.http.routers.kass-health.service: kass-api-svc
+      traefik.http.routers.kass-health.service: kass-api
       traefik.http.routers.kass-health.tls: "true"
       traefik.http.routers.kass-health.tls.certresolver: le
 
@@ -183,7 +183,7 @@ services:
       traefik.http.routers.kass-ws.rule: Host(`kass.freestorms.top`) && PathPrefix(`/ws`)
       traefik.http.routers.kass-ws.entrypoints: websecure
       traefik.http.routers.kass-ws.priority: "110"
-      traefik.http.routers.kass-ws.service: kass-api-svc
+      traefik.http.routers.kass-ws.service: kass-api
       traefik.http.routers.kass-ws.tls: "true"
       traefik.http.routers.kass-ws.tls.certresolver: le
 
@@ -307,13 +307,13 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: app
-      traefik.http.routers.kass-ui.rule: "Host(`kass.freestorms.top`)"
-      traefik.http.routers.kass-ui.entrypoints: websecure
-      traefik.http.routers.kass-ui.priority: "10"
-      traefik.http.routers.kass-ui.service: kass-ui-svc
-      traefik.http.routers.kass-ui.tls: "true"
-      traefik.http.routers.kass-ui.tls.certresolver: le
-      traefik.http.services.kass-ui-svc.loadbalancer.server.port: "5173"
+      traefik.http.routers.kass-frontend.rule: "Host(`kass.freestorms.top`)"
+      traefik.http.routers.kass-frontend.entrypoints: websecure
+      traefik.http.routers.kass-frontend.priority: "10"
+      traefik.http.routers.kass-frontend.service: kass-frontend
+      traefik.http.routers.kass-frontend.tls: "true"
+      traefik.http.routers.kass-frontend.tls.certresolver: le
+      traefik.http.services.kass-frontend.loadbalancer.server.port: "5173"
 
   prometheus:
     image: prom/prometheus:v2.54.1

@@ -65,6 +65,12 @@ docker compose -f docker-compose.prod.yml logs backend | grep "Effective config"
 - [ ] Проверить Traefik логи на успешный выпуск сертификата.
 - [ ] `ufw status` shows ports 22, 80, 443 open.
 
+## Traefik routing
+- [ ] Traefik routers must be explicit service-bound; frontend uses a fallback router
+      (`kass-frontend`, priority 10) that catches all paths not claimed by higher-priority
+      routers (`kass-api` priority 100, `kass-health`/`kass-ws` priority 110).
+      Never use `!PathPrefix` negation — it is fragile and may not match in all Traefik versions.
+
 ## Validation
 - [ ] `curl -i https://kass.freestorms.top/health` returns 200.
 - [ ] `docker compose -f docker-compose.prod.yml logs --tail=200 cron` shows backup success.
