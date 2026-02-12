@@ -12,7 +12,7 @@ Create Date: 2026-02-11 00:00:00.000000
 from alembic import op
 from sqlalchemy import text
 
-revision = "0019"
+revision = "0019_widen_telegram_id_bigint"
 down_revision = "0018_add_telegram_accounts_auth_flows"
 branch_labels = None
 depends_on = None
