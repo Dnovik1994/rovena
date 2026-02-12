@@ -105,6 +105,49 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 # Should print "no new revisions" or equivalent
 ```
 
+### Deterministic advisory-lock verification
+
+Prove that a second migration runner **blocks** (rather than runs concurrently)
+when the advisory lock is already held.
+
+**Terminal 1 — hold the lock for 60 seconds:**
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend python -c "
+from sqlalchemy import create_engine, text
+from app.core.settings import get_settings
+import time
+
+engine = create_engine(get_settings().database_url)
+with engine.connect() as conn:
+    r = conn.execute(text(\"SELECT GET_LOCK('alembic_migration_lock', 0)\")).scalar()
+    assert r == 1, f'GET_LOCK returned {r}, expected 1'
+    cid = conn.execute(text('SELECT CONNECTION_ID()')).scalar()
+    print(f'Lock held on connection_id={cid}. Sleeping 60s...')
+    time.sleep(60)
+    rr = conn.execute(text(\"SELECT RELEASE_LOCK('alembic_migration_lock')\")).scalar()
+    print(f'Released (result={rr}).')
+"
+```
+
+**Terminal 2 — start migrations while lock is held (within that 60 s window):**
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend python /app/scripts/migrate_with_lock.py
+```
+
+**Expected behaviour:**
+
+- Terminal 2 prints `Acquiring advisory lock 'alembic_migration_lock'...` and
+  **hangs** until Terminal 1 releases (or `MIGRATIONS_LOCK_TIMEOUT` expires).
+- If `MIGRATIONS_LOCK_TIMEOUT < 60`, Terminal 2 should exit non-zero with
+  `ERROR: Failed to acquire advisory lock (result: 0)`.
+- After Terminal 1 releases, Terminal 2 proceeds normally if the timeout has
+  not elapsed.
+
+This confirms that `GET_LOCK` serialises migration runs on the same MySQL
+server, regardless of how many backend replicas start simultaneously.
+
 ## Deploy steps
 - [ ] `git pull origin main`
 - [ ] `docker compose -f docker-compose.prod.yml pull`
