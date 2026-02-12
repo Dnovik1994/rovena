@@ -16,11 +16,13 @@
 - Proxy validation still requires manual action in admin.
 
 ## Upgrade Notes
-1. Apply migrations:
+1. Deploy using the safe bootstrap script:
    ```
-   docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+   ./scripts/deploy-bootstrap.sh
    ```
-2. Rebuild and restart services:
+   Migrations run automatically on backend startup (advisory lock + consistency checks).
+   Do NOT run `alembic upgrade head` manually on production.
+2. Verify migration status (read-only):
    ```
-   docker compose -f docker-compose.prod.yml up -d --build
+   docker compose -f docker-compose.prod.yml exec backend /app/scripts/run-migrations.sh
    ```

@@ -138,10 +138,13 @@ Expected: **22 passed**
 python -m pytest tests/ --ignore=tests/test_db_init.py --ignore=tests/test_deploy_stability.py --ignore=tests/test_migrations.py -v
 ```
 
-### Apply the migration
+### Apply the migration (development only)
 
 ```bash
+# Development:
 alembic upgrade head
+# Production: migrations run automatically on backend startup.
+# Do NOT run alembic upgrade head manually on production.
 ```
 
 This adds the 5 new columns to `telegram_accounts`. The migration is idempotent (checks if columns exist before adding).

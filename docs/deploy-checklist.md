@@ -100,8 +100,8 @@ with engine.connect() as conn:
     print(f'OK: single revision {rows[0][0]}')
 "
 
-# Verify idempotency
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+# Verify idempotency via safe wrapper (do NOT run alembic upgrade head directly)
+docker compose -f docker-compose.prod.yml exec backend /app/scripts/run-migrations.sh
 # Should print "no new revisions" or equivalent
 ```
 
