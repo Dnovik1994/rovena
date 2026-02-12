@@ -67,14 +67,9 @@ app.add_middleware(SlowAPIMiddleware)
 async def _internal_error_response(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled exception", extra={"path": str(request.url.path)})
     sentry_sdk.capture_exception(exc)
-    if request.url.path.startswith("/api/"):
-        return JSONResponse(
-            status_code=500,
-            content={"type": "internal_error"},
-        )
     return JSONResponse(
         status_code=500,
-        content={"error": {"code": "500", "message": "Internal error"}},
+        content={"error": {"code": "INTERNAL_ERROR", "message": "Internal error", "status": 500}},
     )
 
 
@@ -318,7 +313,7 @@ app.add_middleware(ExceptionGroupMiddleware)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": str(exc.status_code), "message": exc.detail}},
+        content={"error": {"code": str(exc.status_code), "message": exc.detail, "status": exc.status_code}},
     )
 
 
@@ -329,11 +324,11 @@ async def starlette_http_exception_handler(
     if exc.status_code == http_status.HTTP_404_NOT_FOUND:
         return JSONResponse(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            content={"error": {"code": "404", "message": "Not found"}},
+            content={"error": {"code": "NOT_FOUND", "message": "Not Found", "status": 404}},
         )
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": str(exc.status_code), "message": exc.detail}},
+        content={"error": {"code": str(exc.status_code), "message": exc.detail, "status": exc.status_code}},
     )
 
 
@@ -343,7 +338,7 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": "422", "message": "Validation error"}},
+        content={"error": {"code": "VALIDATION_ERROR", "message": "Validation error", "status": 422}},
     )
 
 
@@ -351,7 +346,7 @@ async def validation_exception_handler(
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     return JSONResponse(
         status_code=429,
-        content={"error": {"code": "429", "message": "Rate limit exceeded"}},
+        content={"error": {"code": "RATE_LIMIT_EXCEEDED", "message": "Rate limit exceeded", "status": 429}},
     )
 
 
@@ -364,7 +359,7 @@ async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSON
     sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=409,
-        content={"error": {"code": "409", "message": "Data conflict: a referenced resource does not exist or a unique constraint was violated"}},
+        content={"error": {"code": "DATA_CONFLICT", "message": "Data conflict: a referenced resource does not exist or a unique constraint was violated", "status": 409}},
     )
 
 
@@ -377,7 +372,7 @@ async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
     sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": "422", "message": "Invalid data: a field value is out of range or malformed"}},
+        content={"error": {"code": "INVALID_DATA", "message": "Invalid data: a field value is out of range or malformed", "status": 422}},
     )
 
 
@@ -482,7 +477,7 @@ async def ws_status_http() -> JSONResponse:
     """Return 426 Upgrade Required when /ws/status is accessed via plain HTTP."""
     return JSONResponse(
         status_code=426,
-        content={"error": {"code": "426", "message": "WebSocket connection required. Use ws:// or wss:// protocol."}},
+        content={"error": {"code": "UPGRADE_REQUIRED", "message": "WebSocket connection required. Use ws:// or wss:// protocol.", "status": 426}},
         headers={"Upgrade": "websocket"},
     )
 
