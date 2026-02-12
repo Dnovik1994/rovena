@@ -232,14 +232,11 @@ services:
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
       CELERY_APP: ${CELERY_APP:-app.workers}
+      APP_ROLE: worker
       PRODUCTION: "true"
       ENVIRONMENT: production
-      WEB_BASE_URL: "https://${DOMAIN:-kass.freestorms.top}"
-      CORS_ORIGINS: '["https://${DOMAIN:-kass.freestorms.top}"]'
-      DEV_ALLOW_LOCALHOST: "false"
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
-    command: celery -A app.workers worker --loglevel=info
     ulimits:
       nofile:
         soft: 65535
