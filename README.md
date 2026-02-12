@@ -44,7 +44,7 @@ MySQL init script автоматически создаёт базу rovena пр
   docker compose --env-file .env -f docker-compose.prod.yml up -d --build
   ```
 
-4. Примените миграции:
+4. Примените миграции (development only — в production миграции запускаются автоматически):
 
 ```bash
 docker compose exec backend alembic upgrade head
@@ -61,8 +61,35 @@ docker compose exec backend alembic upgrade head
 ## Quick Start (Production)
 
 ```bash
-COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+./scripts/deploy-bootstrap.sh
+```
+
+Migrations run automatically on backend startup via the safe migration runner
+(advisory lock + self-heal + consistency checks). Do NOT run `alembic upgrade head`
+manually in production.
+
+> **WARNING — PRODUCTION DATA SAFETY**
+>
+> - **Never** run `docker compose … down -v` on production outside of `deploy-bootstrap.sh` — it destroys **all** data volumes (MySQL, Redis, Prometheus, Grafana, backups).
+> - **Never** run `alembic upgrade head` manually on production — it bypasses the advisory lock and safety checks.
+> - Use `./scripts/deploy-bootstrap.sh` for normal deployments.
+> - Use `./scripts/deploy-bootstrap.sh --wipe-volumes` **only** for first install or explicit full wipe (requires confirmation; **destroys all data**).
+
+### Production verification (read-only)
+
+```bash
+# Check migration status (read-only query)
+docker compose -f docker-compose.prod.yml exec backend python -c \
+  "from sqlalchemy import create_engine, text; from app.core.settings import get_settings; \
+   e = create_engine(get_settings().database_url); c = e.connect(); \
+   print('rows:', c.execute(text('SELECT COUNT(*) FROM alembic_version')).scalar()); \
+   print('head:', c.execute(text('SELECT version_num FROM alembic_version')).scalar())"
+
+# Compare with expected HEAD
+docker compose -f docker-compose.prod.yml exec backend alembic heads
+
+# Optionally trigger migrations via safe wrapper (advisory lock + checks)
+docker compose -f docker-compose.prod.yml exec backend /app/scripts/run-migrations.sh
 ```
 
 Откройте:
@@ -225,13 +252,18 @@ git clone https://github.com/your-org/rovena.git && cd rovena
 cp .env.example .env && nano .env  # fill secrets
 mkdir -p letsencrypt
 touch letsencrypt/acme.json && chmod 600 letsencrypt/acme.json
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml down -v  # first run or after old volumes
-COMMIT_SHA=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml up -d --build
+# First install (wipes volumes — DESTROYS ALL DATA):
+./scripts/deploy-bootstrap.sh --wipe-volumes
+# Subsequent deploys (preserves data):
+# ./scripts/deploy-bootstrap.sh
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
 docker compose logs -f cron  # check backups
 curl https://YOUR_DOMAIN/health  # must 200
 ```
+
+> **WARNING:** Never run `docker compose -f docker-compose.prod.yml down -v` directly.
+> Use `./scripts/deploy-bootstrap.sh --wipe-volumes` only for first install; it requires
+> explicit confirmation and **destroys all data**.
 
 ## Traefik + Let's Encrypt (HTTP-01)
 
@@ -554,10 +586,12 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-3. Примените миграции:
+3. Миграции выполняются автоматически при запуске backend.
+   Не запускайте `alembic upgrade head` вручную на production — это обходит advisory lock и проверки безопасности.
+   Для ручного запуска через безопасный wrapper:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml exec backend /app/scripts/run-migrations.sh
 ```
 
 4. Подготовьте хранилище сертификатов для Traefik:
