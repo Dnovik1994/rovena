@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -13,7 +13,7 @@ class Contact(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), index=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(255))
     first_name: Mapped[str] = mapped_column(String(255))
     last_name: Mapped[str | None] = mapped_column(String(255))
