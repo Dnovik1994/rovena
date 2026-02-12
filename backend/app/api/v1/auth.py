@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import time
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.limits import get_redis_client
 from app.core.metrics import telegram_auth_reject_total
 from app.core.rate_limit import limiter
 from app.core.security import (
@@ -17,6 +19,7 @@ from app.core.security import (
     decode_refresh_token,
     hash_token,
 )
+from app.core.settings import get_settings
 from app.models.user import ADMIN_ROLES, User, UserRole
 from app.schemas.auth import RefreshTokenRequest, TelegramAuthRequest, TokenResponse
 from app.services.telegram_auth import TelegramAuthError, validate_init_data
@@ -56,6 +59,80 @@ def _extract_init_data_metadata(init_data: str) -> dict[str, Any]:
     return metadata
 
 
+def _check_initdata_replay(init_data_raw: str) -> JSONResponse | None:
+    """Atomic initData dedup via Redis ``SET key 1 NX EX ttl``.
+
+    Must be called **after** signature validation passes (so attackers
+    cannot cheaply fill Redis with garbage keys) and **before** any
+    stateful operations (user create / session create).
+
+    Returns a :class:`JSONResponse` when the request must be rejected,
+    or ``None`` when the caller may proceed.
+
+    Fail-closed in production: if Redis is unavailable, the request is
+    rejected.  In development mode without Redis the check is skipped.
+    """
+    settings = get_settings()
+    ttl = settings.telegram_auth_ttl_seconds
+    if ttl <= 0:
+        return None  # Replay protection disabled (dev only)
+
+    client = get_redis_client()
+    if client is None:
+        if settings.production:
+            logger.error("event=replay_check_fail reason=redis_unavailable")
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "error": {
+                        "code": "503",
+                        "message": "Service temporarily unavailable",
+                    }
+                },
+            )
+        logger.warning("event=replay_check_skip reason=redis_unavailable")
+        return None
+
+    digest = hashlib.sha256(init_data_raw.encode("utf-8")).hexdigest()
+    key = f"tg:initdata:replay:{settings.environment}:{digest}"
+
+    try:
+        ok = client.set(key, "1", ex=ttl, nx=True)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "event=replay_check_redis_error hash_prefix=%s", digest[:8]
+        )
+        if settings.production:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "error": {
+                        "code": "503",
+                        "message": "Service temporarily unavailable",
+                    }
+                },
+            )
+        return None
+
+    if not ok:
+        telegram_auth_reject_total.labels(reason="initdata_replay").inc()
+        logger.warning(
+            "event=initdata_replay_detected hash_prefix=%s", digest[:8]
+        )
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "error": {
+                    "code": "401",
+                    "message": "Authentication failed",
+                    "reason_code": "initdata_replay",
+                }
+            },
+        )
+
+    return None
+
+
 @router.post("/auth/telegram", response_model=TokenResponse)
 @limiter.limit("10/minute")
 def auth_via_telegram(
@@ -91,6 +168,13 @@ def auth_via_telegram(
                 }
             },
         )
+
+    # ── Atomic replay protection ──────────────────────────────────────
+    # After signature is verified (no garbage into Redis) but before any
+    # stateful side-effects (user create / token issue).
+    replay_response = _check_initdata_replay(payload.init_data)
+    if replay_response is not None:
+        return replay_response
 
     user_raw = data.get("user")
     if not user_raw:
