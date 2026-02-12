@@ -231,12 +231,16 @@ services:
       MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
       MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
-      CELERY_APP: ${CELERY_APP:-app.workers}
+      CELERY_APP: ${CELERY_APP:-app.workers:celery_app}
+      CELERY_POOL: ${CELERY_POOL:-solo}
+      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       APP_ROLE: worker
       PRODUCTION: "true"
       ENVIRONMENT: production
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
+    command: celery -A app.workers:celery_app worker --loglevel=info --hostname "celery@%h" --pool "${CELERY_POOL:-solo}" --concurrency "${CELERY_CONCURRENCY:-1}"
     ulimits:
       nofile:
         soft: 65535
