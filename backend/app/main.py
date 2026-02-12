@@ -136,12 +136,11 @@ async def on_startup() -> None:
     if settings.redis_url:
         manager.configure_redis(settings.redis_url)
     try:
-        redis_client = Redis.from_url(settings.redis_url)
-        redis_client.ping()
+        await asyncio.to_thread(lambda: Redis.from_url(settings.redis_url).ping())
         logger.info("Redis connected")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
-    _bootstrap_admin()
+    await asyncio.to_thread(_bootstrap_admin)
     logger.info(
         "Admin config | admin_user_id_configured=%s | admin_telegram_id_configured=%s",
         settings.admin_user_id is not None,
@@ -429,6 +428,15 @@ def metrics() -> Response:
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 
+def _apply_stripe_tariff(uid: int, tid: int) -> None:
+    """Apply tariff change from Stripe checkout (runs in thread)."""
+    with SessionLocal() as db:
+        user = db.get(User, uid)
+        if user:
+            user.tariff_id = tid
+            db.commit()
+
+
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request) -> dict[str, str]:
     if not settings.stripe_webhook_secret:
@@ -464,11 +472,7 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
             except (ValueError, TypeError):
                 logger.warning("Invalid Stripe metadata", extra={"user_id": user_id, "tariff_id": tariff_id})
                 return {"status": "ok"}
-            with SessionLocal() as db:
-                user = db.get(User, uid)
-                if user:
-                    user.tariff_id = tid
-                    db.commit()
+            await asyncio.to_thread(_apply_stripe_tariff, uid, tid)
 
     return {"status": "ok"}
 
@@ -481,6 +485,13 @@ async def ws_status_http() -> JSONResponse:
         content={"error": {"code": "426", "message": "WebSocket connection required. Use ws:// or wss:// protocol."}},
         headers={"Upgrade": "websocket"},
     )
+
+
+def _check_user_active(user_id: int) -> bool:
+    """Check if user exists and is active (runs in thread)."""
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        return bool(user and user.is_active)
 
 
 @app.websocket("/ws/status")
@@ -512,11 +523,9 @@ async def websocket_status(websocket: WebSocket) -> None:
         await websocket.close(code=1008)
         return
 
-    with SessionLocal() as db:
-        user = db.get(User, user_id)
-        if not user or not user.is_active:
-            await websocket.close(code=1008)
-            return
+    if not await asyncio.to_thread(_check_user_active, user_id):
+        await websocket.close(code=1008)
+        return
 
     await manager.connect(websocket, user_id, accept=False)
 
