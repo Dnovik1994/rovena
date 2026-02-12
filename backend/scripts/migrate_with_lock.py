@@ -57,6 +57,15 @@ def main() -> int:
         lock_acquired = True
         log("Advisory lock acquired.")
 
+        # Log MySQL server identity and session for observability.
+        try:
+            row = conn.execute(
+                text("SELECT @@hostname, @@port, CONNECTION_ID()")
+            ).one()
+            log(f"MySQL session: host={row[0]}, port={row[1]}, connection_id={row[2]}")
+        except Exception as exc:
+            log(f"WARNING: Could not fetch server identity: {exc}")
+
         # Commit to close the implicit transaction so later reads get a
         # fresh snapshot (MySQL REPEATABLE READ).  The advisory lock is
         # session-scoped and survives commits.
@@ -195,12 +204,13 @@ def main() -> int:
         if lock_acquired:
             try:
                 log(f"Releasing advisory lock '{lock_name}'...")
-                conn.execute(
+                release_result = conn.execute(
                     text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name}
-                )
-            except Exception:
+                ).scalar()
+                log(f"RELEASE_LOCK result: {release_result}")
+            except Exception as exc:
                 log(
-                    "WARNING: Could not release advisory lock "
+                    f"WARNING: Could not release advisory lock: {exc} "
                     "(may auto-release on disconnect)."
                 )
 
