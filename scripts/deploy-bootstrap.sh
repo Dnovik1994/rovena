@@ -38,9 +38,9 @@ if [ "$WIPE_VOLUMES" = true ]; then
     fi
   fi
   echo "WARNING: Wiping Docker volumes..."
-  docker compose -f docker-compose.prod.yml down -v
+  docker compose -f docker-compose.prod.yml down --remove-orphans -v
 else
-  docker compose -f docker-compose.prod.yml down
+  docker compose -f docker-compose.prod.yml down --remove-orphans
 fi
 
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
