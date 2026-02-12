@@ -381,7 +381,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - ./crontab.txt:/etc/crontabs/root:ro
       - backups:/backups
