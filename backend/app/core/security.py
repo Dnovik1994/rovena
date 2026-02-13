@@ -3,6 +3,7 @@ import hashlib
 from typing import Any
 
 from jose import JWTError, jwt
+from jose.exceptions import JWTClaimsError
 
 from app.core.settings import get_settings
 
@@ -28,12 +29,26 @@ def hash_token(token: str) -> str:
 
 
 def _decode_token(token: str, token_type: str | None = None) -> dict[str, Any]:
-    payload = jwt.decode(
-        token,
-        settings.jwt_secret,
-        algorithms=[settings.jwt_algorithm],
-        options={"verify_sub": False},
-    )
+    token = token.strip()
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError as exc:
+        message = str(exc).lower()
+        is_sub_error = isinstance(exc, JWTClaimsError) and (
+            "subject" in message or "sub" in message
+        )
+        if not is_sub_error:
+            raise
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_sub": False},
+        )
     payload_type = payload.get("type")
     if token_type and payload_type != token_type:
         raise JWTError("Invalid token type")

@@ -242,7 +242,7 @@ def refresh_access_token(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
 
     user_id = token_payload.get("sub")
-    if not user_id:
+    if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
     user = db.get(User, int(user_id))

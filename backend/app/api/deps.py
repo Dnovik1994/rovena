@@ -32,14 +32,14 @@ async def get_current_user_id(
     if not authorization or not authorization.startswith("Bearer "):
         raise unauthorized("Missing bearer token")
 
-    token = authorization.replace("Bearer ", "", 1)
+    token = authorization.replace("Bearer ", "", 1).strip()
     try:
         payload = decode_access_token(token)
     except JWTError as exc:
         raise unauthorized("Invalid token") from exc
 
     user_id = payload.get("sub")
-    if not user_id:
+    if user_id is None:
         raise unauthorized("Invalid token payload")
 
     try:
