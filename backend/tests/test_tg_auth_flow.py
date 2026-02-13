@@ -224,6 +224,7 @@ class TestSendCodeTaskSuccess:
         mock_client.send_code = AsyncMock(return_value=mock_sent_code)
         mock_client.connect = AsyncMock()
         mock_client.disconnect = AsyncMock()
+        mock_client.export_session_string = AsyncMock(return_value="test_session_string")
 
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.create_tg_account_client",
