@@ -45,7 +45,7 @@ from app.models.telegram_account import (
     VerifyStatus,
 )
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
-from app.services.session_crypto import encrypt_session
+from app.services.session_crypto import decrypt_session, encrypt_session
 from app.services.websocket_manager import manager
 from app.workers import celery_app
 
@@ -143,6 +143,29 @@ def _log_client_fingerprint(log, ctx, client) -> None:
         log.warning("event=telegram_client_fingerprint_error %s", ctx)
 
 
+async def _get_dc_id(client) -> str:
+    """Extract dc_id from a connected Pyrogram client (best-effort)."""
+    try:
+        dc = client.storage.dc_id
+        if callable(dc):
+            return str(await dc())
+        return str(dc)
+    except Exception:
+        return "unknown"
+
+
+def _is_dc_migrate_error(exc: Exception) -> bool:
+    return "MIGRATE" in type(exc).__name__.upper() or "MIGRATE" in str(exc).upper()
+
+
+def _extract_migrate_dc(exc: Exception) -> int | None:
+    dc = getattr(exc, "value", None)
+    if isinstance(dc, int):
+        return dc
+    m = re.search(r"MIGRATE[_ ]*(\d+)", str(exc).upper())
+    return int(m.group(1)) if m else None
+
+
 # ─── send_code ───────────────────────────────────────────────────────
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
@@ -174,24 +197,39 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
 
             t_connect = time.monotonic()
             await client.connect()
+            dc_before = await _get_dc_id(client)
             log.info(
-                "event=client_connected %s elapsed_ms=%d",
-                ctx, int((time.monotonic() - t_connect) * 1000),
+                "event=client_connected %s dc_id=%s elapsed_ms=%d",
+                ctx, dc_before, int((time.monotonic() - t_connect) * 1000),
             )
             _log_client_fingerprint(log, ctx, client)
 
             t_send = time.monotonic()
             sent_code = await client.send_code(account.phone_e164)
+            dc_after = await _get_dc_id(client)
             log.info(
-                "event=telegram_send_code_ok %s type=%s elapsed_ms=%d",
+                "event=telegram_send_code_ok %s type=%s dc_before=%s dc_after=%s elapsed_ms=%d",
                 ctx, getattr(sent_code, "type", "unknown"),
+                dc_before, dc_after,
                 int((time.monotonic() - t_send) * 1000),
             )
+
+            # Export the session that now points to the correct DC so that
+            # confirm_code can re-use the same auth_key + dc_id.
+            flow_session_enc: str | None = None
+            try:
+                raw_session = await client.export_session_string()
+                flow_session_enc = encrypt_session(raw_session)
+            except Exception:
+                log.warning("event=send_code_session_export_failed %s", ctx)
 
             flow.state = AuthFlowState.wait_code
             flow.sent_at = datetime.now(timezone.utc)
             flow.expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.auth_flow_ttl_seconds)
-            flow.meta_json = {"phone_code_hash": sent_code.phone_code_hash}
+            meta: dict = {"phone_code_hash": sent_code.phone_code_hash, "dc_id": dc_after}
+            if flow_session_enc:
+                meta["session_encrypted"] = flow_session_enc
+            flow.meta_json = meta
 
             account.status = TelegramAccountStatus.code_sent
             account.last_error = None
@@ -323,7 +361,8 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             return
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
-        phone_code_hash = (flow.meta_json or {}).get("phone_code_hash", "")
+        meta = flow.meta_json or {}
+        phone_code_hash = meta.get("phone_code_hash", "")
 
         if not phone_code_hash:
             log.warning("event=confirm_code_missing_hash %s", ctx)
@@ -336,16 +375,37 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
             return
 
+        # Restore session saved by send_code (carries correct dc_id + auth_key)
+        flow_session: str | None = None
+        flow_session_enc = meta.get("session_encrypted")
+        if flow_session_enc:
+            try:
+                flow_session = decrypt_session(flow_session_enc)
+            except Exception:
+                log.warning("event=confirm_code_session_decrypt_failed %s", ctx)
+
+        send_code_dc = meta.get("dc_id", "unknown")
+        log.info(
+            "event=confirm_code_session_info %s send_code_dc=%s has_flow_session=%s",
+            ctx, send_code_dc, bool(flow_session),
+        )
+
         client = None
         try:
             log.info("event=confirm_code_started %s", ctx)
-            client = create_tg_account_client(account, proxy, phone=account.phone_e164)
+            client = create_tg_account_client(
+                account, proxy,
+                phone=account.phone_e164,
+                session_string=flow_session,
+            )
 
             t_connect = time.monotonic()
             await client.connect()
+            confirm_dc = await _get_dc_id(client)
             log.info(
-                "event=client_connected %s elapsed_ms=%d",
-                ctx, int((time.monotonic() - t_connect) * 1000),
+                "event=client_connected %s dc_id=%s send_code_dc=%s elapsed_ms=%d",
+                ctx, confirm_dc, send_code_dc,
+                int((time.monotonic() - t_connect) * 1000),
             )
             _log_client_fingerprint(log, ctx, client)
 
@@ -357,20 +417,40 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 
             # ── Diagnostic: payload entering sign_in ──
             log.info(
-                "event=confirm_code_payload %s code_len=%d code_is_digits=%s hash_prefix=%s flow_state=%s",
+                "event=confirm_code_payload %s code_len=%d code_is_digits=%s hash_prefix=%s flow_state=%s dc_id=%s",
                 ctx,
                 len(code or ""),
                 bool(code) and code.isdigit(),
                 phone_code_hash[:8],
                 flow.state,
+                confirm_dc,
             )
 
+            # ── sign_in with one-retry on DC-migrate error ──
             t_sign = time.monotonic()
-            signed_in = await client.sign_in(
-                phone_number=account.phone_e164,
-                phone_code_hash=phone_code_hash,
-                phone_code=code,
-            )
+            try:
+                signed_in = await client.sign_in(
+                    phone_number=account.phone_e164,
+                    phone_code_hash=phone_code_hash,
+                    phone_code=code,
+                )
+            except Exception as sign_exc:
+                if not _is_dc_migrate_error(sign_exc):
+                    raise
+                target_dc = _extract_migrate_dc(sign_exc)
+                if target_dc is None:
+                    raise
+                log.warning(
+                    "event=sign_in_dc_migrate target_dc=%d %s", target_dc, ctx,
+                )
+                await client.disconnect()
+                await client.storage.dc_id(target_dc)
+                await client.connect()
+                signed_in = await client.sign_in(
+                    phone_number=account.phone_e164,
+                    phone_code_hash=phone_code_hash,
+                    phone_code=code,
+                )
             log.info(
                 "event=sign_in_ok %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_sign) * 1000),

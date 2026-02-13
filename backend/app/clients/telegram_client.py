@@ -82,28 +82,30 @@ def create_tg_account_client(
     *,
     phone: str | None = None,
     in_memory: bool = True,
+    session_string: str | None = None,
 ) -> Client:
     """Create Pyrogram client for a TelegramAccount model.
 
-    If account has an encrypted session, load it via StringSession.
-    Otherwise create a new in-memory client for auth flow.
+    If *session_string* is provided explicitly (e.g. saved from a previous
+    send_code step), it takes priority.  Otherwise falls back to the
+    encrypted session stored on the account, then to phone-number auth.
     """
     _ensure_enabled()
     proxy_config = _build_proxy(proxy)
     device_config = getattr(account, "device_config", None) or generate_device_config()
     device_params = build_pyrogram_client_kwargs(device_config)
 
-    session_string = None
-    if getattr(account, "session_encrypted", None):
+    resolved_session = session_string
+    if not resolved_session and getattr(account, "session_encrypted", None):
         try:
-            session_string = decrypt_session(account.session_encrypted)
+            resolved_session = decrypt_session(account.session_encrypted)
         except Exception:
             logger.warning("Failed to decrypt session for account %s", account.id)
 
     logger.info(
         "TG account client init | account_id=%s | has_session=%s | proxy=%s",
         account.id,
-        bool(session_string),
+        bool(resolved_session),
         "enabled" if proxy_config else "none",
     )
 
@@ -115,8 +117,8 @@ def create_tg_account_client(
         **device_params,
     }
 
-    if session_string:
-        kwargs["session_string"] = session_string
+    if resolved_session:
+        kwargs["session_string"] = resolved_session
     elif phone:
         kwargs["phone_number"] = phone
 
