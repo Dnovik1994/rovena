@@ -197,12 +197,13 @@ def validate_settings(settings: Settings) -> None:
     logger.info(
         "Effective config | ENVIRONMENT=%s | WEB_BASE_URL=%s | "
         "CORS_ORIGINS=%s | TELEGRAM_AUTH_TTL_SECONDS=%d | "
-        "admin_id_present=%s",
+        "admin_id_present=%s | SESSION_ENC_KEY_set=%s",
         settings.environment,
         settings.web_base_url,
         settings.cors_origins,
         settings.telegram_auth_ttl_seconds,
         settings.admin_telegram_id is not None,
+        bool(settings.session_enc_key),
     )
 
 
@@ -219,6 +220,11 @@ def get_settings() -> Settings:
             raise ValueError("Change DATABASE_URL!")
         if settings.telegram_client_enabled and (not settings.telegram_api_id or not settings.telegram_api_hash):
             raise ValueError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH!")
+        if settings.telegram_client_enabled and not settings.session_enc_key:
+            raise ValueError(
+                "SESSION_ENC_KEY must be set in production when Telegram client is enabled. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
         if settings.stripe_secret_key or settings.stripe_webhook_secret:
             if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
                 raise ValueError("Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET!")
