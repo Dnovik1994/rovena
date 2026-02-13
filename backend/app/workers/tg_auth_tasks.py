@@ -325,6 +325,17 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         phone_code_hash = (flow.meta_json or {}).get("phone_code_hash", "")
 
+        if not phone_code_hash:
+            log.warning("event=confirm_code_missing_hash %s", ctx)
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Missing phone_code_hash; please resend code"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Missing phone_code_hash; please resend code"
+            db.commit()
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+            return
+
         client = None
         try:
             log.info("event=confirm_code_started %s", ctx)
@@ -338,27 +349,10 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             )
             _log_client_fingerprint(log, ctx, client)
 
-            # Re-send code to re-establish connection context, then sign in
-            original_hash_prefix = (phone_code_hash or "")[:8]
-            try:
-                sent_code = await client.send_code(account.phone_e164)
-                phone_code_hash = sent_code.phone_code_hash
-                log.info(
-                    "event=confirm_code_resend_ok %s original_hash_prefix=%s new_hash_prefix=%s hash_changed=%s",
-                    ctx, original_hash_prefix, (phone_code_hash or "")[:8],
-                    original_hash_prefix != (phone_code_hash or "")[:8],
-                )
-            except Exception as resend_exc:
-                log.info(
-                    "event=confirm_code_resend_skipped %s reason=%s using_original_hash_prefix=%s",
-                    ctx, type(resend_exc).__name__, original_hash_prefix,
-                )
-
             # ── Diagnostic: verify hash stability ──
-            assert phone_code_hash, "phone_code_hash is empty"
             log.info(
                 "event=confirm_code_hash_check %s hash_len=%d hash_prefix=%s",
-                ctx, len(phone_code_hash or ""), (phone_code_hash or "")[:8],
+                ctx, len(phone_code_hash), phone_code_hash[:8],
             )
 
             # ── Diagnostic: payload entering sign_in ──
@@ -367,7 +361,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                 ctx,
                 len(code or ""),
                 bool(code) and code.isdigit(),
-                (phone_code_hash or "")[:8],
+                phone_code_hash[:8],
                 flow.state,
             )
 
