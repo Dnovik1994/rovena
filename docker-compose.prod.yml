@@ -161,7 +161,7 @@ services:
       com.prometheus.scrape: "true"
       com.prometheus.port: "8000"
       traefik.enable: "true"
-      traefik.docker.network: app
+      traefik.docker.network: rovena_app
       # основной API
       traefik.http.routers.kass-api.rule: Host(`kass.freestorms.top`) && PathPrefix(`/api/v1`)
       traefik.http.routers.kass-api.entrypoints: websecure
@@ -307,7 +307,7 @@ services:
       start_period: 10s
     labels:
       traefik.enable: "true"
-      traefik.docker.network: app
+      traefik.docker.network: rovena_app
       traefik.http.routers.kass-web.rule: "Host(`kass.freestorms.top`)"
       traefik.http.routers.kass-web.entrypoints: websecure
       traefik.http.routers.kass-web.priority: "10"
