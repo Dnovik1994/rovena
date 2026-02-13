@@ -123,6 +123,26 @@ def _is_network_error(exc: Exception) -> bool:
     return any(kw in msg for kw in ("timeout", "connection", "network", "eof", "reset", "refused"))
 
 
+def _log_client_fingerprint(log, ctx, client) -> None:
+    """Log Telegram client session identity for cross-step consistency checks."""
+    try:
+        session_id = getattr(client, "name", None) or "unknown"
+        proxy = getattr(client, "proxy", None) or {}
+        if isinstance(proxy, dict):
+            proxy_host = "%s:%s" % (proxy.get("hostname", "?"), proxy.get("port", "?"))
+        else:
+            proxy_host = "none"
+        device_model = getattr(client, "device_model", "?")
+        system_version = getattr(client, "system_version", "?")
+        app_version = getattr(client, "app_version", "?")
+        log.info(
+            "event=telegram_client_fingerprint %s session=%s proxy=%s device=%s system=%s app=%s",
+            ctx, session_id, proxy_host, device_model, system_version, app_version,
+        )
+    except Exception:
+        log.warning("event=telegram_client_fingerprint_error %s", ctx)
+
+
 # ─── send_code ───────────────────────────────────────────────────────
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
@@ -158,6 +178,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
                 "event=client_connected %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_connect) * 1000),
             )
+            _log_client_fingerprint(log, ctx, client)
 
             t_send = time.monotonic()
             sent_code = await client.send_code(account.phone_e164)
@@ -315,13 +336,40 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                 "event=client_connected %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_connect) * 1000),
             )
+            _log_client_fingerprint(log, ctx, client)
 
             # Re-send code to re-establish connection context, then sign in
+            original_hash_prefix = (phone_code_hash or "")[:8]
             try:
                 sent_code = await client.send_code(account.phone_e164)
                 phone_code_hash = sent_code.phone_code_hash
-            except Exception:
-                pass  # May fail if code was already sent recently
+                log.info(
+                    "event=confirm_code_resend_ok %s original_hash_prefix=%s new_hash_prefix=%s hash_changed=%s",
+                    ctx, original_hash_prefix, (phone_code_hash or "")[:8],
+                    original_hash_prefix != (phone_code_hash or "")[:8],
+                )
+            except Exception as resend_exc:
+                log.info(
+                    "event=confirm_code_resend_skipped %s reason=%s using_original_hash_prefix=%s",
+                    ctx, type(resend_exc).__name__, original_hash_prefix,
+                )
+
+            # ── Diagnostic: verify hash stability ──
+            assert phone_code_hash, "phone_code_hash is empty"
+            log.info(
+                "event=confirm_code_hash_check %s hash_len=%d hash_prefix=%s",
+                ctx, len(phone_code_hash or ""), (phone_code_hash or "")[:8],
+            )
+
+            # ── Diagnostic: payload entering sign_in ──
+            log.info(
+                "event=confirm_code_payload %s code_len=%d code_is_digits=%s hash_prefix=%s flow_state=%s",
+                ctx,
+                len(code or ""),
+                bool(code) and code.isdigit(),
+                (phone_code_hash or "")[:8],
+                flow.state,
+            )
 
             t_sign = time.monotonic()
             signed_in = await client.sign_in(
