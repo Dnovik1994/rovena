@@ -163,7 +163,7 @@ services:
       traefik.enable: "true"
       traefik.docker.network: rovena_app
       # основной API
-      traefik.http.routers.kass-api.rule: Host(`kass.freestorms.top`) && PathPrefix(`/api/v1`)
+      traefik.http.routers.kass-api.rule: "Host(`kass.freestorms.top`) && (PathPrefix(`/api/v1/`) || Path(`/api/v1`))"
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "20"
       traefik.http.routers.kass-api.service: kass-api
