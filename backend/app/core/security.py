@@ -9,17 +9,17 @@ from app.core.settings import get_settings
 settings = get_settings()
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str | int) -> str:
     expires_delta = timedelta(minutes=settings.jwt_expiration_minutes)
     expire = datetime.now(timezone.utc) + expires_delta
-    payload = {"sub": subject, "exp": expire, "type": "access"}
+    payload = {"sub": str(subject), "exp": expire, "type": "access"}
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str | int) -> str:
     expires_delta = timedelta(days=settings.jwt_refresh_expiration_days)
     expire = datetime.now(timezone.utc) + expires_delta
-    payload = {"sub": subject, "exp": expire, "type": "refresh"}
+    payload = {"sub": str(subject), "exp": expire, "type": "refresh"}
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
@@ -28,7 +28,12 @@ def hash_token(token: str) -> str:
 
 
 def _decode_token(token: str, token_type: str | None = None) -> dict[str, Any]:
-    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    payload = jwt.decode(
+        token,
+        settings.jwt_secret,
+        algorithms=[settings.jwt_algorithm],
+        options={"verify_sub": False},
+    )
     payload_type = payload.get("type")
     if token_type and payload_type != token_type:
         raise JWTError("Invalid token type")
