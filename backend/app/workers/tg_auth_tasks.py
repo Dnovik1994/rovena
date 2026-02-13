@@ -123,6 +123,26 @@ def _is_network_error(exc: Exception) -> bool:
     return any(kw in msg for kw in ("timeout", "connection", "network", "eof", "reset", "refused"))
 
 
+def _log_client_fingerprint(log, ctx, client) -> None:
+    """Log Telegram client session identity for cross-step consistency checks."""
+    try:
+        session_id = getattr(client, "name", None) or "unknown"
+        proxy = getattr(client, "proxy", None) or {}
+        if isinstance(proxy, dict):
+            proxy_host = "%s:%s" % (proxy.get("hostname", "?"), proxy.get("port", "?"))
+        else:
+            proxy_host = "none"
+        device_model = getattr(client, "device_model", "?")
+        system_version = getattr(client, "system_version", "?")
+        app_version = getattr(client, "app_version", "?")
+        log.info(
+            "event=telegram_client_fingerprint %s session=%s proxy=%s device=%s system=%s app=%s",
+            ctx, session_id, proxy_host, device_model, system_version, app_version,
+        )
+    except Exception:
+        log.warning("event=telegram_client_fingerprint_error %s", ctx)
+
+
 # ─── send_code ───────────────────────────────────────────────────────
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
@@ -158,6 +178,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
                 "event=client_connected %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_connect) * 1000),
             )
+            _log_client_fingerprint(log, ctx, client)
 
             t_send = time.monotonic()
             sent_code = await client.send_code(account.phone_e164)
@@ -304,6 +325,17 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         phone_code_hash = (flow.meta_json or {}).get("phone_code_hash", "")
 
+        if not phone_code_hash:
+            log.warning("event=confirm_code_missing_hash %s", ctx)
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Missing phone_code_hash; please resend code"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Missing phone_code_hash; please resend code"
+            db.commit()
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+            return
+
         client = None
         try:
             log.info("event=confirm_code_started %s", ctx)
@@ -315,13 +347,23 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                 "event=client_connected %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_connect) * 1000),
             )
+            _log_client_fingerprint(log, ctx, client)
 
-            # Re-send code to re-establish connection context, then sign in
-            try:
-                sent_code = await client.send_code(account.phone_e164)
-                phone_code_hash = sent_code.phone_code_hash
-            except Exception:
-                pass  # May fail if code was already sent recently
+            # ── Diagnostic: verify hash stability ──
+            log.info(
+                "event=confirm_code_hash_check %s hash_len=%d hash_prefix=%s",
+                ctx, len(phone_code_hash), phone_code_hash[:8],
+            )
+
+            # ── Diagnostic: payload entering sign_in ──
+            log.info(
+                "event=confirm_code_payload %s code_len=%d code_is_digits=%s hash_prefix=%s flow_state=%s",
+                ctx,
+                len(code or ""),
+                bool(code) and code.isdigit(),
+                phone_code_hash[:8],
+                flow.state,
+            )
 
             t_sign = time.monotonic()
             signed_in = await client.sign_in(
