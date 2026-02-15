@@ -224,7 +224,6 @@ class TestSendCodeTaskSuccess:
         mock_client.send_code = AsyncMock(return_value=mock_sent_code)
         mock_client.connect = AsyncMock()
         mock_client.disconnect = AsyncMock()
-        mock_client.export_session_string = AsyncMock(return_value="test_session_string")
 
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.create_tg_account_client",
@@ -233,10 +232,6 @@ class TestSendCodeTaskSuccess:
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.manager",
             MagicMock(),
-        )
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.encrypt_session",
-            lambda s: "encrypted_" + s,
         )
 
         from app.workers.tg_auth_tasks import _run_send_code
@@ -253,10 +248,11 @@ class TestSendCodeTaskSuccess:
 
         assert flow.state == AuthFlowState.wait_code
         assert flow.meta_json["phone_code_hash"] == "test_hash_123"
-        assert flow.meta_json["session_encrypted"] == "encrypted_test_session_string"
+        assert "session_encrypted" not in (flow.meta_json or {})
         assert flow.sent_at is not None
         assert account.status == TelegramAccountStatus.code_sent
         assert account.last_error is None
+        mock_client.export_session_string.assert_not_called()
 
 
 # ─── send_code_task: exception paths ───────────────────────────────
@@ -710,121 +706,37 @@ class TestSanitizationUtils:
         assert _mask_phone("") == "***"
 
 
-# ─── send_code_task: missing SESSION_ENC_KEY → flow failed ────────
+# ─── confirm_code_task: successful login persists exported session ───
 
 
-class TestSendCodeSessionEncryptionFailure:
-    """When encrypt_session fails (e.g. SESSION_ENC_KEY missing), send_code
-    must mark flow as failed and NOT transition to wait_code."""
-
-    def test_missing_enc_key_marks_flow_failed(self, db_session, monkeypatch):
+class TestConfirmCodeSessionPersistence:
+    def test_confirm_code_exports_and_saves_session(self, db_session, monkeypatch):
         user = _create_user(db_session)
         account = _create_account(db_session, user)
-        flow = _create_flow(db_session, account)
+        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
+        flow.meta_json = {"phone_code_hash": "hash_xyz", "dc_id": "4"}
+        db_session.commit()
+
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
 
         mock_client = AsyncMock()
-        mock_sent_code = MagicMock()
-        mock_sent_code.phone_code_hash = "hash_abc"
-        mock_sent_code.type = "sms"
-        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
         mock_client.connect = AsyncMock()
         mock_client.disconnect = AsyncMock()
+        mock_client.sign_in = AsyncMock(return_value=MagicMock(
+            id=123456,
+            username="test_user",
+            first_name="Test",
+            last_name="User",
+        ))
         mock_client.export_session_string = AsyncMock(return_value="raw_session")
 
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
-
-        # Make encrypt_session raise (simulates missing SESSION_ENC_KEY)
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.encrypt_session",
-            MagicMock(side_effect=RuntimeError("SESSION_ENC_KEY is not set")),
-        )
-
-        from app.workers.tg_auth_tasks import _run_send_code
-
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_run_send_code(account.id, flow.id))
-        finally:
-            loop.close()
-
-        db_session.expire_all()
-        flow = db_session.get(TelegramAuthFlow, flow.id)
-        account = db_session.get(TelegramAccount, account.id)
-
-        assert flow.state == AuthFlowState.failed
-        assert flow.state != AuthFlowState.wait_code
-        assert "encrypt" in (flow.last_error or "").lower() or "session" in (flow.last_error or "").lower()
-        assert account.status == TelegramAccountStatus.error
-
-    def test_export_session_string_failure_marks_flow_failed(self, db_session, monkeypatch):
-        """If export_session_string itself raises, flow should also be failed."""
-        user = _create_user(db_session)
-        account = _create_account(db_session, user)
-        flow = _create_flow(db_session, account)
-
-        mock_client = AsyncMock()
-        mock_sent_code = MagicMock()
-        mock_sent_code.phone_code_hash = "hash_def"
-        mock_sent_code.type = "sms"
-        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
-        mock_client.connect = AsyncMock()
-        mock_client.disconnect = AsyncMock()
-        mock_client.export_session_string = AsyncMock(
-            side_effect=RuntimeError("session export error"),
-        )
-
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
-            lambda *a, **kw: mock_client,
-        )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
-
-        from app.workers.tg_auth_tasks import _run_send_code
-
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_run_send_code(account.id, flow.id))
-        finally:
-            loop.close()
-
-        db_session.expire_all()
-        flow = db_session.get(TelegramAuthFlow, flow.id)
-        account = db_session.get(TelegramAccount, account.id)
-
-        assert flow.state == AuthFlowState.failed
-        assert account.status == TelegramAccountStatus.error
-
-
-# ─── confirm_code_task: missing session_encrypted → flow failed ───
-
-
-class TestConfirmCodeMissingSession:
-    """When session_encrypted is absent from flow meta, confirm_code must
-    NOT attempt sign_in and must mark flow as failed."""
-
-    def test_no_session_encrypted_marks_flow_failed(self, db_session, monkeypatch):
-        user = _create_user(db_session)
-        account = _create_account(db_session, user)
-        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        # Set meta WITHOUT session_encrypted (simulates the old bug path)
-        flow.meta_json = {"phone_code_hash": "hash_xyz", "dc_id": "4"}
-        db_session.commit()
-
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
-
-        # sign_in should never be called — use a mock to verify
-        mock_client = AsyncMock()
-        mock_client.connect = AsyncMock()
-        mock_client.disconnect = AsyncMock()
-        mock_client.sign_in = AsyncMock()
-
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
-            lambda *a, **kw: mock_client,
+            lambda s: "encrypted_" + s,
         )
 
         from app.workers.tg_auth_tasks import _run_confirm_code
@@ -839,56 +751,10 @@ class TestConfirmCodeMissingSession:
         flow = db_session.get(TelegramAuthFlow, flow.id)
         account = db_session.get(TelegramAccount, account.id)
 
-        assert flow.state == AuthFlowState.failed
-        assert "session" in (flow.last_error or "").lower()
-        assert "resend" in (flow.last_error or "").lower()
-        assert account.status == TelegramAccountStatus.error
-        # sign_in must NOT have been called
-        mock_client.sign_in.assert_not_called()
-
-    def test_decrypt_failure_marks_flow_failed(self, db_session, monkeypatch):
-        """If session_encrypted is present but decrypt fails, flow → failed."""
-        user = _create_user(db_session)
-        account = _create_account(db_session, user)
-        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        flow.meta_json = {
-            "phone_code_hash": "hash_abc",
-            "dc_id": "2",
-            "session_encrypted": "corrupt_data",
-        }
-        db_session.commit()
-
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.decrypt_session",
-            MagicMock(side_effect=RuntimeError("decrypt failed")),
-        )
-
-        mock_client = AsyncMock()
-        mock_client.connect = AsyncMock()
-        mock_client.disconnect = AsyncMock()
-        mock_client.sign_in = AsyncMock()
-
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
-            lambda *a, **kw: mock_client,
-        )
-
-        from app.workers.tg_auth_tasks import _run_confirm_code
-
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_run_confirm_code(account.id, flow.id, "12345"))
-        finally:
-            loop.close()
-
-        db_session.expire_all()
-        flow = db_session.get(TelegramAuthFlow, flow.id)
-        account = db_session.get(TelegramAccount, account.id)
-
-        assert flow.state == AuthFlowState.failed
-        assert account.status == TelegramAccountStatus.error
-        mock_client.sign_in.assert_not_called()
+        assert flow.state == AuthFlowState.done
+        assert account.status == TelegramAccountStatus.verified
+        assert account.session_encrypted == "encrypted_raw_session"
+        mock_client.export_session_string.assert_called_once()
 
 
 # ─── telegram_api_id type coercion ────────────────────────────────
@@ -953,95 +819,3 @@ class TestTelegramApiIdCoercion:
         assert captured["api_id"] == 38685950
 
 
-# ─── export_session_string failure: last_error contains real cause ─
-
-
-class TestSessionExportRealErrorInLastError:
-    """When export_session_string fails with struct.error, last_error must
-    contain the real exception type and message, not a generic string."""
-
-    def test_struct_error_recorded_in_last_error(self, db_session, monkeypatch):
-        import struct
-
-        user = _create_user(db_session)
-        account = _create_account(db_session, user)
-        flow = _create_flow(db_session, account)
-
-        mock_client = AsyncMock()
-        mock_sent_code = MagicMock()
-        mock_sent_code.phone_code_hash = "hash_struct"
-        mock_sent_code.type = "sms"
-        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
-        mock_client.connect = AsyncMock()
-        mock_client.disconnect = AsyncMock()
-        mock_client.export_session_string = AsyncMock(
-            side_effect=struct.error("required argument is not an integer"),
-        )
-        # Provide storage mock for diagnostic logging
-        mock_client.storage = MagicMock()
-
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
-            lambda *a, **kw: mock_client,
-        )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
-
-        from app.workers.tg_auth_tasks import _run_send_code
-
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_run_send_code(account.id, flow.id))
-        finally:
-            loop.close()
-
-        db_session.expire_all()
-        flow = db_session.get(TelegramAuthFlow, flow.id)
-        account = db_session.get(TelegramAccount, account.id)
-
-        assert flow.state == AuthFlowState.failed
-        assert account.status == TelegramAccountStatus.error
-        # Real error must be in last_error, not the old generic message
-        assert "struct.error" in (flow.last_error or "").lower() or "error" in (flow.last_error or "").lower()
-        assert "required argument is not an integer" in (flow.last_error or "")
-        assert "check SESSION_ENC_KEY" not in (flow.last_error or "")
-
-    def test_runtime_error_recorded_in_last_error(self, db_session, monkeypatch):
-        user = _create_user(db_session)
-        account = _create_account(db_session, user)
-        flow = _create_flow(db_session, account)
-
-        mock_client = AsyncMock()
-        mock_sent_code = MagicMock()
-        mock_sent_code.phone_code_hash = "hash_rt"
-        mock_sent_code.type = "sms"
-        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
-        mock_client.connect = AsyncMock()
-        mock_client.disconnect = AsyncMock()
-        mock_client.export_session_string = AsyncMock(return_value="raw_session")
-        mock_client.storage = MagicMock()
-
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
-            lambda *a, **kw: mock_client,
-        )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
-        monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.encrypt_session",
-            MagicMock(side_effect=RuntimeError("SESSION_ENC_KEY is not set")),
-        )
-
-        from app.workers.tg_auth_tasks import _run_send_code
-
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_run_send_code(account.id, flow.id))
-        finally:
-            loop.close()
-
-        db_session.expire_all()
-        flow = db_session.get(TelegramAuthFlow, flow.id)
-
-        assert flow.state == AuthFlowState.failed
-        # Must contain the real exception, not the old generic message
-        assert "RuntimeError" in (flow.last_error or "")
-        assert "SESSION_ENC_KEY" in (flow.last_error or "")
