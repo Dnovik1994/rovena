@@ -889,3 +889,159 @@ class TestConfirmCodeMissingSession:
         assert flow.state == AuthFlowState.failed
         assert account.status == TelegramAccountStatus.error
         mock_client.sign_in.assert_not_called()
+
+
+# ─── telegram_api_id type coercion ────────────────────────────────
+
+
+class TestTelegramApiIdCoercion:
+    """Settings.telegram_api_id must be int even when the env var is a string."""
+
+    def test_string_env_coerced_to_int(self, monkeypatch):
+        """TELEGRAM_API_ID='38685950' → settings.telegram_api_id == 38685950 (int)."""
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("TELEGRAM_API_ID", "38685950")
+        s = Settings()
+        assert isinstance(s.telegram_api_id, int)
+        assert s.telegram_api_id == 38685950
+
+    def test_empty_string_env_coerced_to_zero(self, monkeypatch):
+        """TELEGRAM_API_ID='' → settings.telegram_api_id == 0."""
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("TELEGRAM_API_ID", "")
+        s = Settings()
+        assert isinstance(s.telegram_api_id, int)
+        assert s.telegram_api_id == 0
+
+    def test_client_factory_receives_int_api_id(self, monkeypatch):
+        """create_tg_account_client passes api_id as int to Client()."""
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("TELEGRAM_API_ID", "38685950")
+        monkeypatch.setenv("TELEGRAM_API_HASH", "testhash")
+
+        captured = {}
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                captured.update(kwargs)
+
+        monkeypatch.setattr("app.clients.telegram_client.Client", FakeClient)
+
+        import app.clients.telegram_client as tcmod
+
+        # Reload settings to pick up env and enable client
+        fresh = Settings()
+        fresh.telegram_client_enabled = True
+        monkeypatch.setattr(tcmod, "settings", fresh)
+
+        from app.clients.telegram_client import _CLIENT_INIT_PARAMS
+        # Add our kwargs so the filter doesn't strip them
+        _CLIENT_INIT_PARAMS.add("api_id")
+        _CLIENT_INIT_PARAMS.add("api_hash")
+        _CLIENT_INIT_PARAMS.add("in_memory")
+
+        account = MagicMock()
+        account.id = 1
+        account.session_encrypted = None
+        account.device_config = None
+
+        tcmod.create_tg_account_client(account, None, phone="+1234567890")
+        assert isinstance(captured["api_id"], int)
+        assert captured["api_id"] == 38685950
+
+
+# ─── export_session_string failure: last_error contains real cause ─
+
+
+class TestSessionExportRealErrorInLastError:
+    """When export_session_string fails with struct.error, last_error must
+    contain the real exception type and message, not a generic string."""
+
+    def test_struct_error_recorded_in_last_error(self, db_session, monkeypatch):
+        import struct
+
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account)
+
+        mock_client = AsyncMock()
+        mock_sent_code = MagicMock()
+        mock_sent_code.phone_code_hash = "hash_struct"
+        mock_sent_code.type = "sms"
+        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.export_session_string = AsyncMock(
+            side_effect=struct.error("required argument is not an integer"),
+        )
+        # Provide storage mock for diagnostic logging
+        mock_client.storage = MagicMock()
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        from app.workers.tg_auth_tasks import _run_send_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_send_code(account.id, flow.id))
+        finally:
+            loop.close()
+
+        db_session.expire_all()
+        flow = db_session.get(TelegramAuthFlow, flow.id)
+        account = db_session.get(TelegramAccount, account.id)
+
+        assert flow.state == AuthFlowState.failed
+        assert account.status == TelegramAccountStatus.error
+        # Real error must be in last_error, not the old generic message
+        assert "struct.error" in (flow.last_error or "").lower() or "error" in (flow.last_error or "").lower()
+        assert "required argument is not an integer" in (flow.last_error or "")
+        assert "check SESSION_ENC_KEY" not in (flow.last_error or "")
+
+    def test_runtime_error_recorded_in_last_error(self, db_session, monkeypatch):
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account)
+
+        mock_client = AsyncMock()
+        mock_sent_code = MagicMock()
+        mock_sent_code.phone_code_hash = "hash_rt"
+        mock_sent_code.type = "sms"
+        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.export_session_string = AsyncMock(return_value="raw_session")
+        mock_client.storage = MagicMock()
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.encrypt_session",
+            MagicMock(side_effect=RuntimeError("SESSION_ENC_KEY is not set")),
+        )
+
+        from app.workers.tg_auth_tasks import _run_send_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_send_code(account.id, flow.id))
+        finally:
+            loop.close()
+
+        db_session.expire_all()
+        flow = db_session.get(TelegramAuthFlow, flow.id)
+
+        assert flow.state == AuthFlowState.failed
+        # Must contain the real exception, not the old generic message
+        assert "RuntimeError" in (flow.last_error or "")
+        assert "SESSION_ENC_KEY" in (flow.last_error or "")

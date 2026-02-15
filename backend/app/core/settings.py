@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 60
 
     telegram_bot_token: str = ""
-    telegram_api_id: str = ""
+    telegram_api_id: int = 0
     telegram_api_hash: str = ""
     telegram_client_enabled: bool | None = None
     telegram_auth_ttl_seconds: int = 300
@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     health_queue_warn_threshold: int = 100
 
     ws_broadcast_concurrency: int = 100
+
+    @field_validator("telegram_api_id", mode="before")
+    @classmethod
+    def coerce_telegram_api_id(cls, v: object) -> int:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 0
+        return int(v)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

@@ -217,18 +217,39 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             # Export the session that now points to the correct DC so that
             # confirm_code can re-use the same auth_key + dc_id.
             flow_session_enc: str | None = None
+            session_export_err: str | None = None
             try:
+                # Diagnostic: log storage field types before export
+                try:
+                    _fields = {}
+                    for _fn in ("dc_id", "api_id", "test_mode", "user_id", "is_bot"):
+                        _attr = getattr(client.storage, _fn, None)
+                        _val = await _attr() if callable(_attr) else _attr
+                        _fields[_fn] = (_val, type(_val).__name__)
+                    log.info(
+                        "event=session_storage_fields %s dc_id=%r(%s) api_id=%r(%s) "
+                        "test_mode=%r(%s) user_id=%r(%s) is_bot=%r(%s)",
+                        ctx,
+                        _fields["dc_id"][0], _fields["dc_id"][1],
+                        _fields["api_id"][0], _fields["api_id"][1],
+                        _fields["test_mode"][0], _fields["test_mode"][1],
+                        _fields["user_id"][0], _fields["user_id"][1],
+                        _fields["is_bot"][0], _fields["is_bot"][1],
+                    )
+                except Exception as diag_exc:
+                    log.warning("event=session_storage_diag_failed %s error=%s", ctx, diag_exc)
+
                 raw_session = await client.export_session_string()
                 flow_session_enc = encrypt_session(raw_session)
             except Exception as enc_exc:
-                log.warning(
+                session_export_err = f"{type(enc_exc).__name__}: {enc_exc}"
+                log.exception(
                     "event=send_code_session_export_failed %s error=%s",
                     ctx, _sanitize_error(str(enc_exc)[:300]),
-                    exc_info=True,
                 )
 
             if flow_session_enc is None:
-                err = "Failed to export/encrypt session (check SESSION_ENC_KEY)"
+                err = _sanitize_error(session_export_err) if session_export_err else "Failed to export/encrypt session"
                 flow.state = AuthFlowState.failed
                 flow.last_error = err
                 account.status = TelegramAccountStatus.error
