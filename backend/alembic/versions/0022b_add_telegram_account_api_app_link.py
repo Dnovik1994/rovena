@@ -1,22 +1,32 @@
 """add telegram_account api_app_id FK
 
-Revision ID: 0018_add_telegram_account_api_app_link
-Revises: 0017_add_performance_indexes
+Revision ID: 0022b_add_telegram_account_api_app_link
+Revises: 0022_add_telegram_api_apps
 Create Date: 2026-02-15 00:00:00.000000
 """
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect as sa_inspect
 
 
 # revision identifiers, used by Alembic.
-revision = "0018_add_telegram_account_api_app_link"
-down_revision = "0017_add_performance_indexes"
+revision = "0022b_add_telegram_account_api_app_link"
+down_revision = "0022_add_telegram_api_apps"
 branch_labels = None
 depends_on = None
 
 
+def _column_exists(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    inspector = sa_inspect(bind)
+    return any(c["name"] == column for c in inspector.get_columns(table))
+
+
 def upgrade() -> None:
+    if _column_exists("telegram_accounts", "api_app_id"):
+        return
+
     op.add_column(
         "telegram_accounts",
         sa.Column("api_app_id", sa.Integer(), nullable=True),

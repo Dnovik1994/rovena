@@ -6,7 +6,7 @@ The DB-level constraint guarantees this can never happen, even if the
 application-level check in assign_api_app is bypassed.
 
 Revision ID: 0023_unique_api_app_proxy
-Revises: 0022_add_telegram_api_apps
+Revises: 0022b_add_telegram_account_api_app_link
 Create Date: 2026-02-15 00:00:00.000000
 """
 
@@ -14,7 +14,7 @@ from alembic import op
 from sqlalchemy import inspect as sa_inspect
 
 revision = "0023_unique_api_app_proxy"
-down_revision = "0022_add_telegram_api_apps"
+down_revision = "0022b_add_telegram_account_api_app_link"
 branch_labels = None
 depends_on = None
 
