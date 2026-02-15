@@ -8,6 +8,7 @@ from app.models.source import Source, SourceType
 from app.models.target import Target, TargetType
 from app.models.tariff import Tariff
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus, VerifyStatus, VerifyReasonCode, VERIFY_LEASE_TTL_SECONDS
+from app.models.telegram_api_app import TelegramApiApp
 from app.models.telegram_auth_flow import TelegramAuthFlow, AuthFlowState
 from app.models.user import User
 
@@ -31,6 +32,7 @@ __all__ = [
     "Tariff",
     "TelegramAccount",
     "TelegramAccountStatus",
+    "TelegramApiApp",
     "TelegramAuthFlow",
     "User",
     "VerifyStatus",
