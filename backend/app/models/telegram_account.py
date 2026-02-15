@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.clients.device_generator import generate_device_config
@@ -68,7 +68,10 @@ class TelegramAccount(Base):
     session_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     device_config: Mapped[dict | None] = mapped_column(JSON, default=generate_device_config)
     proxy_id: Mapped[int | None] = mapped_column(ForeignKey("proxies.id"), nullable=True)
+    api_app_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_api_apps.id"), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    api_app = relationship("TelegramApiApp", lazy="joined")
 
     # ── Verify lease/lock fields ──
     verifying: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
