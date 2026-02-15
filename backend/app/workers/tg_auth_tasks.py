@@ -45,7 +45,7 @@ from app.models.telegram_account import (
     VerifyStatus,
 )
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
-from app.services.session_crypto import decrypt_session, encrypt_session
+from app.services.session_crypto import encrypt_session
 from app.services.websocket_manager import manager
 from app.workers import celery_app
 
@@ -214,57 +214,10 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
                 int((time.monotonic() - t_send) * 1000),
             )
 
-            # Export the session that now points to the correct DC so that
-            # confirm_code can re-use the same auth_key + dc_id.
-            flow_session_enc: str | None = None
-            session_export_err: str | None = None
-            try:
-                # Diagnostic: log storage field types before export
-                try:
-                    _fields = {}
-                    for _fn in ("dc_id", "api_id", "test_mode", "user_id", "is_bot"):
-                        _attr = getattr(client.storage, _fn, None)
-                        _val = await _attr() if callable(_attr) else _attr
-                        _fields[_fn] = (_val, type(_val).__name__)
-                    log.info(
-                        "event=session_storage_fields %s dc_id=%r(%s) api_id=%r(%s) "
-                        "test_mode=%r(%s) user_id=%r(%s) is_bot=%r(%s)",
-                        ctx,
-                        _fields["dc_id"][0], _fields["dc_id"][1],
-                        _fields["api_id"][0], _fields["api_id"][1],
-                        _fields["test_mode"][0], _fields["test_mode"][1],
-                        _fields["user_id"][0], _fields["user_id"][1],
-                        _fields["is_bot"][0], _fields["is_bot"][1],
-                    )
-                except Exception as diag_exc:
-                    log.warning("event=session_storage_diag_failed %s error=%s", ctx, diag_exc)
-
-                raw_session = await client.export_session_string()
-                flow_session_enc = encrypt_session(raw_session)
-            except Exception as enc_exc:
-                session_export_err = f"{type(enc_exc).__name__}: {enc_exc}"
-                log.exception(
-                    "event=send_code_session_export_failed %s error=%s",
-                    ctx, _sanitize_error(str(enc_exc)[:300]),
-                )
-
-            if flow_session_enc is None:
-                err = _sanitize_error(session_export_err) if session_export_err else "Failed to export/encrypt session"
-                flow.state = AuthFlowState.failed
-                flow.last_error = err
-                account.status = TelegramAccountStatus.error
-                account.last_error = err
-                db.commit()
-                log.error("event=send_code_session_required_but_missing %s", ctx)
-                _broadcast_account_update(account)
-                _broadcast_flow_update(flow, account_id, account.owner_user_id)
-                return
-
             flow.state = AuthFlowState.wait_code
             flow.sent_at = datetime.now(timezone.utc)
             flow.expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.auth_flow_ttl_seconds)
             meta: dict = {"phone_code_hash": sent_code.phone_code_hash, "dc_id": dc_after}
-            meta["session_encrypted"] = flow_session_enc
             flow.meta_json = meta
 
             account.status = TelegramAccountStatus.code_sent
@@ -411,35 +364,11 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
             return
 
-        # Restore session saved by send_code (carries correct dc_id + auth_key)
-        flow_session: str | None = None
-        flow_session_enc = meta.get("session_encrypted")
-        if flow_session_enc:
-            try:
-                flow_session = decrypt_session(flow_session_enc)
-            except Exception:
-                log.warning("event=confirm_code_session_decrypt_failed %s", ctx, exc_info=True)
-
         send_code_dc = meta.get("dc_id", "unknown")
         log.info(
-            "event=confirm_code_session_info %s send_code_dc=%s has_flow_session=%s",
-            ctx, send_code_dc, bool(flow_session),
+            "event=confirm_code_session_info %s send_code_dc=%s",
+            ctx, send_code_dc,
         )
-
-        if not flow_session:
-            err = (
-                "Session data missing from auth flow (session_encrypted not set). "
-                "Fix server config (SESSION_ENC_KEY) and resend code."
-            )
-            flow.state = AuthFlowState.failed
-            flow.last_error = err
-            account.status = TelegramAccountStatus.error
-            account.last_error = err
-            db.commit()
-            log.error("event=confirm_code_no_flow_session %s", ctx)
-            _broadcast_account_update(account)
-            _broadcast_flow_update(flow, account_id, account.owner_user_id)
-            return
 
         client = None
         try:
@@ -447,7 +376,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             client = create_tg_account_client(
                 account, proxy,
                 phone=account.phone_e164,
-                session_string=flow_session,
             )
 
             t_connect = time.monotonic()
