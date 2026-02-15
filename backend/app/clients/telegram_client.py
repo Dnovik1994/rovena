@@ -83,12 +83,18 @@ def create_tg_account_client(
     phone: str | None = None,
     in_memory: bool = True,
     session_string: str | None = None,
+    workdir: str | None = None,
+    session_name: str | None = None,
 ) -> Client:
     """Create Pyrogram client for a TelegramAccount model.
 
     If *session_string* is provided explicitly (e.g. saved from a previous
     send_code step), it takes priority.  Otherwise falls back to the
     encrypted session stored on the account, then to phone-number auth.
+
+    If *workdir* is provided, the client uses a file-based session in that
+    directory (in_memory is forced to False).  This is used for pre-auth
+    session persistence between send_code and confirm_code steps.
     """
     _ensure_enabled()
     proxy_config = _build_proxy(proxy)
@@ -102,11 +108,19 @@ def create_tg_account_client(
         except Exception:
             logger.warning("Failed to decrypt session for account %s", account.id)
 
+    # File-based session: override in_memory when workdir is specified
+    if workdir:
+        in_memory = False
+
+    name = session_name or f"tg-{account.id}"
+
     logger.info(
-        "TG account client init | account_id=%s | has_session=%s | proxy=%s",
+        "TG account client init | account_id=%s | has_session=%s | proxy=%s | in_memory=%s | workdir=%s",
         account.id,
         bool(resolved_session),
         "enabled" if proxy_config else "none",
+        in_memory,
+        workdir or "N/A",
     )
 
     kwargs: dict[str, Any] = {
@@ -116,6 +130,9 @@ def create_tg_account_client(
         "in_memory": in_memory,
         **device_params,
     }
+
+    if workdir:
+        kwargs["workdir"] = workdir
 
     if resolved_session:
         kwargs["session_string"] = resolved_session
@@ -127,7 +144,7 @@ def create_tg_account_client(
     # TypeError("got multiple values for keyword argument 'name'").
     kwargs.pop("name", None)
     kwargs = {k: v for k, v in kwargs.items() if k in _CLIENT_INIT_PARAMS}
-    return Client(name=f"tg-{account.id}", **kwargs)
+    return Client(name=name, **kwargs)
 
 
 def get_validator_client(proxy: Proxy) -> Client:

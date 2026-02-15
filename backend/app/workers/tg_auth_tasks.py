@@ -9,10 +9,12 @@ with lease-based idempotency.
 
 import asyncio
 import logging
+import os
 import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from app.core.tz import ensure_utc, is_expired, utcnow
 
@@ -166,6 +168,41 @@ def _extract_migrate_dc(exc: Exception) -> int | None:
     return int(m.group(1)) if m else None
 
 
+# ── Pre-auth session persistence ─────────────────────────────────────
+# File-based Pyrogram sessions persist auth_key between send_code and
+# confirm_code Celery tasks, avoiding Telegram PhoneCodeExpired errors
+# caused by creating a fresh auth_key on each task invocation.
+
+_PRE_AUTH_DIR = Path(os.environ.get("PRE_AUTH_SESSION_DIR", "/data/pyrogram_pre_auth"))
+
+
+def _pre_auth_session_name(flow_id: str) -> str:
+    """Deterministic Pyrogram session name tied to auth flow."""
+    return f"preauth-{flow_id}"
+
+
+def _pre_auth_session_path(flow_id: str) -> Path:
+    """Full path to the pre-auth SQLite session file."""
+    return _PRE_AUTH_DIR / f"{_pre_auth_session_name(flow_id)}.session"
+
+
+def _ensure_pre_auth_dir() -> None:
+    """Create pre-auth session directory if it doesn't exist."""
+    _PRE_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _cleanup_pre_auth_session(flow_id: str, log=None) -> None:
+    """Remove temporary pre-auth session file (and SQLite side-files)."""
+    base = _pre_auth_session_path(flow_id)
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        try:
+            (base.parent / (base.name + suffix)).unlink(missing_ok=True)
+        except Exception:
+            pass
+    if log:
+        log.info("event=pre_auth_session_cleaned flow_id=%s", flow_id)
+
+
 # ─── send_code ───────────────────────────────────────────────────────
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
@@ -189,7 +226,13 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             log.info("event=send_code_started %s", ctx)
 
             t_client = time.monotonic()
-            client = create_tg_account_client(account, proxy, phone=account.phone_e164)
+            _ensure_pre_auth_dir()
+            client = create_tg_account_client(
+                account, proxy,
+                phone=account.phone_e164,
+                workdir=str(_PRE_AUTH_DIR),
+                session_name=_pre_auth_session_name(flow_id),
+            )
             log.info(
                 "event=client_created %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_client) * 1000),
@@ -244,6 +287,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             db.commit()
             verify_fail_total.labels(reason=VerifyReasonCode.client_disabled.value).inc()
             log.warning("event=send_code_failed reason=client_disabled %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except PhoneNumberInvalid:
@@ -254,6 +298,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             db.commit()
             verify_fail_total.labels(reason=VerifyReasonCode.phone_invalid.value).inc()
             log.warning("event=send_code_failed reason=phone_invalid %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except FloodWait as exc:
@@ -262,6 +307,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             _handle_floodwait(account, exc, db)
             verify_fail_total.labels(reason=VerifyReasonCode.floodwait.value).inc()
             log.warning("event=send_code_failed reason=flood_wait wait_s=%s %s", exc.value, ctx)
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except Exception as exc:
@@ -282,6 +328,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             account.last_error = err_msg
             db.commit()
             verify_fail_total.labels(reason=reason.value).inc()
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
@@ -365,9 +412,11 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             return
 
         send_code_dc = meta.get("dc_id", "unknown")
+        session_path = _pre_auth_session_path(flow_id)
+        has_pre_auth_session = session_path.exists()
         log.info(
-            "event=confirm_code_session_info %s send_code_dc=%s",
-            ctx, send_code_dc,
+            "event=confirm_code_session_info %s send_code_dc=%s pre_auth_session=%s session_path=%s",
+            ctx, send_code_dc, has_pre_auth_session, session_path,
         )
 
         client = None
@@ -376,6 +425,8 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             client = create_tg_account_client(
                 account, proxy,
                 phone=account.phone_e164,
+                workdir=str(_PRE_AUTH_DIR),
+                session_name=_pre_auth_session_name(flow_id),
             )
 
             t_connect = time.monotonic()
@@ -454,6 +505,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             elapsed = int((time.monotonic() - t0) * 1000)
             log.info("event=confirm_code_ok %s elapsed_ms=%d", ctx, elapsed)
 
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -475,6 +527,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 
             db.commit()
             log.info("event=confirm_code_2fa_required %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -488,12 +541,20 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 
         except PhoneCodeExpired:
             flow.state = AuthFlowState.expired
-            flow.last_error = "Verification code expired"
+            flow.last_error = (
+                "PhoneCodeExpired: Telegram server rejected the code "
+                "(session mismatch or server-side timeout)"
+            )
             account.status = TelegramAccountStatus.error
-            account.last_error = "Verification code expired"
+            account.last_error = "PhoneCodeExpired (Telegram server rejected the code)"
             db.commit()
             verify_fail_total.labels(reason=VerifyReasonCode.code_expired.value).inc()
-            log.warning("event=confirm_code_failed reason=code_expired %s", ctx)
+            log.warning(
+                "event=confirm_code_failed reason=phone_code_expired %s "
+                "pre_auth_session_existed=%s",
+                ctx, has_pre_auth_session,
+            )
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -522,6 +583,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             account.last_error = err_msg
             db.commit()
             verify_fail_total.labels(reason=reason.value).inc()
+            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:

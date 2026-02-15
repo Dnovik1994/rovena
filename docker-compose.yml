@@ -128,6 +128,9 @@ services:
     stop_grace_period: 30s
     env_file:
       - .env
+    volumes:
+      - 3proxy-cfg:/app/3proxy.cfg
+      - pre-auth-sessions:/data/pyrogram_pre_auth
     environment:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -160,8 +163,6 @@ services:
       CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       APP_ROLE: worker
-    volumes:
-      - 3proxy-cfg:/app/3proxy.cfg
     command: celery -A app.workers:celery_app worker --loglevel=info --hostname "celery@%h" --pool "${CELERY_POOL:-solo}" --concurrency "${CELERY_CONCURRENCY:-1}"
     depends_on:
       backend:
@@ -234,3 +235,4 @@ volumes:
   postgres-data:
   redis-data:
   3proxy-cfg:
+  pre-auth-sessions:
