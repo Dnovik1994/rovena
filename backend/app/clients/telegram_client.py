@@ -50,13 +50,21 @@ def build_pyrogram_client_kwargs(
 def _ensure_enabled() -> None:
     if not settings.telegram_client_enabled:
         raise TelegramClientDisabledError()
-    if not settings.telegram_api_id or not settings.telegram_api_hash:
-        raise RuntimeError("TELEGRAM_API_ID/HASH not configured")
+
+
+def _resolve_api_credentials(account: Any | None = None) -> tuple[int, str]:
+    """Return (api_id, api_hash) from account's api_app or fall back to settings."""
+    if account and getattr(account, "api_app", None):
+        return int(account.api_app.api_id), account.api_app.api_hash
+    if settings.telegram_api_id and settings.telegram_api_hash:
+        return int(settings.telegram_api_id), settings.telegram_api_hash
+    raise RuntimeError("TELEGRAM_API_ID/HASH not configured and account has no api_app")
 
 
 def get_client(account: Any, proxy: Proxy | None = None) -> Client:
     """Create Pyrogram client for an existing Account (legacy model)."""
     _ensure_enabled()
+    api_id, api_hash = _resolve_api_credentials(account)
     proxy_config = _build_proxy(proxy)
     device_config = getattr(account, "device_config", None) or generate_device_config()
     device_params = build_pyrogram_client_kwargs(device_config)
@@ -69,8 +77,8 @@ def get_client(account: Any, proxy: Proxy | None = None) -> Client:
 
     return Client(
         name=str(account.id),
-        api_id=int(settings.telegram_api_id),
-        api_hash=settings.telegram_api_hash,
+        api_id=api_id,
+        api_hash=api_hash,
         proxy=proxy_config,
         **device_params,
     )
@@ -97,6 +105,7 @@ def create_tg_account_client(
     session persistence between send_code and confirm_code steps.
     """
     _ensure_enabled()
+    api_id, api_hash = _resolve_api_credentials(account)
     proxy_config = _build_proxy(proxy)
     device_config = getattr(account, "device_config", None) or generate_device_config()
     device_params = build_pyrogram_client_kwargs(device_config)
@@ -124,8 +133,8 @@ def create_tg_account_client(
     )
 
     kwargs: dict[str, Any] = {
-        "api_id": int(settings.telegram_api_id),
-        "api_hash": settings.telegram_api_hash,
+        "api_id": api_id,
+        "api_hash": api_hash,
         "proxy": proxy_config,
         "in_memory": in_memory,
         **device_params,
@@ -147,12 +156,13 @@ def create_tg_account_client(
     return Client(name=name, **kwargs)
 
 
-def get_validator_client(proxy: Proxy) -> Client:
+def get_validator_client(proxy: Proxy, account: Any | None = None) -> Client:
     _ensure_enabled()
+    api_id, api_hash = _resolve_api_credentials(account)
     proxy_config = _build_proxy(proxy)
     return Client(
         name=f"validator-{proxy.id}",
-        api_id=int(settings.telegram_api_id),
-        api_hash=settings.telegram_api_hash,
+        api_id=api_id,
+        api_hash=api_hash,
         proxy=proxy_config,
     )
