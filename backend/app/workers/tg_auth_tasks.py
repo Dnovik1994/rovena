@@ -187,8 +187,41 @@ def _pre_auth_session_path(flow_id: str) -> Path:
 
 
 def _ensure_pre_auth_dir() -> None:
-    """Create pre-auth session directory if it doesn't exist."""
-    _PRE_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    """Create pre-auth session directory if it doesn't exist.
+
+    Logs diagnostics and raises RuntimeError with an actionable message
+    when the directory cannot be created or is not writable (e.g. the
+    Docker named volume is not mounted).
+    """
+    _log = logger.getChild("pre_auth_dir")
+    _log.info(
+        "event=pre_auth_dir_check path=%s exists=%s",
+        _PRE_AUTH_DIR, _PRE_AUTH_DIR.exists(),
+    )
+    try:
+        _PRE_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _log.error(
+            "event=pre_auth_dir_create_failed path=%s error=%s "
+            "hint=ensure 'pre-auth-sessions' volume is mounted in docker-compose.prod.yml",
+            _PRE_AUTH_DIR, exc,
+        )
+        raise RuntimeError(
+            f"pre-auth dir not writable: cannot create {_PRE_AUTH_DIR} — "
+            f"check that the 'pre-auth-sessions' named volume is mounted "
+            f"at {_PRE_AUTH_DIR} in docker-compose.prod.yml"
+        ) from exc
+
+    if not os.access(_PRE_AUTH_DIR, os.W_OK):
+        _log.error(
+            "event=pre_auth_dir_not_writable path=%s "
+            "hint=volume may be owned by root; container user must have write access",
+            _PRE_AUTH_DIR,
+        )
+        raise RuntimeError(
+            f"pre-auth dir not writable: {_PRE_AUTH_DIR} exists but is not writable — "
+            f"check volume permissions for the container user"
+        )
 
 
 def _cleanup_pre_auth_session(flow_id: str, log=None) -> None:

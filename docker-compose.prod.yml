@@ -240,6 +240,7 @@ services:
       ENVIRONMENT: production
     volumes:
       - 3proxy-cfg:/app/3proxy.cfg
+      - pre-auth-sessions:/data/pyrogram_pre_auth
     command: celery -A app.workers:celery_app worker --loglevel=info --hostname "celery@%h" --pool "${CELERY_POOL:-solo}" --concurrency "${CELERY_CONCURRENCY:-1}"
     ulimits:
       nofile:
@@ -404,6 +405,7 @@ volumes:
   mysql-data:
   redis-data:
   3proxy-cfg:
+  pre-auth-sessions:
   prometheus-data:
   grafana-data:
   backups:
