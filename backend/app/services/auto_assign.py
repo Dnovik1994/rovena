@@ -3,6 +3,7 @@
 import logging
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.telegram_account import TelegramAccount
@@ -87,6 +88,17 @@ def assign_api_app(account: TelegramAccount, db: Session) -> TelegramApiApp:
 
     api_app: TelegramApiApp = result[0]
     account.api_app_id = api_app.id
+
+    # Flush to trigger the UNIQUE(api_app_id, proxy_id) constraint early.
+    # The application-level filter above should already prevent duplicates,
+    # but a concurrent transaction could slip through without the DB check.
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise NoAvailableApiAppError(
+            "Комбинация API-приложения и прокси уже используется другим аккаунтом"
+        )
 
     logger.info(
         "event=api_app_assigned account_id=%s api_app_id=%s proxy_id=%s",

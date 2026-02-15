@@ -33,6 +33,7 @@ from app.schemas.telegram_account import (
     SendCodeResponse,
     TgAccountCreate,
     TgAccountResponse,
+    TgAccountUpdate,
     VerifyAccountResponse,
 )
 from app.services.auto_assign import NoAvailableApiAppError, assign_api_app
@@ -144,6 +145,55 @@ def get_tg_account(
     db: Session = Depends(get_db),
 ) -> TgAccountResponse:
     account = _get_account_or_404(db, account_id, current_user)
+    return TgAccountResponse.model_validate(account)
+
+
+# ─── UPDATE (manual assign api_app / proxy) ─────────────────────────
+
+@router.patch("/{account_id}", response_model=TgAccountResponse)
+def update_tg_account(
+    account_id: int,
+    payload: TgAccountUpdate,
+    current_user: User = Depends(require_permission("tg_accounts", "update")),
+    db: Session = Depends(get_db),
+) -> TgAccountResponse:
+    account = _get_account_or_404(db, account_id, current_user)
+
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        return TgAccountResponse.model_validate(account)
+
+    # Determine what the final (api_app_id, proxy_id) pair will be
+    new_api_app_id = data.get("api_app_id", account.api_app_id)
+    new_proxy_id = data.get("proxy_id", account.proxy_id)
+
+    # Validate uniqueness: same (api_app_id, proxy_id) on another account
+    # is a red flag for Telegram anti-ban (identical api_id + IP).
+    if new_api_app_id is not None and new_proxy_id is not None:
+        conflict = (
+            db.query(TelegramAccount)
+            .filter(
+                TelegramAccount.api_app_id == new_api_app_id,
+                TelegramAccount.proxy_id == new_proxy_id,
+                TelegramAccount.id != account.id,
+            )
+            .first()
+        )
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Комбинация api_app_id={new_api_app_id} и proxy_id={new_proxy_id} "
+                    f"уже используется аккаунтом id={conflict.id}. "
+                    "Два аккаунта с одинаковым api_id и IP — красный флаг для Telegram."
+                ),
+            )
+
+    for field, value in data.items():
+        setattr(account, field, value)
+
+    db.commit()
+    db.refresh(account)
     return TgAccountResponse.model_validate(account)
 
 

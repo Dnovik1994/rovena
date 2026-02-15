@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -53,6 +53,7 @@ class TelegramAccount(Base):
         Index("ix_tg_accounts_owner_phone", "owner_user_id", "phone_e164", unique=True),
         Index("ix_tg_accounts_owner_id", "owner_user_id"),
         Index("ix_tg_accounts_status", "status"),
+        UniqueConstraint("api_app_id", "proxy_id", name="uq_tg_accounts_api_app_proxy"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

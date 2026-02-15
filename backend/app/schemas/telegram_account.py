@@ -32,6 +32,11 @@ class TgAccountCreate(BaseModel):
         return v
 
 
+class TgAccountUpdate(BaseModel):
+    proxy_id: int | None = None
+    api_app_id: int | None = None
+
+
 class TgAccountResponse(BaseModel):
     id: int
     owner_user_id: int
