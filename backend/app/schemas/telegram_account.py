@@ -42,6 +42,7 @@ class TgAccountResponse(BaseModel):
     last_name: str | None
     status: TgAccountStatus
     proxy_id: int | None
+    api_app_id: int | None
     device_config: dict | None
     last_error: str | None
     warming_actions_completed: int

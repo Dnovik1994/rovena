@@ -35,6 +35,7 @@ from app.schemas.telegram_account import (
     TgAccountResponse,
     VerifyAccountResponse,
 )
+from app.services.auto_assign import NoAvailableApiAppError, assign_api_app
 from app.services.websocket_manager import manager
 from app.workers.tg_auth_tasks import confirm_code_task, confirm_password_task, send_code_task, verify_account_task
 from app.workers.tasks import account_health_check, start_warming
@@ -192,6 +193,18 @@ def create_tg_account(
         last_device_regenerated_at=datetime.now(timezone.utc),
     )
     db.add(account)
+    db.flush()  # get account.id before auto-assign
+
+    # Auto-assign API app
+    try:
+        assign_api_app(account, db)
+    except NoAvailableApiAppError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
     db.commit()
     db.refresh(account)
     return TgAccountResponse.model_validate(account)
