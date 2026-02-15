@@ -35,6 +35,7 @@ POLICY: dict[str, dict[str, list[str]]] = {
         "verify": ["user", "admin", "superadmin"],
         "warmup": ["user", "admin", "superadmin"],
         "regenerate_device": ["user", "admin", "superadmin"],
+        "assign_resources": ["user", "admin", "superadmin"],
     },
     "api_apps": {
         "list": ["admin", "superadmin"],

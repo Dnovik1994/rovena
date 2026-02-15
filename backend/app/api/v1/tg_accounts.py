@@ -24,6 +24,7 @@ from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.models.user import User
 from app.models.telegram_account import VerifyStatus
+from app.models.telegram_api_app import TelegramApiApp
 from app.schemas.telegram_account import (
     AuthFlowStatusResponse,
     ConfirmCodeRequest,
@@ -163,13 +164,18 @@ def update_tg_account(
     if not data:
         return TgAccountResponse.model_validate(account)
 
-    # Determine what the final (api_app_id, proxy_id) pair will be
+    # Handle api_app_id="auto" — run auto-assign instead of manual set
+    auto_assign_requested = data.get("api_app_id") == "auto"
+    if auto_assign_requested:
+        data.pop("api_app_id")
+
+    # Apply simple fields first (proxy_id, and api_app_id if it's an int)
     new_api_app_id = data.get("api_app_id", account.api_app_id)
     new_proxy_id = data.get("proxy_id", account.proxy_id)
 
     # Validate uniqueness: same (api_app_id, proxy_id) on another account
     # is a red flag for Telegram anti-ban (identical api_id + IP).
-    if new_api_app_id is not None and new_proxy_id is not None:
+    if not auto_assign_requested and new_api_app_id is not None and new_proxy_id is not None:
         conflict = (
             db.query(TelegramAccount)
             .filter(
@@ -189,8 +195,57 @@ def update_tg_account(
                 ),
             )
 
+    # Validate that the manually specified api_app exists
+    if "api_app_id" in data and data["api_app_id"] is not None:
+        app = db.get(TelegramApiApp, data["api_app_id"])
+        if not app:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"API app with id={data['api_app_id']} not found",
+            )
+
     for field, value in data.items():
         setattr(account, field, value)
+
+    # Auto-assign after other fields are applied (proxy_id may affect selection)
+    if auto_assign_requested:
+        try:
+            assign_api_app(account, db)
+        except NoAvailableApiAppError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    db.commit()
+    db.refresh(account)
+    return TgAccountResponse.model_validate(account)
+
+
+# ─── ASSIGN RESOURCES (auto-assign api_app) ──────────────────────────
+
+@router.post("/{account_id}/assign-resources", response_model=TgAccountResponse)
+def assign_resources(
+    account_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "assign_resources")),
+    db: Session = Depends(get_db),
+) -> TgAccountResponse:
+    """Auto-assign the best available API app to the account.
+
+    Uses the least-loaded active app that respects the proxy-uniqueness
+    constraint.  Replaces any previously assigned app.
+    """
+    account = _get_account_or_404(db, account_id, current_user)
+
+    try:
+        assign_api_app(account, db)
+    except NoAvailableApiAppError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     db.commit()
     db.refresh(account)

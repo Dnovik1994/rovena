@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
 from enum import Enum
+from typing import Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -34,7 +35,18 @@ class TgAccountCreate(BaseModel):
 
 class TgAccountUpdate(BaseModel):
     proxy_id: int | None = None
-    api_app_id: int | None = None
+    api_app_id: Union[int, Literal["auto"], None] = None
+
+
+class ApiAppBrief(BaseModel):
+    """Compact API-app representation embedded in account responses."""
+    id: int
+    api_id: int
+    app_title: str | None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
 
 
 class TgAccountResponse(BaseModel):
@@ -48,6 +60,7 @@ class TgAccountResponse(BaseModel):
     status: TgAccountStatus
     proxy_id: int | None
     api_app_id: int | None
+    api_app: ApiAppBrief | None = None
     device_config: dict | None
     last_error: str | None
     warming_actions_completed: int
