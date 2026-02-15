@@ -819,3 +819,331 @@ class TestTelegramApiIdCoercion:
         assert captured["api_id"] == 38685950
 
 
+# ─── Pre-auth session persistence ────────────────────────────────────
+
+
+class TestPreAuthSessionPersistence:
+    """Verify that send_code and confirm_code use file-based sessions
+    and that the pre-auth session is cleaned up after terminal states."""
+
+    def test_send_code_creates_client_with_workdir(self, db_session, monkeypatch, tmp_path):
+        """send_code must pass workdir and session_name to create_tg_account_client."""
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account)
+
+        # Redirect pre-auth dir to tmp_path
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        captured_kwargs = {}
+
+        mock_client = AsyncMock()
+        mock_sent_code = MagicMock()
+        mock_sent_code.phone_code_hash = "hash_abc"
+        mock_sent_code.type = "sms"
+        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+
+        def capture_create(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            capture_create,
+        )
+
+        from app.workers.tg_auth_tasks import _run_send_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_send_code(account.id, flow.id))
+        finally:
+            loop.close()
+
+        assert captured_kwargs["workdir"] == str(tmp_path)
+        assert "preauth-" in captured_kwargs["session_name"]
+        assert flow.id in captured_kwargs["session_name"]
+        # export_session_string must NOT be called during send_code
+        mock_client.export_session_string.assert_not_called()
+
+    def test_confirm_code_reuses_pre_auth_session(self, db_session, monkeypatch, tmp_path):
+        """confirm_code must pass the same workdir/session_name as send_code."""
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
+        flow.meta_json = {"phone_code_hash": "hash_reuse", "dc_id": "2"}
+        db_session.commit()
+
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        # Create a fake pre-auth session file to verify existence check
+        from app.workers.tg_auth_tasks import _pre_auth_session_name
+        session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
+        session_file.write_text("fake-session-data")
+
+        captured_kwargs = {}
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.sign_in = AsyncMock(return_value=MagicMock(
+            id=999, username="reuse_user", first_name="Re", last_name="Use",
+        ))
+        mock_client.export_session_string = AsyncMock(return_value="session_str")
+
+        def capture_create(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            capture_create,
+        )
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.encrypt_session",
+            lambda s: "enc_" + s,
+        )
+
+        from app.workers.tg_auth_tasks import _run_confirm_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_confirm_code(account.id, flow.id, "12345"))
+        finally:
+            loop.close()
+
+        # Verify workdir and session_name match what send_code would use
+        assert captured_kwargs["workdir"] == str(tmp_path)
+        assert captured_kwargs["session_name"] == _pre_auth_session_name(flow.id)
+
+        # sign_in must be called with the saved phone_code_hash
+        mock_client.sign_in.assert_called_once_with(
+            phone_number=account.phone_e164,
+            phone_code_hash="hash_reuse",
+            phone_code="12345",
+        )
+
+        db_session.expire_all()
+        account = db_session.get(TelegramAccount, account.id)
+        flow = db_session.get(TelegramAuthFlow, flow.id)
+
+        assert flow.state == AuthFlowState.done
+        assert account.status == TelegramAccountStatus.verified
+        assert account.session_encrypted == "enc_session_str"
+
+    def test_pre_auth_session_cleaned_after_success(self, db_session, monkeypatch, tmp_path):
+        """After successful sign_in, the pre-auth session file must be deleted."""
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
+        flow.meta_json = {"phone_code_hash": "hash_clean", "dc_id": "1"}
+        db_session.commit()
+
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        from app.workers.tg_auth_tasks import _pre_auth_session_name
+        session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
+        session_file.write_text("pre-auth-data")
+        assert session_file.exists()
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.sign_in = AsyncMock(return_value=MagicMock(
+            id=111, username="clean", first_name="C", last_name="L",
+        ))
+        mock_client.export_session_string = AsyncMock(return_value="sess")
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.encrypt_session",
+            lambda s: "enc_" + s,
+        )
+
+        from app.workers.tg_auth_tasks import _run_confirm_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_confirm_code(account.id, flow.id, "99999"))
+        finally:
+            loop.close()
+
+        # Session file must be cleaned up
+        assert not session_file.exists()
+
+    def test_pre_auth_session_cleaned_on_phone_code_expired(self, db_session, monkeypatch, tmp_path):
+        """PhoneCodeExpired must also clean up the pre-auth session file."""
+        from pyrogram.errors import PhoneCodeExpired
+
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
+        flow.meta_json = {"phone_code_hash": "hash_exp", "dc_id": "3"}
+        db_session.commit()
+
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        from app.workers.tg_auth_tasks import _pre_auth_session_name
+        session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
+        session_file.write_text("pre-auth-data")
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.sign_in = AsyncMock(side_effect=PhoneCodeExpired())
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+
+        from app.workers.tg_auth_tasks import _run_confirm_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_confirm_code(account.id, flow.id, "00000"))
+        finally:
+            loop.close()
+
+        assert not session_file.exists()
+
+        db_session.expire_all()
+        flow = db_session.get(TelegramAuthFlow, flow.id)
+        assert flow.state == AuthFlowState.expired
+        assert "PhoneCodeExpired" in flow.last_error
+
+    def test_pre_auth_session_kept_on_invalid_code(self, db_session, monkeypatch, tmp_path):
+        """PhoneCodeInvalid is retriable — session file must NOT be deleted."""
+        from pyrogram.errors import PhoneCodeInvalid
+
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
+        flow.meta_json = {"phone_code_hash": "hash_inv", "dc_id": "2"}
+        db_session.commit()
+
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        from app.workers.tg_auth_tasks import _pre_auth_session_name
+        session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
+        session_file.write_text("pre-auth-data")
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.sign_in = AsyncMock(side_effect=PhoneCodeInvalid())
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+
+        from app.workers.tg_auth_tasks import _run_confirm_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_confirm_code(account.id, flow.id, "wrong"))
+        finally:
+            loop.close()
+
+        # Session file must STILL exist (user can retry)
+        assert session_file.exists()
+
+    def test_phone_code_expired_error_message_distinguishes_from_ttl(
+        self, db_session, monkeypatch, tmp_path,
+    ):
+        """PhoneCodeExpired error must clearly indicate Telegram rejection,
+        not be confused with our TTL-based expiry."""
+        from pyrogram.errors import PhoneCodeExpired
+
+        user = _create_user(db_session)
+        account = _create_account(db_session, user)
+        flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
+        flow.meta_json = {"phone_code_hash": "hash_msg", "dc_id": "1"}
+        db_session.commit()
+
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+        mock_client.sign_in = AsyncMock(side_effect=PhoneCodeExpired())
+
+        monkeypatch.setattr(
+            "app.workers.tg_auth_tasks.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+
+        from app.workers.tg_auth_tasks import _run_confirm_code
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run_confirm_code(account.id, flow.id, "12345"))
+        finally:
+            loop.close()
+
+        db_session.expire_all()
+        flow = db_session.get(TelegramAuthFlow, flow.id)
+        account = db_session.get(TelegramAccount, account.id)
+
+        # Error message must reference PhoneCodeExpired explicitly
+        assert "PhoneCodeExpired" in flow.last_error
+        assert "PhoneCodeExpired" in account.last_error
+        # Must NOT say "Flow expired" (that's for TTL expiry)
+        assert "Flow expired" not in flow.last_error
+
+
+# ─── Pre-auth session helper unit tests ──────────────────────────────
+
+
+class TestPreAuthSessionHelpers:
+    def test_session_name_deterministic(self):
+        from app.workers.tg_auth_tasks import _pre_auth_session_name
+
+        fid = "abc-def-123"
+        assert _pre_auth_session_name(fid) == f"preauth-{fid}"
+        assert _pre_auth_session_name(fid) == _pre_auth_session_name(fid)
+
+    def test_session_path_under_pre_auth_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        from app.workers.tg_auth_tasks import _pre_auth_session_path
+
+        path = _pre_auth_session_path("flow-42")
+        assert path.parent == tmp_path
+        assert "preauth-flow-42" in path.name
+        assert path.suffix == ".session"
+
+    def test_cleanup_removes_session_and_sidefiles(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        from app.workers.tg_auth_tasks import _cleanup_pre_auth_session, _pre_auth_session_path
+
+        base = _pre_auth_session_path("flow-clean")
+        # Create main file + side-files
+        for suffix in ("", "-journal", "-wal", "-shm"):
+            (base.parent / (base.name + suffix)).write_text("data")
+
+        _cleanup_pre_auth_session("flow-clean")
+
+        for suffix in ("", "-journal", "-wal", "-shm"):
+            assert not (base.parent / (base.name + suffix)).exists()
+
+    def test_cleanup_noop_if_no_file(self, monkeypatch, tmp_path):
+        """Cleanup must not raise if session file doesn't exist."""
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        from app.workers.tg_auth_tasks import _cleanup_pre_auth_session
+
+        # Should not raise
+        _cleanup_pre_auth_session("nonexistent-flow")
+
+
