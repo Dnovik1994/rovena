@@ -264,6 +264,33 @@ services:
       retries: 3
       start_period: 15s
 
+  beat:
+    build:
+      context: ./backend
+      args:
+        COMMIT_SHA: ${COMMIT_SHA:-unknown}
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - data
+    init: true
+    stop_grace_period: 15s
+    env_file:
+      - .env
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-3306}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      APP_ROLE: beat
+      PRODUCTION: "true"
+      ENVIRONMENT: production
+    command: celery -A app.workers:celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+
   proxy:
     build:
       context: ./proxy
