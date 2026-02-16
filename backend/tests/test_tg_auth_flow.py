@@ -813,6 +813,7 @@ class TestTelegramApiIdCoercion:
         account.id = 1
         account.session_encrypted = None
         account.device_config = None
+        account.api_app = None
 
         tcmod.create_tg_account_client(account, None, phone="+1234567890")
         assert isinstance(captured["api_id"], int)
@@ -1102,6 +1103,70 @@ class TestPreAuthSessionPersistence:
         assert "PhoneCodeExpired" in account.last_error
         # Must NOT say "Flow expired" (that's for TTL expiry)
         assert "Flow expired" not in flow.last_error
+
+
+# ─── _resolve_api_credentials validation ──────────────────────────────
+
+
+class TestResolveApiCredentialsValidation:
+    """Validate that _resolve_api_credentials rejects api_id<=0 and short/empty api_hash."""
+
+    def test_active_app_zero_api_id_raises(self):
+        from app.clients.telegram_client import _resolve_api_credentials
+
+        app = MagicMock(is_active=True, api_id=0, api_hash="a" * 32)
+        with pytest.raises(RuntimeError, match="Invalid api_id=0"):
+            _resolve_api_credentials(api_app=app)
+
+    def test_active_app_negative_api_id_raises(self):
+        from app.clients.telegram_client import _resolve_api_credentials
+
+        app = MagicMock(is_active=True, api_id=-5, api_hash="a" * 32)
+        with pytest.raises(RuntimeError, match="Invalid api_id=-5"):
+            _resolve_api_credentials(api_app=app)
+
+    def test_active_app_empty_api_hash_raises(self):
+        from app.clients.telegram_client import _resolve_api_credentials
+
+        app = MagicMock(is_active=True, api_id=12345, api_hash="")
+        with pytest.raises(RuntimeError, match="Invalid api_hash"):
+            _resolve_api_credentials(api_app=app)
+
+    def test_active_app_short_api_hash_raises(self):
+        from app.clients.telegram_client import _resolve_api_credentials
+
+        app = MagicMock(is_active=True, api_id=12345, api_hash="abc")
+        with pytest.raises(RuntimeError, match="Invalid api_hash"):
+            _resolve_api_credentials(api_app=app)
+
+    def test_settings_fallback_zero_api_id_raises(self, monkeypatch):
+        import app.clients.telegram_client as tcmod
+
+        monkeypatch.setattr(tcmod.settings, "telegram_api_id", 0)
+        monkeypatch.setattr(tcmod.settings, "telegram_api_hash", "a" * 32)
+        # telegram_api_id=0 is falsy, so the existing guard won't even reach validation;
+        # but if someone sets it to a truthy-but-invalid value, validation catches it.
+        # Force through by using an active app with api_id=0
+        app = MagicMock(is_active=True, api_id=0, api_hash="a" * 32)
+        with pytest.raises(RuntimeError, match="Invalid api_id=0"):
+            tcmod._resolve_api_credentials(api_app=app)
+
+    def test_active_app_valid_credentials_pass(self):
+        from app.clients.telegram_client import _resolve_api_credentials
+
+        app = MagicMock(is_active=True, api_id=12345678, api_hash="abcdef1234567890")
+        api_id, api_hash = _resolve_api_credentials(api_app=app)
+        assert api_id == 12345678
+        assert api_hash == "abcdef1234567890"
+
+    def test_settings_fallback_valid_credentials_pass(self, monkeypatch):
+        import app.clients.telegram_client as tcmod
+
+        monkeypatch.setattr(tcmod.settings, "telegram_api_id", 98765432)
+        monkeypatch.setattr(tcmod.settings, "telegram_api_hash", "validhash12345678")
+        api_id, api_hash = tcmod._resolve_api_credentials()
+        assert api_id == 98765432
+        assert api_hash == "validhash12345678"
 
 
 # ─── Pre-auth session helper unit tests ──────────────────────────────
