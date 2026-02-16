@@ -8,6 +8,7 @@ with lease-based idempotency.
 """
 
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -333,15 +334,21 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             flow.state = AuthFlowState.wait_code
             flow.sent_at = datetime.now(timezone.utc)
             flow.expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.auth_flow_ttl_seconds)
-            session_str = await client.export_session_string()
+            # Read raw session file and encode as base64 for transport.
+            # export_session_string() crashes on pre-auth sessions because
+            # dc_id / user_id may be None inside storage (not yet authorized).
+            session_path = _pre_auth_session_path(flow_id)
+            with open(session_path, "rb") as f:
+                session_bytes = f.read()
+            session_b64 = base64.b64encode(session_bytes).decode()
             log.info(
-                "event=send_code_session_exported %s session_str_len=%d session_str_prefix=%s",
-                ctx, len(session_str), session_str[:8] if session_str else "",
+                "event=send_code_session_exported %s session_b64_len=%d",
+                ctx, len(session_b64),
             )
             meta: dict = {
                 "phone_code_hash": sent_code.phone_code_hash,
                 "dc_id": str(dc_after),
-                "pre_auth_session": session_str,
+                "pre_auth_session": session_b64,
             }
             flow.meta_json = meta
 
@@ -547,17 +554,16 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             return
 
         send_code_dc = meta.get("dc_id", "unknown")
-        session_str = meta.get("pre_auth_session", "")
+        session_b64 = meta.get("pre_auth_session", "")
         log.info(
             "event=confirm_code_session_info %s send_code_dc=%s "
-            "has_session_string=%s session_str_len=%d session_str_prefix=%s",
+            "has_session_b64=%s session_b64_len=%d",
             ctx, send_code_dc,
-            bool(session_str), len(session_str or ""),
-            (session_str[:8] if session_str else ""),
+            bool(session_b64), len(session_b64 or ""),
         )
 
-        if not session_str:
-            log.warning("event=confirm_code_missing_session_string %s", ctx)
+        if not session_b64:
+            log.warning("event=confirm_code_missing_session %s", ctx)
             flow.state = AuthFlowState.failed
             flow.last_error = "Missing pre_auth_session; please resend code"
             account.status = TelegramAccountStatus.error
@@ -567,12 +573,25 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
             return
 
+        # Restore raw session file from base64 so Pyrogram loads the
+        # exact same auth_key that was negotiated during send_code.
+        _ensure_pre_auth_dir()
+        session_path = _pre_auth_session_path(flow_id)
+        session_bytes = base64.b64decode(session_b64)
+        with open(session_path, "wb") as f:
+            f.write(session_bytes)
+        log.info(
+            "event=confirm_code_session_restored %s session_file_size=%d",
+            ctx, len(session_bytes),
+        )
+
         client = None
         try:
             log.info("event=confirm_code_started %s", ctx)
             client = create_tg_account_client(
                 account, proxy,
-                session_string=session_str,
+                workdir=str(_PRE_AUTH_DIR),
+                session_name=_pre_auth_session_name(flow_id),
             )
 
             t_connect = time.monotonic()
@@ -696,8 +715,8 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             verify_fail_total.labels(reason=VerifyReasonCode.code_expired.value).inc()
             log.warning(
                 "event=confirm_code_failed reason=phone_code_expired %s "
-                "session_str_was_provided=%s",
-                ctx, bool(session_str),
+                "session_b64_was_provided=%s",
+                ctx, bool(session_b64),
             )
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
@@ -758,6 +777,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                     await client.disconnect()
                 except Exception:
                     pass
+            _cleanup_pre_auth_session(flow_id, log)
 
 
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
