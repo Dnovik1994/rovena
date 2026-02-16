@@ -564,7 +564,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             log.info("event=confirm_code_started %s", ctx)
             client = create_tg_account_client(
                 account, proxy,
-                phone=account.phone_e164,
                 workdir=str(_PRE_AUTH_DIR),
                 session_name=_pre_auth_session_name(flow_id),
             )
