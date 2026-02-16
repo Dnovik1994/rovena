@@ -9,6 +9,7 @@ from app.core.cache import delete, get_json, set_json
 from app.core.database import get_db
 from app.core.settings import get_settings
 from app.models.account import Account, AccountStatus
+from app.models.telegram_account import TelegramAccount
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.proxy import Proxy, ProxyStatus
 from app.models.tariff import Tariff
@@ -472,9 +473,9 @@ def admin_accounts(
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     accounts = (
-        db.query(Account, Proxy)
-        .outerjoin(Proxy, Proxy.id == Account.proxy_id)
-        .order_by(Account.id.asc())
+        db.query(TelegramAccount, Proxy)
+        .outerjoin(Proxy, Proxy.id == TelegramAccount.proxy_id)
+        .order_by(TelegramAccount.id.asc())
         .offset(offset)
         .limit(limit)
         .all()
@@ -482,10 +483,10 @@ def admin_accounts(
     items = [
         {
             "id": account.id,
-            "telegram_id": account.telegram_id,
+            "telegram_id": account.tg_user_id,
             "status": account.status.value if account.status else None,
-            "owner_id": account.owner_id,
-            "user_id": account.user_id,
+            "owner_id": account.owner_user_id,
+            "user_id": account.owner_user_id,
             "proxy": (
                 {
                     "id": proxy.id,
@@ -494,6 +495,16 @@ def admin_accounts(
                     "status": proxy.status.value if proxy.status else None,
                 }
                 if proxy
+                else None
+            ),
+            "api_app": (
+                {
+                    "id": account.api_app.id,
+                    "api_id": account.api_app.api_id,
+                    "app_title": account.api_app.app_title,
+                    "is_active": account.api_app.is_active,
+                }
+                if account.api_app
                 else None
             ),
             "warming_actions_completed": account.warming_actions_completed,
