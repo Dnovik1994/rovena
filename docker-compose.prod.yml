@@ -125,7 +125,7 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy.cfg}
+      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
       PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
       PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
       DB_HOST: ${DB_HOST:-db}
@@ -151,7 +151,7 @@ services:
       UVICORN_PORT: ${UVICORN_PORT:-8000}
       BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8000/api/v1/health}
     volumes:
-      - 3proxy-cfg:/app/3proxy.cfg
+      - 3proxy-cfg:/app/3proxy-cfg
     depends_on:
       db:
         condition: service_healthy
@@ -214,7 +214,7 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy.cfg}
+      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
       PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
       PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
       DB_HOST: ${DB_HOST:-db}
@@ -239,7 +239,7 @@ services:
       PRODUCTION: "true"
       ENVIRONMENT: production
     volumes:
-      - 3proxy-cfg:/app/3proxy.cfg
+      - 3proxy-cfg:/app/3proxy-cfg
       - pre-auth-sessions:/data/pyrogram_pre_auth
     command: celery -A app.workers:celery_app worker --loglevel=info --hostname "celery@%h" --pool "${CELERY_POOL:-solo}" --concurrency "${CELERY_CONCURRENCY:-1}"
     ulimits:

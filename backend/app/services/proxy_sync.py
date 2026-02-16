@@ -44,6 +44,7 @@ def sync_3proxy() -> None:
         proxies = db.query(Proxy).order_by(Proxy.id.asc()).all()
 
     content = generate_3proxy_config(proxies)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(content, encoding="utf-8")
     logger.info("3proxy config updated", extra={"count": len(proxies)})
 
