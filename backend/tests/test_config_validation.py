@@ -23,7 +23,7 @@ os.environ.setdefault("REDIS_URL", "")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("PRODUCTION", "false")
 
-from app.core.settings import Settings, validate_settings  # noqa: E402
+from app.core.settings import Settings, get_settings, validate_settings  # noqa: E402
 
 
 def _make_settings(overrides: dict) -> Settings:
@@ -221,3 +221,75 @@ class TestWorkerRoleSkipsBrowserChecks:
     def test_cron_ignores_empty_cors(self):
         settings = _make_settings({"app_role": "cron", "cors_origins": []})
         validate_settings(settings)  # must not raise
+
+
+# ── JWT_SECRET validation (get_settings) ─────────────────────────
+
+
+class TestJwtSecretValidation:
+    """JWT_SECRET must not be empty in any env, and must be ≥16 chars in production."""
+
+    def _setup_prod_env(self, monkeypatch):
+        """Set minimal env vars for a valid production config."""
+        monkeypatch.setenv("PRODUCTION", "true")
+        monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@host:3306/db")
+        monkeypatch.setenv("CORS_ORIGINS", '["https://example.com"]')
+        monkeypatch.setenv("WEB_BASE_URL", "https://example.com")
+        monkeypatch.setenv("TELEGRAM_AUTH_TTL_SECONDS", "300")
+
+    def test_empty_jwt_secret_rejected_in_dev(self, monkeypatch):
+        get_settings.cache_clear()
+        monkeypatch.setenv("PRODUCTION", "false")
+        monkeypatch.setenv("JWT_SECRET", "")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="JWT_SECRET must not be empty"):
+            get_settings()
+
+    def test_whitespace_jwt_secret_rejected_in_dev(self, monkeypatch):
+        get_settings.cache_clear()
+        monkeypatch.setenv("PRODUCTION", "false")
+        monkeypatch.setenv("JWT_SECRET", "   ")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="JWT_SECRET must not be empty"):
+            get_settings()
+
+    def test_empty_jwt_secret_rejected_in_production(self, monkeypatch):
+        get_settings.cache_clear()
+        self._setup_prod_env(monkeypatch)
+        monkeypatch.setenv("JWT_SECRET", "")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="JWT_SECRET must not be empty"):
+            get_settings()
+
+    def test_short_jwt_secret_rejected_in_production(self, monkeypatch):
+        get_settings.cache_clear()
+        self._setup_prod_env(monkeypatch)
+        monkeypatch.setenv("JWT_SECRET", "too-short")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="at least 16 characters"):
+            get_settings()
+
+    def test_change_me_rejected_in_production(self, monkeypatch):
+        get_settings.cache_clear()
+        self._setup_prod_env(monkeypatch)
+        monkeypatch.setenv("JWT_SECRET", "change-me")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="at least 16 characters"):
+            get_settings()
+
+    def test_valid_jwt_secret_accepted_in_production(self, monkeypatch):
+        get_settings.cache_clear()
+        self._setup_prod_env(monkeypatch)
+        monkeypatch.setenv("JWT_SECRET", "prod-secret-value-long-enough")
+        get_settings.cache_clear()
+        settings = get_settings()
+        assert settings.jwt_secret == "prod-secret-value-long-enough"
+
+    def test_short_jwt_secret_allowed_in_dev(self, monkeypatch):
+        """In development, short (but non-empty) secrets are allowed."""
+        get_settings.cache_clear()
+        monkeypatch.setenv("PRODUCTION", "false")
+        monkeypatch.setenv("JWT_SECRET", "dev-secret")
+        get_settings.cache_clear()
+        settings = get_settings()
+        assert settings.jwt_secret == "dev-secret"
