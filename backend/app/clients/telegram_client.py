@@ -148,8 +148,9 @@ def create_tg_account_client(
         except Exception:
             logger.warning("Failed to decrypt session for account %s", account.id)
 
-    # File-based session: override in_memory when workdir is specified
-    if workdir:
+    # File-based session: override in_memory when workdir is specified,
+    # but not when session_string is explicitly provided (it takes priority)
+    if workdir and not session_string:
         in_memory = False
 
     name = session_name or f"tg-{account.id}"
@@ -171,7 +172,7 @@ def create_tg_account_client(
         **device_params,
     }
 
-    if workdir:
+    if workdir and not session_string:
         kwargs["workdir"] = workdir
 
     if resolved_session:
