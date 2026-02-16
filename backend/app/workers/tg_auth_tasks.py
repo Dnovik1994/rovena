@@ -813,16 +813,14 @@ async def _run_verify_account(account_id: int, task_id: str) -> None:
         ctx["user_id"] = account.owner_user_id
         ctx["proxy_id"] = account.proxy_id
 
-        # ── Acquire lease ──
-        if not account.acquire_verify_lease(task_id):
+        # ── Acquire lease (atomic DB-level UPDATE) ──
+        if not account.acquire_verify_lease(task_id, db):
             verify_lease_rejected_total.inc()
             log.info(
                 "event=verify_account_lease_rejected existing_task_id=%s %s",
                 account.verifying_task_id, ctx,
             )
             return
-
-        db.commit()
         verify_lease_acquired_total.inc()
         active_verifications.inc()
         log.info("event=verify_account_lease_acquired %s", ctx)
