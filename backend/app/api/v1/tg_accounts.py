@@ -149,6 +149,31 @@ def get_tg_account(
     return TgAccountResponse.model_validate(account)
 
 
+# ─── DELETE ─────────────────────────────────────────────────────────
+
+@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tg_account(
+    account_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "delete")),
+    db: Session = Depends(get_db),
+) -> None:
+    account = _get_account_or_404(db, account_id, current_user)
+
+    # Unlink api_app_id to avoid FK constraint violations
+    account.api_app_id = None
+    account.proxy_id = None
+    db.flush()
+
+    # Delete related auth flows
+    db.query(TelegramAuthFlow).filter(
+        TelegramAuthFlow.account_id == account.id,
+    ).delete(synchronize_session="fetch")
+
+    db.delete(account)
+    db.commit()
+    return None
+
+
 # ─── UPDATE (manual assign api_app / proxy) ─────────────────────────
 
 @router.patch("/{account_id}", response_model=TgAccountResponse)
