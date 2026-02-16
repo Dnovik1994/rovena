@@ -74,7 +74,7 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy.cfg}
+      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
       PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
       PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
       DB_HOST: ${DB_HOST:-db}
@@ -101,7 +101,7 @@ services:
     ports:
       - "8020:8020"
     volumes:
-      - 3proxy-cfg:/app/3proxy.cfg
+      - 3proxy-cfg:/app/3proxy-cfg
     depends_on:
       db:
         condition: service_healthy
@@ -129,14 +129,14 @@ services:
     env_file:
       - .env
     volumes:
-      - 3proxy-cfg:/app/3proxy.cfg
+      - 3proxy-cfg:/app/3proxy-cfg
       - pre-auth-sessions:/data/pyrogram_pre_auth
     environment:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy.cfg}
+      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
       PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
       PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
       DB_HOST: ${DB_HOST:-db}
@@ -191,13 +191,13 @@ services:
     ports:
       - "10000-11000:10000-11000"
     volumes:
-      - 3proxy-cfg:/etc/3proxy/3proxy.cfg
+      - 3proxy-cfg:/etc/3proxy
     command: ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "test -s /etc/3proxy/3proxy.cfg"]
+      test: ["CMD", "sh", "-lc", "test -s /etc/3proxy/3proxy.cfg && pgrep 3proxy >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5

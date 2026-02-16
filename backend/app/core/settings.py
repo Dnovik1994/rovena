@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     app_role: str = "backend"
     dev_allow_localhost: bool = False
 
-    proxy_config_path: str = "/app/3proxy.cfg"
+    proxy_config_path: str = "/app/3proxy-cfg/3proxy.cfg"
     proxy_base_port: int = 10000
     proxy_reload_cmd: str = ""
     health_check_timeout_seconds: float = 2.0
