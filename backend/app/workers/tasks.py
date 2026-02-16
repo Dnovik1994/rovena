@@ -582,6 +582,9 @@ def check_cooldowns(self) -> None:
             db.commit()
     except SoftTimeLimitExceeded:
         logger.warning("Task %s hit soft time limit, graceful shutdown", self.request.id)
+    except Exception as exc:  # noqa: BLE001
+        sentry_sdk.capture_exception(exc)
+        logger.exception("check_cooldowns failed: %s", exc)
 
 
 @celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
