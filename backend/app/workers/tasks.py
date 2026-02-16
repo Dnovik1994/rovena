@@ -97,6 +97,7 @@ def _set_account_cooldown(db, account: Account, seconds: int) -> None:
 
 
 async def _run_campaign_dispatch(campaign_id: int) -> None:
+    # --- Phase 1: load IDs / primitives in a short-lived session ----------
     with SessionLocal() as db:
         campaign = db.get(Campaign, campaign_id)
         if not campaign:
@@ -116,16 +117,17 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
         )
         if campaign.source_id:
             contacts_query = contacts_query.filter(Contact.source_id == campaign.source_id)
-        contacts = contacts_query.order_by(Contact.id.asc()).all()
+        contact_ids = [c.id for c in contacts_query.order_by(Contact.id.asc()).all()]
 
         # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
-        accounts = (
-            db.query(Account)
+        account_ids = [
+            a.id
+            for a in db.query(Account)
             .filter(Account.owner_id == campaign.owner_id)
             .filter(Account.status == AccountStatus.active)
             .order_by(Account.id.asc())
             .all()
-        )
+        ]
 
         target = db.get(Target, campaign.target_id) if campaign.target_id else None
         if not target:
@@ -135,64 +137,78 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
             )
             return
 
-        if not contacts or not accounts:
+        target_link = target.link
+        owner_id = campaign.owner_id
+
+        if not contact_ids or not account_ids:
             campaign.progress = 0.0
             db.commit()
             return
 
-        total_contacts = len(contacts)
-        success = 0
+    # --- Phase 2: iterate with per-operation sessions ---------------------
+    total_contacts = len(contact_ids)
+    success = 0
 
-        for account in accounts:
+    for acct_id in account_ids:
+        # Load account & proxy in a short-lived session, build client
+        with SessionLocal() as db:
+            account = db.get(Account, acct_id)
+            if not account or account.status != AccountStatus.active:
+                continue
             proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
             try:
                 client = get_client(account, proxy)
             except TelegramClientDisabledError as exc:
                 _log_dispatch_error(
-                    db,
-                    campaign.id,
-                    account.id,
-                    None,
-                    DispatchErrorType.other,
-                    str(exc),
-                    owner_id=campaign.owner_id,
+                    db, campaign_id, account.id, None,
+                    DispatchErrorType.other, str(exc), owner_id=owner_id,
                 )
                 continue
-            try:
-                async with client:
-                    for contact in contacts:
-                        if success >= total_contacts:
-                            break
+
+        try:
+            async with client:
+                for contact_id in contact_ids:
+                    if success >= total_contacts:
+                        break
+
+                    should_sleep = False
+                    should_break = False
+
+                    # One short-lived session per contact
+                    with SessionLocal() as db:
+                        campaign = db.get(Campaign, campaign_id)
+                        contact = db.get(Contact, contact_id)
+                        account = db.get(Account, acct_id)
+                        if not campaign or not contact:
+                            continue
                         try:
-                            await client.add_chat_members(target.link, [contact.telegram_id])
+                            await client.add_chat_members(target_link, [contact.telegram_id])
                             success += 1
                             campaign.progress = round((success / total_contacts) * 100, 2)
                             db.commit()
                             campaign_invites_success_total.inc()
-                            increment_daily_invites(campaign.owner_id)
+                            increment_daily_invites(owner_id)
                             manager.broadcast_sync(
                                 {
                                     "type": "campaign_progress",
-                                    "user_id": campaign.owner_id,
-                                    "campaign_id": campaign.id,
+                                    "user_id": owner_id,
+                                    "campaign_id": campaign_id,
                                     "progress": campaign.progress,
                                     "success": success,
                                 }
                             )
-                            await asyncio.sleep(random.uniform(40, 120))
+                            should_sleep = True
                         except FloodWait as exc:
                             sentry_sdk.capture_exception(exc)
-                            _set_account_cooldown(db, account, exc.value)
+                            if account:
+                                _set_account_cooldown(db, account, exc.value)
                             _log_dispatch_error(
-                                db,
-                                campaign.id,
-                                account.id,
-                                contact.id,
+                                db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.flood_wait,
                                 f"FloodWait {exc.value}",
-                                owner_id=campaign.owner_id,
+                                owner_id=owner_id,
                             )
-                            break
+                            should_break = True
                         except UserBlocked as exc:
                             sentry_sdk.capture_exception(exc)
                             contact.blocked = True
@@ -201,83 +217,70 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                             manager.broadcast_sync(
                                 {
                                     "type": "contact_blocked",
-                                    "user_id": campaign.owner_id,
+                                    "user_id": owner_id,
                                     "contact_id": contact.id,
                                     "reason": "UserBlocked",
                                 }
                             )
                             _log_dispatch_error(
-                                db,
-                                campaign.id,
-                                account.id,
-                                contact.id,
+                                db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.user_blocked,
-                                str(exc),
-                                owner_id=campaign.owner_id,
+                                str(exc), owner_id=owner_id,
                             )
                         except UserPrivacyRestricted as exc:
                             sentry_sdk.capture_exception(exc)
                             _log_dispatch_error(
-                                db,
-                                campaign.id,
-                                account.id,
-                                contact.id,
+                                db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.user_privacy_restricted,
-                                str(exc),
-                                owner_id=campaign.owner_id,
+                                str(exc), owner_id=owner_id,
                             )
                         except PeerIdInvalid as exc:
                             sentry_sdk.capture_exception(exc)
                             _log_dispatch_error(
-                                db,
-                                campaign.id,
-                                account.id,
-                                contact.id,
+                                db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.peer_id_invalid,
-                                str(exc),
-                                owner_id=campaign.owner_id,
+                                str(exc), owner_id=owner_id,
                             )
                         except UserAlreadyParticipant as exc:
                             sentry_sdk.capture_exception(exc)
                             _log_dispatch_error(
-                                db,
-                                campaign.id,
-                                account.id,
-                                contact.id,
+                                db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.other,
-                                str(exc),
-                                owner_id=campaign.owner_id,
+                                str(exc), owner_id=owner_id,
                             )
                         except Exception as exc:  # noqa: BLE001
                             sentry_sdk.capture_exception(exc)
                             _log_dispatch_error(
-                                db,
-                                campaign.id,
-                                account.id,
-                                contact.id,
+                                db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.other,
-                                str(exc),
-                                owner_id=campaign.owner_id,
+                                str(exc), owner_id=owner_id,
                             )
-            except Exception as exc:  # noqa: BLE001
-                sentry_sdk.capture_exception(exc)
+
+                    # Session is closed — safe to sleep
+                    if should_break:
+                        break
+                    if should_sleep:
+                        await asyncio.sleep(random.uniform(40, 120))
+
+        except Exception as exc:  # noqa: BLE001
+            sentry_sdk.capture_exception(exc)
+            with SessionLocal() as db:
                 _log_dispatch_error(
-                    db,
-                    campaign.id,
-                    account.id,
-                    None,
-                    DispatchErrorType.other,
-                    str(exc),
-                    owner_id=campaign.owner_id,
+                    db, campaign_id, acct_id, None,
+                    DispatchErrorType.other, str(exc), owner_id=owner_id,
                 )
 
-            if success >= total_contacts:
-                break
-
         if success >= total_contacts:
-            campaign.status = CampaignStatus.completed
-            campaign.progress = 100.0
-        db.commit()
+            break
+
+    # --- Phase 3: final status update ------------------------------------
+    with SessionLocal() as db:
+        campaign = db.get(Campaign, campaign_id)
+        if campaign:
+            if success >= total_contacts:
+                campaign.status = CampaignStatus.completed
+                campaign.progress = 100.0
+            db.commit()
 
 
 @celery_app.task(
@@ -359,6 +362,7 @@ async def perform_low_risk_action(client) -> int:
 
 # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
 async def _run_warming_cycle(account_id: int) -> None:
+    # --- Phase 1: load data & build client in a short-lived session -------
     with SessionLocal() as db:
         account = db.get(Account, account_id)
         if not account:
@@ -382,70 +386,91 @@ async def _run_warming_cycle(account_id: int) -> None:
             _set_account_cooldown(db, account, 300)
             return
 
-        manager.broadcast_sync(
-            {
-                "type": "account_update",
-                "user_id": account.owner_id,
-                "account_id": account.id,
-                "status": _serialize_status(account.status),
-                "actions_completed": account.warming_actions_completed,
-                "target_actions": account.target_warming_actions,
-                "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
-            }
-        )
+        owner_id = account.owner_id
+        actions_done = account.warming_actions_completed
+        target_actions = account.target_warming_actions or 10
+        cooldown_until_iso = account.cooldown_until.isoformat() if account.cooldown_until else None
 
-        try:
-            async with client:
-                actions_done = account.warming_actions_completed
-                target_actions = account.target_warming_actions or 10
-                while actions_done < target_actions:
-                    actions_done += await perform_low_risk_action(client)
-                    account.warming_actions_completed = actions_done
-                    account.last_activity_at = datetime.now(timezone.utc)
+    # --- Phase 2: warming loop — sessions only for DB writes --------------
+    manager.broadcast_sync(
+        {
+            "type": "account_update",
+            "user_id": owner_id,
+            "account_id": account_id,
+            "status": _serialize_status(AccountStatus.warming),
+            "actions_completed": actions_done,
+            "target_actions": target_actions,
+            "cooldown_until": cooldown_until_iso,
+        }
+    )
+
+    try:
+        async with client:
+            while actions_done < target_actions:
+                # perform_low_risk_action sleeps 60-300s internally — no DB held
+                actions_done += await perform_low_risk_action(client)
+
+                with SessionLocal() as db:
+                    account = db.get(Account, account_id)
+                    if account:
+                        account.warming_actions_completed = actions_done
+                        account.last_activity_at = datetime.now(timezone.utc)
+                        db.commit()
+
+                manager.broadcast_sync(
+                    {
+                        "type": "account_update",
+                        "user_id": owner_id,
+                        "account_id": account_id,
+                        "status": _serialize_status(AccountStatus.warming),
+                        "actions_completed": actions_done,
+                        "target_actions": target_actions,
+                        "cooldown_until": None,
+                    }
+                )
+
+            with SessionLocal() as db:
+                account = db.get(Account, account_id)
+                if account:
+                    account.status = AccountStatus.active
                     db.commit()
-                    manager.broadcast_sync(
-                        {
-                            "type": "account_update",
-                            "user_id": account.owner_id,
-                            "account_id": account.id,
-                            "status": _serialize_status(account.status),
-                            "actions_completed": account.warming_actions_completed,
-                            "target_actions": target_actions,
-                            "cooldown_until": account.cooldown_until.isoformat()
-                            if account.cooldown_until
-                            else None,
-                        }
-                    )
-
-                account.status = AccountStatus.active
-                db.commit()
-        except FloodWait as exc:
-            sentry_sdk.capture_exception(exc)
-            logger.info(
-                "FloodWait during warming",
-                extra={"account_id": account.id, "wait_seconds": exc.value},
-            )
-            account.status = AccountStatus.cooldown
-            account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=exc.value)
-            db.commit()
-        except Exception as exc:  # noqa: BLE001
-            sentry_sdk.capture_exception(exc)
-            logger.error("Warming error", extra={"error": str(exc), "account_id": account.id})
-            account.status = AccountStatus.cooldown
-            account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
-            db.commit()
-
-        manager.broadcast_sync(
-            {
-                "type": "account_update",
-                "user_id": account.owner_id,
-                "account_id": account.id,
-                "status": _serialize_status(account.status),
-                "actions_completed": account.warming_actions_completed,
-                "target_actions": account.target_warming_actions,
-                "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
-            }
+    except FloodWait as exc:
+        sentry_sdk.capture_exception(exc)
+        logger.info(
+            "FloodWait during warming",
+            extra={"account_id": account_id, "wait_seconds": exc.value},
         )
+        with SessionLocal() as db:
+            account = db.get(Account, account_id)
+            if account:
+                account.status = AccountStatus.cooldown
+                account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=exc.value)
+                db.commit()
+    except Exception as exc:  # noqa: BLE001
+        sentry_sdk.capture_exception(exc)
+        logger.error("Warming error", extra={"error": str(exc), "account_id": account_id})
+        with SessionLocal() as db:
+            account = db.get(Account, account_id)
+            if account:
+                account.status = AccountStatus.cooldown
+                account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
+                db.commit()
+
+    # --- Phase 3: final broadcast with fresh data -------------------------
+    with SessionLocal() as db:
+        account = db.get(Account, account_id)
+        if account:
+            manager.broadcast_sync(
+                {
+                    "type": "account_update",
+                    "user_id": owner_id,
+                    "account_id": account_id,
+                    "status": _serialize_status(account.status),
+                    "actions_completed": account.warming_actions_completed,
+                    "target_actions": account.target_warming_actions,
+                    "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
+                }
+            )
 
 
 @celery_app.task(
