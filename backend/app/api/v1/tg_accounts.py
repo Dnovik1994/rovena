@@ -175,22 +175,30 @@ def update_tg_account(
 
     # Validate uniqueness: same (api_app_id, proxy_id) on another account
     # is a red flag for Telegram anti-ban (identical api_id + IP).
-    if not auto_assign_requested and new_api_app_id is not None and new_proxy_id is not None:
-        conflict = (
-            db.query(TelegramAccount)
-            .filter(
-                TelegramAccount.api_app_id == new_api_app_id,
-                TelegramAccount.proxy_id == new_proxy_id,
-                TelegramAccount.id != account.id,
-            )
-            .first()
+    # NOTE: The DB constraint UNIQUE(api_app_id, proxy_id) does NOT catch
+    # duplicates when proxy_id IS NULL (SQL treats every NULL as distinct),
+    # so we must check both the NULL and non-NULL cases at the app level.
+    if not auto_assign_requested and new_api_app_id is not None:
+        conflict_query = db.query(TelegramAccount).filter(
+            TelegramAccount.api_app_id == new_api_app_id,
+            TelegramAccount.id != account.id,
         )
+        if new_proxy_id is not None:
+            conflict_query = conflict_query.filter(
+                TelegramAccount.proxy_id == new_proxy_id,
+            )
+        else:
+            conflict_query = conflict_query.filter(
+                TelegramAccount.proxy_id.is_(None),
+            )
+        conflict = conflict_query.first()
         if conflict:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"Комбинация api_app_id={new_api_app_id} и proxy_id={new_proxy_id} "
-                    f"уже используется аккаунтом id={conflict.id}. "
+                    f"Другой аккаунт (id={conflict.id}) уже использует этот "
+                    f"api_app (id={new_api_app_id}) с "
+                    f"{'этим прокси (id=' + str(new_proxy_id) + ')' if new_proxy_id else 'отсутствующим прокси'}. "
                     "Два аккаунта с одинаковым api_id и IP — красный флаг для Telegram."
                 ),
             )
