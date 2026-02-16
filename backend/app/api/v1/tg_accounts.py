@@ -40,7 +40,8 @@ from app.schemas.telegram_account import (
 from app.services.auto_assign import NoAvailableApiAppError, assign_api_app
 from app.services.websocket_manager import manager
 from app.workers.tg_auth_tasks import confirm_code_task, confirm_password_task, send_code_task, verify_account_task
-from app.workers.tasks import account_health_check, start_warming
+from app.workers.tasks import account_health_check
+from app.workers.tg_warming_tasks import start_tg_warming
 
 router = APIRouter(prefix="/tg-accounts", tags=["tg-accounts"])
 settings = get_settings()
@@ -720,7 +721,7 @@ def tg_warmup(
         "target_actions": account.target_warming_actions,
     })
 
-    _safe_dispatch(start_warming, account.id)
+    _safe_dispatch(start_tg_warming, account.id)
 
     return TgAccountResponse.model_validate(account)
 
