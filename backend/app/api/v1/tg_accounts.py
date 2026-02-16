@@ -286,6 +286,8 @@ def create_tg_account(
 
     # Tariff enforcement
     if not _is_admin(current_user):
+        # Lock the user row to prevent concurrent requests from bypassing the limit
+        db.query(User).filter(User.id == current_user.id).with_for_update().first()
         max_accounts = tariff_limits["max_accounts"]
         current_count = (
             db.query(TelegramAccount)
