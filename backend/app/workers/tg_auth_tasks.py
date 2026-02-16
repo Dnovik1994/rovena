@@ -18,6 +18,7 @@ from pathlib import Path
 
 from app.core.tz import ensure_utc, is_expired, utcnow
 
+from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import (
     BadRequest,
     FloodWait,
@@ -372,13 +373,28 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
                     pass
 
 
-@celery_app.task(bind=True, max_retries=2)
+@celery_app.task(bind=True, max_retries=2, soft_time_limit=300, time_limit=360)
 def send_code_task(self, account_id: int, flow_id: str) -> None:
     logger.info(
         "event=send_code_task_started account_id=%s flow_id=%s",
         account_id, flow_id,
     )
-    asyncio.run(_run_send_code(account_id, flow_id))
+    try:
+        asyncio.run(_run_send_code(account_id, flow_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s, flow_id=%s)", self.request.id, account_id, flow_id)
+        _cleanup_pre_auth_session(flow_id)
+        with SessionLocal() as db:
+            account = db.get(TelegramAccount, account_id)
+            flow = db.get(TelegramAuthFlow, flow_id)
+            if account:
+                account.status = TelegramAccountStatus.error
+                account.last_error = "Task timed out"
+            if flow:
+                flow.state = AuthFlowState.failed
+                flow.last_error = "Task timed out"
+            db.commit()
+        return
     logger.info(
         "event=send_code_task_finished account_id=%s flow_id=%s",
         account_id, flow_id,
@@ -627,13 +643,28 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                     pass
 
 
-@celery_app.task(bind=True, max_retries=1)
+@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=360)
 def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
     logger.info(
         "event=confirm_code_task_started account_id=%s flow_id=%s",
         account_id, flow_id,
     )
-    asyncio.run(_run_confirm_code(account_id, flow_id, code))
+    try:
+        asyncio.run(_run_confirm_code(account_id, flow_id, code))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s, flow_id=%s)", self.request.id, account_id, flow_id)
+        _cleanup_pre_auth_session(flow_id)
+        with SessionLocal() as db:
+            account = db.get(TelegramAccount, account_id)
+            flow = db.get(TelegramAuthFlow, flow_id)
+            if account:
+                account.status = TelegramAccountStatus.error
+                account.last_error = "Task timed out"
+            if flow:
+                flow.state = AuthFlowState.failed
+                flow.last_error = "Task timed out"
+            db.commit()
+        return
     logger.info(
         "event=confirm_code_task_finished account_id=%s flow_id=%s",
         account_id, flow_id,
@@ -779,13 +810,27 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
                     pass
 
 
-@celery_app.task(bind=True, max_retries=1)
+@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=360)
 def confirm_password_task(self, account_id: int, flow_id: str, password: str) -> None:
     logger.info(
         "event=confirm_password_task_started account_id=%s flow_id=%s",
         account_id, flow_id,
     )
-    asyncio.run(_run_confirm_password(account_id, flow_id, password))
+    try:
+        asyncio.run(_run_confirm_password(account_id, flow_id, password))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s, flow_id=%s)", self.request.id, account_id, flow_id)
+        with SessionLocal() as db:
+            account = db.get(TelegramAccount, account_id)
+            flow = db.get(TelegramAuthFlow, flow_id)
+            if account:
+                account.status = TelegramAccountStatus.error
+                account.last_error = "Task timed out"
+            if flow:
+                flow.state = AuthFlowState.failed
+                flow.last_error = "Task timed out"
+            db.commit()
+        return
     logger.info(
         "event=confirm_password_task_finished account_id=%s flow_id=%s",
         account_id, flow_id,
@@ -929,7 +974,7 @@ async def _run_verify_account(account_id: int, task_id: str) -> None:
                     pass
 
 
-@celery_app.task(bind=True, max_retries=_MAX_NETWORK_RETRIES, default_retry_delay=5)
+@celery_app.task(bind=True, max_retries=_MAX_NETWORK_RETRIES, default_retry_delay=5, soft_time_limit=300, time_limit=360)
 def verify_account_task(self, account_id: int) -> None:
     """Celery wrapper for verify_account with lease-based idempotency."""
     task_id = self.request.id or str(uuid.uuid4())
@@ -937,7 +982,18 @@ def verify_account_task(self, account_id: int) -> None:
         "event=verify_account_task_started account_id=%s task_id=%s",
         account_id, task_id,
     )
-    asyncio.run(_run_verify_account(account_id, task_id))
+    try:
+        asyncio.run(_run_verify_account(account_id, task_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", task_id, account_id)
+        with SessionLocal() as db:
+            account = db.get(TelegramAccount, account_id)
+            if account:
+                account.status = TelegramAccountStatus.error
+                account.last_error = "Verification timed out"
+                account.release_verify_lease(VerifyStatus.failed, VerifyReasonCode.unknown)
+                db.commit()
+        return
     logger.info(
         "event=verify_account_task_finished account_id=%s task_id=%s",
         account_id, task_id,
