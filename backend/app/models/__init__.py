@@ -11,6 +11,7 @@ from app.models.telegram_account import TelegramAccount, TelegramAccountStatus, 
 from app.models.telegram_api_app import TelegramApiApp
 from app.models.telegram_auth_flow import TelegramAuthFlow, AuthFlowState
 from app.models.user import User
+from app.models.warming_channel import WarmingChannel
 
 __all__ = [
     "Account",
@@ -38,4 +39,5 @@ __all__ = [
     "VerifyStatus",
     "VerifyReasonCode",
     "VERIFY_LEASE_TTL_SECONDS",
+    "WarmingChannel",
 ]

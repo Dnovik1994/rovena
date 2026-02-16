@@ -86,6 +86,7 @@ class TelegramAccount(Base):
     warming_actions_completed: Mapped[int] = mapped_column(Integer, default=0)
     target_warming_actions: Mapped[int] = mapped_column(Integer, default=10)
     warming_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    warming_joined_channels: Mapped[list | None] = mapped_column(JSON, nullable=True)
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_device_regenerated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
