@@ -221,8 +221,21 @@ def get_settings() -> Settings:
     settings = Settings()
     if settings.telegram_client_enabled is None:
         settings.telegram_client_enabled = bool(settings.telegram_api_id and settings.telegram_api_hash)
-    if settings.production and settings.jwt_secret == "change-me":
-        raise ValueError("Change JWT_SECRET!")
+    # Reject empty/whitespace-only JWT_SECRET in ALL environments —
+    # an empty HS256 secret lets anyone forge tokens.
+    if not settings.jwt_secret or not settings.jwt_secret.strip():
+        raise ValueError(
+            "JWT_SECRET must not be empty. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    # In production, also require minimum length and reject the default value.
+    if settings.production and (
+        settings.jwt_secret == "change-me" or len(settings.jwt_secret) < 16
+    ):
+        raise ValueError(
+            "JWT_SECRET must be at least 16 characters and not the default value. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
 
     if settings.production:
         if settings.database_url == "mysql+pymysql://rovena:rovena@db:3306/rovena":
