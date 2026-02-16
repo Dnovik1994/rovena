@@ -73,7 +73,7 @@ class TestVerifyLease:
             account = _create_account(db, user)
 
             assert account.verifying is False
-            acquired = account.acquire_verify_lease("task-1")
+            acquired = account.acquire_verify_lease("task-1", db)
             assert acquired is True
             assert account.verifying is True
             assert account.verifying_task_id == "task-1"
@@ -87,12 +87,10 @@ class TestVerifyLease:
             account = _create_account(db, user)
 
             # First acquire
-            assert account.acquire_verify_lease("task-1") is True
-            db.commit()
+            assert account.acquire_verify_lease("task-1", db) is True
 
             # Second acquire should fail
-            db.refresh(account)
-            assert account.acquire_verify_lease("task-2") is False
+            assert account.acquire_verify_lease("task-2", db) is False
             # Original task_id is still the owner
             assert account.verifying_task_id == "task-1"
 
@@ -103,7 +101,7 @@ class TestVerifyLease:
             account = _create_account(db, user)
 
             # First acquire
-            assert account.acquire_verify_lease("task-1") is True
+            assert account.acquire_verify_lease("task-1", db) is True
             # Simulate an old start time (expired)
             account.verifying_started_at = datetime.now(timezone.utc) - timedelta(
                 seconds=VERIFY_LEASE_TTL_SECONDS + 60,
@@ -112,7 +110,7 @@ class TestVerifyLease:
 
             # Now another acquire should succeed (lease expired)
             db.refresh(account)
-            assert account.acquire_verify_lease("task-2") is True
+            assert account.acquire_verify_lease("task-2", db) is True
             assert account.verifying_task_id == "task-2"
 
     def test_release_lease_ok(self):
@@ -121,10 +119,8 @@ class TestVerifyLease:
             user = _create_user(db)
             account = _create_account(db, user)
 
-            account.acquire_verify_lease("task-1")
-            db.commit()
+            account.acquire_verify_lease("task-1", db)
 
-            db.refresh(account)
             account.release_verify_lease(VerifyStatus.ok)
             db.commit()
 
@@ -141,10 +137,8 @@ class TestVerifyLease:
             user = _create_user(db)
             account = _create_account(db, user)
 
-            account.acquire_verify_lease("task-1")
-            db.commit()
+            account.acquire_verify_lease("task-1", db)
 
-            db.refresh(account)
             account.release_verify_lease(VerifyStatus.failed, VerifyReasonCode.floodwait)
             db.commit()
 
@@ -175,14 +169,14 @@ class TestStatusTransitions:
         with SessionLocal() as db:
             user = _create_user(db)
             account = _create_account(db, user)
-            account.acquire_verify_lease("task-1")
+            account.acquire_verify_lease("task-1", db)
             assert account.verify_status == VerifyStatus.running.value
 
     def test_release_cooldown_status(self):
         with SessionLocal() as db:
             user = _create_user(db)
             account = _create_account(db, user)
-            account.acquire_verify_lease("task-1")
+            account.acquire_verify_lease("task-1", db)
             account.release_verify_lease(VerifyStatus.cooldown, VerifyReasonCode.floodwait)
             assert account.verify_status == VerifyStatus.cooldown.value
             assert account.verify_reason == VerifyReasonCode.floodwait.value
@@ -191,7 +185,7 @@ class TestStatusTransitions:
         with SessionLocal() as db:
             user = _create_user(db)
             account = _create_account(db, user)
-            account.acquire_verify_lease("task-1")
+            account.acquire_verify_lease("task-1", db)
             account.release_verify_lease(VerifyStatus.needs_password, VerifyReasonCode.password_required)
             assert account.verify_status == VerifyStatus.needs_password.value
 

@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, or_, update
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.core.database import Base
 from app.clients.device_generator import generate_device_config
@@ -99,29 +99,43 @@ class TelegramAccount(Base):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    def acquire_verify_lease(self, task_id: str) -> bool:
-        """Try to acquire a verify lease. Returns True if acquired.
+    def acquire_verify_lease(self, task_id: str, db: Session) -> bool:
+        """Atomic lease acquisition using DB-level UPDATE with WHERE.
 
-        The caller must check the return value and only proceed with
-        verification if True. The DB session must be committed by the caller.
+        Issues a single UPDATE ... WHERE that only succeeds if the row
+        is not currently leased (or the existing lease has expired).
+        Returns True if this worker acquired the lease, False otherwise.
         """
-        now = datetime.now(timezone.utc)
+        from app.core.tz import ensure_utc
+        now = ensure_utc(datetime.utcnow())
+        lease_ttl = timedelta(seconds=VERIFY_LEASE_TTL_SECONDS)
 
-        # If already verifying, check if the lease has expired
-        if self.verifying and self.verifying_started_at:
-            from app.core.tz import ensure_utc
-            started = ensure_utc(self.verifying_started_at)
-            elapsed = (now - started).total_seconds()
-            if elapsed < VERIFY_LEASE_TTL_SECONDS:
-                return False  # Lease is still active
+        # Atomic: UPDATE only if not currently leased (or lease expired)
+        result = db.execute(
+            update(TelegramAccount)
+            .where(
+                TelegramAccount.id == self.id,
+                or_(
+                    TelegramAccount.verifying == False,  # noqa: E712
+                    TelegramAccount.verifying_started_at == None,  # noqa: E711
+                    TelegramAccount.verifying_started_at < now - lease_ttl,
+                ),
+            )
+            .values(
+                verifying=True,
+                verifying_started_at=now,
+                verifying_task_id=task_id,
+                verify_status=VerifyStatus.running.value,
+                verify_reason=None,
+            )
+        )
+        db.commit()
 
-        # Acquire the lease
-        self.verifying = True
-        self.verifying_started_at = now
-        self.verifying_task_id = task_id
-        self.verify_status = VerifyStatus.running.value
-        self.verify_reason = None
-        return True
+        # If rowcount == 1, we got the lease. If 0, someone else has it.
+        if result.rowcount == 1:
+            db.refresh(self)
+            return True
+        return False
 
     def release_verify_lease(
         self,
