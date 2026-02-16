@@ -7,6 +7,7 @@ from app.core.tz import is_expired
 
 from celery import current_task
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy.exc import IntegrityError
 
 from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.core.database import SessionLocal
@@ -54,18 +55,28 @@ def _log_dispatch_error(
     error_message: str,
     owner_id: int | None = None,
 ) -> None:
-    db.add(
-        CampaignDispatchLog(
-            campaign_id=campaign_id,
-            account_id=account_id,
-            contact_id=contact_id,
-            error=error_message[:255],
-            error_type=error_type,
-            error_message=error_message[:255],
-            timestamp=datetime.now(timezone.utc),
+    try:
+        db.add(
+            CampaignDispatchLog(
+                campaign_id=campaign_id,
+                account_id=account_id,
+                contact_id=contact_id,
+                error=error_message[:255],
+                error_type=error_type,
+                error_message=error_message[:255],
+                timestamp=datetime.now(timezone.utc),
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.warning(
+            "Failed to log dispatch error: FK violation for campaign=%s account=%s contact=%s",
+            campaign_id, account_id, contact_id,
+        )
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Failed to log dispatch error: %s", exc)
     campaign_invites_errors_total.labels(error_type=error_type.value).inc()
     manager.broadcast_sync(
         {
