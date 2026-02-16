@@ -12,6 +12,7 @@ import {
   confirmTgCode,
   confirmTgPassword,
   disconnectTgAccount,
+  deleteTgAccount,
   tgHealthCheck,
   tgWarmup,
   tgRegenerateDevice,
@@ -417,6 +418,22 @@ const Accounts = (): JSX.Element => {
     }
   };
 
+  const handleDelete = async (account: TgAccount) => {
+    if (!token) return;
+    const confirmed = window.confirm(
+      `Удалить аккаунт ${account.phone_e164}? Сессия будет потеряна.`,
+    );
+    if (!confirmed) return;
+    try {
+      setGlobalError(null);
+      await deleteTgAccount(token, account.id);
+      setAccounts((prev) => prev.filter((a) => a.id !== account.id));
+      setActionMessage("Account deleted.");
+    } catch (err) {
+      setGlobalError(extractError(err));
+    }
+  };
+
   /* ── Helpers ─── */
   const formatProgress = (account: TgAccount) => {
     const target = account.target_warming_actions || 0;
@@ -667,6 +684,16 @@ const Accounts = (): JSX.Element => {
                       Disconnect
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(account);
+                    }}
+                    className="rounded-lg bg-rose-600 px-3 py-1 text-xs font-semibold text-white"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             );

@@ -241,6 +241,10 @@ export const tgRegenerateDevice = (token: string, id: number): Promise<TgAccount
   );
 };
 
+export const deleteTgAccount = (token: string, id: number): Promise<void> => {
+  return apiFetch<void>(`/tg-accounts/${id}`, { method: "DELETE" }, token);
+};
+
 export const fetchAdminStats = (token: string): Promise<AdminStats> => {
   return apiFetch<AdminStats>("/admin/stats", {}, token);
 };
