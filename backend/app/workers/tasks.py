@@ -176,6 +176,16 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                     DispatchErrorType.other, str(exc), owner_id=owner_id,
                 )
                 continue
+            except RuntimeError as e:
+                logger.error(f"Cannot create Telegram client: {e}")
+                account.status = AccountStatus.error
+                account.last_error = str(e)
+                db.commit()
+                _log_dispatch_error(
+                    db, campaign_id, account.id, None,
+                    DispatchErrorType.other, str(e), owner_id=owner_id,
+                )
+                continue
 
         try:
             async with client:
@@ -341,6 +351,12 @@ async def _run_account_health_check(account_id: int) -> None:
         except TelegramClientDisabledError:
             _set_account_cooldown(db, account, 300)
             return
+        except RuntimeError as e:
+            logger.error(f"Cannot create Telegram client: {e}")
+            account.status = AccountStatus.error
+            account.last_error = str(e)
+            db.commit()
+            return
 
         try:
             async with client:
@@ -410,6 +426,12 @@ async def _run_warming_cycle(account_id: int) -> None:
             client = get_client(account, proxy)
         except TelegramClientDisabledError:
             _set_account_cooldown(db, account, 300)
+            return
+        except RuntimeError as e:
+            logger.error(f"Cannot create Telegram client: {e}")
+            account.status = AccountStatus.error
+            account.last_error = str(e)
+            db.commit()
             return
 
         owner_id = account.owner_id
@@ -612,6 +634,13 @@ async def _run_legacy_verify(account_id: int) -> None:
         except TelegramClientDisabledError:
             logger.warning("event=legacy_verify_failed reason=client_disabled account_id=%d", account_id)
             verify_fail_total.labels(reason="client_disabled").inc()
+            return
+        except RuntimeError as e:
+            logger.error(f"Cannot create Telegram client: {e}")
+            verify_fail_total.labels(reason="runtime_error").inc()
+            account.status = AccountStatus.error
+            account.last_error = str(e)
+            db.commit()
             return
 
         try:

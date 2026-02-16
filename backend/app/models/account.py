@@ -5,7 +5,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, String
+from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -19,6 +19,7 @@ class AccountStatus(str, Enum):
     cooldown = "cooldown"
     blocked = "blocked"
     verified = "verified"
+    error = "error"
 
 
 class Account(Base):
@@ -40,6 +41,7 @@ class Account(Base):
     warming_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
