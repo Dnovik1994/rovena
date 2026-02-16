@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.cache import ping as cache_ping
 from app.core.database import get_db
+from app.core.redis_client import get_sync_redis
 from app.core.settings import get_settings
 from app.core.version import APP_VERSION
 from app.workers import CELERY_HEARTBEAT_KEY_PREFIX, CELERY_HEARTBEAT_TTL_SECONDS
@@ -78,12 +79,15 @@ async def health_check(db: Session = Depends(get_db)) -> JSONResponse:
 
     if settings.redis_url:
         try:
-            redis_client = await _run_with_timeout(Redis.from_url, timeout_seconds, settings.redis_url)
-            queue_length = await _run_with_timeout(redis_client.llen, timeout_seconds, "celery")
-            queue_status = "ok"
-            if queue_length >= settings.health_queue_warn_threshold:
-                queue_status = "warn"
-            checks["celery_queue"] = {"status": queue_status, "queue_length": queue_length}
+            redis_client = get_sync_redis()
+            if redis_client is None:
+                checks["celery_queue"] = {"status": "fail", "error": "redis_unavailable"}
+            else:
+                queue_length = await _run_with_timeout(redis_client.llen, timeout_seconds, "celery")
+                queue_status = "ok"
+                if queue_length >= settings.health_queue_warn_threshold:
+                    queue_status = "warn"
+                checks["celery_queue"] = {"status": queue_status, "queue_length": queue_length}
         except asyncio.TimeoutError:
             checks["celery_queue"] = {"status": "fail", "error": "timeout"}
         except Exception as exc:  # noqa: BLE001
@@ -93,32 +97,35 @@ async def health_check(db: Session = Depends(get_db)) -> JSONResponse:
 
     if settings.redis_url:
         try:
-            redis_client = await _run_with_timeout(Redis.from_url, timeout_seconds, settings.redis_url)
-            heartbeat_key, heartbeat_value = await _run_with_timeout(
-                _read_worker_heartbeat,
-                timeout_seconds,
-                redis_client,
-            )
-            if not heartbeat_key or not heartbeat_value:
-                checks["celery_worker"] = {"status": "warn", "error": "missing_heartbeat"}
+            redis_client = get_sync_redis()
+            if redis_client is None:
+                checks["celery_worker"] = {"status": "warn", "error": "redis_unavailable"}
             else:
-                try:
-                    heartbeat_ts = float(heartbeat_value)
-                    age_seconds = max(0.0, time.time() - heartbeat_ts)
-                    worker_status = (
-                        "ok" if age_seconds <= CELERY_HEARTBEAT_TTL_SECONDS else "warn"
-                    )
-                    checks["celery_worker"] = {
-                        "status": worker_status,
-                        "heartbeat_key": heartbeat_key,
-                        "age_seconds": int(age_seconds),
-                    }
-                except (TypeError, ValueError):
-                    checks["celery_worker"] = {
-                        "status": "warn",
-                        "error": "invalid_heartbeat",
-                        "heartbeat_key": heartbeat_key,
-                    }
+                heartbeat_key, heartbeat_value = await _run_with_timeout(
+                    _read_worker_heartbeat,
+                    timeout_seconds,
+                    redis_client,
+                )
+                if not heartbeat_key or not heartbeat_value:
+                    checks["celery_worker"] = {"status": "warn", "error": "missing_heartbeat"}
+                else:
+                    try:
+                        heartbeat_ts = float(heartbeat_value)
+                        age_seconds = max(0.0, time.time() - heartbeat_ts)
+                        worker_status = (
+                            "ok" if age_seconds <= CELERY_HEARTBEAT_TTL_SECONDS else "warn"
+                        )
+                        checks["celery_worker"] = {
+                            "status": worker_status,
+                            "heartbeat_key": heartbeat_key,
+                            "age_seconds": int(age_seconds),
+                        }
+                    except (TypeError, ValueError):
+                        checks["celery_worker"] = {
+                            "status": "warn",
+                            "error": "invalid_heartbeat",
+                            "heartbeat_key": heartbeat_key,
+                        }
         except asyncio.TimeoutError:
             checks["celery_worker"] = {"status": "warn", "error": "timeout"}
         except Exception as exc:  # noqa: BLE001
