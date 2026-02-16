@@ -50,4 +50,9 @@ def sync_3proxy() -> None:
 
     if settings.proxy_reload_cmd:
         cmd = shlex.split(settings.proxy_reload_cmd)
-        subprocess.check_call(cmd, shell=False)
+        try:
+            subprocess.check_call(cmd, shell=False, timeout=30)
+        except subprocess.TimeoutExpired:
+            logger.error("3proxy config sync timed out after 30s")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"3proxy config sync failed: {e}")
