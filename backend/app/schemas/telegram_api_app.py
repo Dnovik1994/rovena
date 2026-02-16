@@ -1,8 +1,15 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.sanitization import SanitizedModel
+
+
+def mask_api_hash(value: str) -> str:
+    """Mask api_hash showing only first 4 and last 4 characters."""
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:4]}...{value[-4:]}"
 
 
 class ApiAppCreate(SanitizedModel):
@@ -20,7 +27,7 @@ class ApiAppUpdate(SanitizedModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
-class ApiAppResponse(BaseModel):
+class _ApiAppBase(BaseModel):
     id: int
     api_id: int
     api_hash: str
@@ -33,6 +40,25 @@ class ApiAppResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ApiAppResponse(_ApiAppBase):
+    """Default response — api_hash is masked."""
+
+    @model_validator(mode="after")
+    def _mask_hash(self) -> "ApiAppResponse":
+        object.__setattr__(self, "api_hash", mask_api_hash(self.api_hash))
+        return self
+
+
+class ApiAppCreateResponse(_ApiAppBase):
+    """Returned once on POST — full api_hash visible."""
+
+
+class ApiAppHashReveal(BaseModel):
+    id: int
+    api_id: int
+    api_hash: str
 
 
 class ApiAppListResponse(ApiAppResponse):
