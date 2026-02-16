@@ -166,6 +166,16 @@ async def admin_user_update(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role"
             ) from exc
+        if new_role == UserRole.superadmin and current_user.role != UserRole.superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only superadmin can assign superadmin role",
+            )
+        if user.role == UserRole.superadmin and current_user.role != UserRole.superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only superadmin can modify superadmin users",
+            )
         user.role = new_role
         user.is_admin = new_role in ADMIN_ROLES
     db.commit()
