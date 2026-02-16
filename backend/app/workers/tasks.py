@@ -27,6 +27,12 @@ import sentry_sdk
 
 logger = logging.getLogger(__name__)
 
+
+def _serialize_status(status) -> str:
+    """Safely serialize enum status for JSON."""
+    return status.value if hasattr(status, 'value') else str(status)
+
+
 def _log_task_started(campaign_id: int | None = None, account_id: int | None = None) -> None:
     task = current_task
     task_name = task.name if task else "unknown"
@@ -82,7 +88,7 @@ def _set_account_cooldown(db, account: Account, seconds: int) -> None:
             "type": "account_update",
             "user_id": account.owner_id,
             "account_id": account.id,
-            "status": account.status,
+            "status": _serialize_status(account.status),
             "actions_completed": account.warming_actions_completed,
             "target_actions": account.target_warming_actions,
             "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
@@ -320,7 +326,7 @@ async def _run_account_health_check(account_id: int) -> None:
                     "type": "account_update",
                     "user_id": account.owner_id,
                     "account_id": account.id,
-                    "status": account.status,
+                    "status": _serialize_status(account.status),
                     "actions_completed": account.warming_actions_completed,
                     "target_actions": account.target_warming_actions,
                     "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
@@ -381,7 +387,7 @@ async def _run_warming_cycle(account_id: int) -> None:
                 "type": "account_update",
                 "user_id": account.owner_id,
                 "account_id": account.id,
-                "status": account.status,
+                "status": _serialize_status(account.status),
                 "actions_completed": account.warming_actions_completed,
                 "target_actions": account.target_warming_actions,
                 "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
@@ -402,7 +408,7 @@ async def _run_warming_cycle(account_id: int) -> None:
                             "type": "account_update",
                             "user_id": account.owner_id,
                             "account_id": account.id,
-                            "status": account.status,
+                            "status": _serialize_status(account.status),
                             "actions_completed": account.warming_actions_completed,
                             "target_actions": target_actions,
                             "cooldown_until": account.cooldown_until.isoformat()
@@ -434,7 +440,7 @@ async def _run_warming_cycle(account_id: int) -> None:
                 "type": "account_update",
                 "user_id": account.owner_id,
                 "account_id": account.id,
-                "status": account.status,
+                "status": _serialize_status(account.status),
                 "actions_completed": account.warming_actions_completed,
                 "target_actions": account.target_warming_actions,
                 "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
@@ -478,7 +484,7 @@ def check_cooldowns() -> None:
                         "type": "account_update",
                         "user_id": account.owner_id,
                         "account_id": account.id,
-                        "status": account.status,
+                        "status": _serialize_status(account.status),
                         "actions_completed": account.warming_actions_completed,
                         "target_actions": account.target_warming_actions,
                         "cooldown_until": None,
@@ -571,5 +577,5 @@ async def _run_legacy_verify(account_id: int) -> None:
             "type": "account_update",
             "user_id": account.owner_id,
             "account_id": account.id,
-            "status": account.status.value if hasattr(account.status, "value") else str(account.status),
+            "status": _serialize_status(account.status),
         })
