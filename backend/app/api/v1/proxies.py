@@ -124,6 +124,17 @@ async def validate_proxy_by_id(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Telegram client disabled",
         ) from exc
+    except (ConnectionError, TimeoutError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Proxy validation failed: {exc}",
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error validating proxy %s", proxy_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal error during proxy validation",
+        ) from exc
     if not proxy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
     return ProxyResponse.model_validate(proxy)
