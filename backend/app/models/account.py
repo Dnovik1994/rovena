@@ -1,3 +1,7 @@
+# TODO: DEPRECATED — эта модель не поддерживает per-account api_id.
+# Все новые задачи должны использовать TelegramAccount.
+# План: мигрировать tasks.py на TelegramAccount, затем удалить эту модель.
+
 from datetime import datetime, timezone
 from enum import Enum
 
