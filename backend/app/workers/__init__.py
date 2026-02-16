@@ -75,6 +75,7 @@ celery_app = Celery(
     include=[
         "app.workers.tasks",
         "app.workers.tg_auth_tasks",
+        "app.workers.tg_warming_tasks",
     ],
 )
 celery_app.conf.update(
