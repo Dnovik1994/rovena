@@ -333,7 +333,16 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             flow.state = AuthFlowState.wait_code
             flow.sent_at = datetime.now(timezone.utc)
             flow.expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.auth_flow_ttl_seconds)
-            meta: dict = {"phone_code_hash": sent_code.phone_code_hash, "dc_id": dc_after}
+            session_str = await client.export_session_string()
+            log.info(
+                "event=send_code_session_exported %s session_str_len=%d session_str_prefix=%s",
+                ctx, len(session_str), session_str[:8] if session_str else "",
+            )
+            meta: dict = {
+                "phone_code_hash": sent_code.phone_code_hash,
+                "dc_id": str(dc_after),
+                "pre_auth_session": session_str,
+            }
             flow.meta_json = meta
 
             account.status = TelegramAccountStatus.code_sent
@@ -538,81 +547,44 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             return
 
         send_code_dc = meta.get("dc_id", "unknown")
-        session_path = _pre_auth_session_path(flow_id)
-        has_pre_auth_session = session_path.exists()
+        session_str = meta.get("pre_auth_session", "")
         log.info(
-            "event=confirm_code_session_info %s send_code_dc=%s pre_auth_session=%s session_path=%s",
-            ctx, send_code_dc, has_pre_auth_session, session_path,
+            "event=confirm_code_session_info %s send_code_dc=%s "
+            "has_session_string=%s session_str_len=%d session_str_prefix=%s",
+            ctx, send_code_dc,
+            bool(session_str), len(session_str or ""),
+            (session_str[:8] if session_str else ""),
         )
 
-        # ── Diagnostic: auth_key BEFORE client creation ──
-        ak_before = _read_session_auth_key(session_path, log)
-        log.info(
-            "event=confirm_code_auth_key_before_client %s "
-            "session_exists=%s session_size=%s "
-            "dc_id=%s auth_key_len=%s auth_key_prefix=%s",
-            ctx,
-            ak_before.get("exists"),
-            ak_before.get("size"),
-            ak_before.get("dc_id"),
-            ak_before.get("auth_key_len"),
-            ak_before.get("auth_key_prefix"),
-        )
+        if not session_str:
+            log.warning("event=confirm_code_missing_session_string %s", ctx)
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Missing pre_auth_session; please resend code"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Missing pre_auth_session; please resend code"
+            db.commit()
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+            return
 
         client = None
         try:
             log.info("event=confirm_code_started %s", ctx)
             client = create_tg_account_client(
                 account, proxy,
-                workdir=str(_PRE_AUTH_DIR),
-                session_name=_pre_auth_session_name(flow_id),
+                session_string=session_str,
             )
 
             t_connect = time.monotonic()
             await client.connect()
             confirm_dc = await _get_dc_id(client)
             log.info(
-                "event=client_connected %s dc_id=%s send_code_dc=%s elapsed_ms=%d",
+                "event=client_connected %s dc_id=%s send_code_dc=%s "
+                "session_source=meta_json elapsed_ms=%d",
                 ctx, confirm_dc, send_code_dc,
                 int((time.monotonic() - t_connect) * 1000),
             )
             _log_client_fingerprint(log, ctx, client)
-
-            # ── Diagnostic: auth_key AFTER connect (detect if Pyrogram overwrote it) ──
-            ak_after = _read_session_auth_key(session_path, log)
-            ak_match = (
-                ak_before.get("auth_key_prefix") == ak_after.get("auth_key_prefix")
-                and ak_before.get("auth_key_len") == ak_after.get("auth_key_len")
-            )
-            log.info(
-                "event=confirm_code_auth_key_after_connect %s "
-                "session_exists=%s session_size=%s "
-                "dc_id=%s auth_key_len=%s auth_key_prefix=%s "
-                "auth_key_MATCHES_before=%s "
-                "before_dc=%s after_dc=%s "
-                "before_prefix=%s after_prefix=%s",
-                ctx,
-                ak_after.get("exists"),
-                ak_after.get("size"),
-                ak_after.get("dc_id"),
-                ak_after.get("auth_key_len"),
-                ak_after.get("auth_key_prefix"),
-                ak_match,
-                ak_before.get("dc_id"),
-                ak_after.get("dc_id"),
-                ak_before.get("auth_key_prefix"),
-                ak_after.get("auth_key_prefix"),
-            )
-            if not ak_match:
-                log.error(
-                    "event=AUTH_KEY_MISMATCH %s "
-                    "BEFORE: dc_id=%s len=%s prefix=%s "
-                    "AFTER: dc_id=%s len=%s prefix=%s "
-                    "VERDICT: Pyrogram created a NEW auth_key — this WILL cause PhoneCodeExpired",
-                    ctx,
-                    ak_before.get("dc_id"), ak_before.get("auth_key_len"), ak_before.get("auth_key_prefix"),
-                    ak_after.get("dc_id"), ak_after.get("auth_key_len"), ak_after.get("auth_key_prefix"),
-                )
 
             # ── Diagnostic: verify hash stability ──
             log.info(
@@ -680,7 +652,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             elapsed = int((time.monotonic() - t0) * 1000)
             log.info("event=confirm_code_ok %s elapsed_ms=%d", ctx, elapsed)
 
-            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -702,7 +673,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 
             db.commit()
             log.info("event=confirm_code_2fa_required %s", ctx)
-            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -726,10 +696,9 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             verify_fail_total.labels(reason=VerifyReasonCode.code_expired.value).inc()
             log.warning(
                 "event=confirm_code_failed reason=phone_code_expired %s "
-                "pre_auth_session_existed=%s",
-                ctx, has_pre_auth_session,
+                "session_str_was_provided=%s",
+                ctx, bool(session_str),
             )
-            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -748,7 +717,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             db.commit()
             verify_fail_total.labels(reason=VerifyReasonCode.phone_banned.value).inc()
             log.warning("event=confirm_code_failed reason=phone_banned %s", ctx)
-            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -761,7 +729,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             db.commit()
             verify_fail_total.labels(reason=VerifyReasonCode.session_revoked.value).inc()
             log.warning("event=confirm_code_failed reason=session_revoked %s", ctx)
-            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
@@ -783,7 +750,6 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             account.last_error = err_msg
             db.commit()
             verify_fail_total.labels(reason=reason.value).inc()
-            _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
         finally:
@@ -804,7 +770,6 @@ def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
         asyncio.run(_run_confirm_code(account_id, flow_id, code))
     except SoftTimeLimitExceeded:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s, flow_id=%s)", self.request.id, account_id, flow_id)
-        _cleanup_pre_auth_session(flow_id)
         with SessionLocal() as db:
             account = db.get(TelegramAccount, account_id)
             flow = db.get(TelegramAuthFlow, flow_id)
