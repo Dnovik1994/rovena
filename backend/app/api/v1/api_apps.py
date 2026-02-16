@@ -8,6 +8,8 @@ from app.models.telegram_account import TelegramAccount
 from app.models.telegram_api_app import TelegramApiApp
 from app.schemas.telegram_api_app import (
     ApiAppCreate,
+    ApiAppCreateResponse,
+    ApiAppHashReveal,
     ApiAppListResponse,
     ApiAppResponse,
     ApiAppUpdate,
@@ -49,12 +51,12 @@ def list_api_apps(
     return result
 
 
-@router.post("/api-apps", response_model=ApiAppResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/api-apps", response_model=ApiAppCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_api_app(
     payload: ApiAppCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("api_apps", "create")),
-) -> ApiAppResponse:
+) -> ApiAppCreateResponse:
     existing = db.query(TelegramApiApp).filter(TelegramApiApp.api_id == payload.api_id).first()
     if existing:
         raise HTTPException(
@@ -71,7 +73,19 @@ def create_api_app(
     db.add(api_app)
     db.commit()
     db.refresh(api_app)
-    return ApiAppResponse.model_validate(api_app)
+    return ApiAppCreateResponse.model_validate(api_app)
+
+
+@router.get("/api-apps/{app_id}/reveal-hash", response_model=ApiAppHashReveal)
+def reveal_api_app_hash(
+    app_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("api_apps", "update")),
+) -> ApiAppHashReveal:
+    api_app = db.get(TelegramApiApp, app_id)
+    if not api_app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API app not found")
+    return ApiAppHashReveal(id=api_app.id, api_id=api_app.api_id, api_hash=api_app.api_hash)
 
 
 @router.patch("/api-apps/{app_id}", response_model=ApiAppResponse)
