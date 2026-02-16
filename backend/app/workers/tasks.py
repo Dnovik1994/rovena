@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.tz import is_expired
 
 from celery import current_task
+from celery.exceptions import SoftTimeLimitExceeded
 
 from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.core.database import SessionLocal
@@ -284,21 +285,35 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
 
 
 @celery_app.task(
+    bind=True,
     rate_limit="2/s",
     autoretry_for=(FloodWait,),
     retry_backoff=60,
     retry_backoff_max=600,
     retry_jitter=True,
+    soft_time_limit=3600,
+    time_limit=3900,
 )
-def campaign_dispatch(campaign_id: int) -> None:
+def campaign_dispatch(self, campaign_id: int) -> None:
     _log_task_started(campaign_id=campaign_id)
-    asyncio.run(_run_campaign_dispatch(campaign_id))
+    try:
+        asyncio.run(_run_campaign_dispatch(campaign_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (campaign_id=%s)", self.request.id, campaign_id)
+        with SessionLocal() as db:
+            campaign = db.get(Campaign, campaign_id)
+            if campaign and campaign.status == CampaignStatus.active:
+                campaign.status = CampaignStatus.paused
+                db.commit()
 
 
-@celery_app.task
-def account_health_check(account_id: int) -> None:
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
+def account_health_check(self, account_id: int) -> None:
     _log_task_started(account_id=account_id)
-    asyncio.run(_run_account_health_check(account_id))
+    try:
+        asyncio.run(_run_account_health_check(account_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
 # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
@@ -474,71 +489,98 @@ async def _run_warming_cycle(account_id: int) -> None:
 
 
 @celery_app.task(
+    bind=True,
     autoretry_for=(FloodWait,),
     retry_backoff=60,
     retry_backoff_max=600,
     retry_jitter=True,
+    soft_time_limit=3600,
+    time_limit=3900,
 )
-def start_warming(account_id: int) -> None:
+def start_warming(self, account_id: int) -> None:
     _log_task_started(account_id=account_id)
-    asyncio.run(_run_warming_cycle(account_id))
+    try:
+        asyncio.run(_run_warming_cycle(account_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
+        with SessionLocal() as db:
+            account = db.get(Account, account_id)
+            if account:
+                account.status = AccountStatus.cooldown
+                account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
+                db.commit()
 
 
-@celery_app.task
-def perform_warming_action(account_id: int) -> None:
+@celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
+def perform_warming_action(self, account_id: int) -> None:
     _log_task_started(account_id=account_id)
-    logger.info("Perform warming action", extra={"account_id": account_id})
+    try:
+        logger.info("Perform warming action", extra={"account_id": account_id})
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
-@celery_app.task
-def check_cooldowns() -> None:
+@celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
+def check_cooldowns(self) -> None:
     _log_task_started()
-    with SessionLocal() as db:
-        # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
-        accounts = (
-            db.query(Account)
-            .filter(Account.status == AccountStatus.cooldown)
-            .filter(Account.cooldown_until.isnot(None))
-            .all()
-        )
-        for account in accounts:
-            if account.cooldown_until and is_expired(account.cooldown_until):
-                account.status = AccountStatus.active
-                manager.broadcast_sync(
-                    {
-                        "type": "account_update",
-                        "user_id": account.owner_id,
-                        "account_id": account.id,
-                        "status": _serialize_status(account.status),
-                        "actions_completed": account.warming_actions_completed,
-                        "target_actions": account.target_warming_actions,
-                        "cooldown_until": None,
-                    }
-                )
-        db.commit()
+    try:
+        with SessionLocal() as db:
+            # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+            accounts = (
+                db.query(Account)
+                .filter(Account.status == AccountStatus.cooldown)
+                .filter(Account.cooldown_until.isnot(None))
+                .all()
+            )
+            for account in accounts:
+                if account.cooldown_until and is_expired(account.cooldown_until):
+                    account.status = AccountStatus.active
+                    manager.broadcast_sync(
+                        {
+                            "type": "account_update",
+                            "user_id": account.owner_id,
+                            "account_id": account.id,
+                            "status": _serialize_status(account.status),
+                            "actions_completed": account.warming_actions_completed,
+                            "target_actions": account.target_warming_actions,
+                            "cooldown_until": None,
+                        }
+                    )
+            db.commit()
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown", self.request.id)
 
 
-@celery_app.task
-def sync_3proxy_config() -> None:
+@celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
+def sync_3proxy_config(self) -> None:
     _log_task_started()
-    sync_3proxy()
+    try:
+        sync_3proxy()
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown", self.request.id)
 
 
-@celery_app.task
-def validate_proxy_task(proxy_id: int) -> None:
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
+def validate_proxy_task(self, proxy_id: int) -> None:
     _log_task_started()
-    asyncio.run(validate_proxy(proxy_id))
+    try:
+        asyncio.run(validate_proxy(proxy_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (proxy_id=%s)", self.request.id, proxy_id)
 
 
-@celery_app.task
-def legacy_verify_account(account_id: int) -> None:
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
+def legacy_verify_account(self, account_id: int) -> None:
     """Async-safe verify for legacy Account model.
 
     Replaces the old blocking verify_account endpoint by offloading
     the Pyrogram get_me() call to a Celery worker.
     """
     _log_task_started(account_id=account_id)
-    asyncio.run(_run_legacy_verify(account_id))
+    try:
+        asyncio.run(_run_legacy_verify(account_id))
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
 # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
