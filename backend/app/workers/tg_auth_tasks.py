@@ -236,6 +236,46 @@ def _cleanup_pre_auth_session(flow_id: str, log=None) -> None:
         log.info("event=pre_auth_session_cleaned flow_id=%s", flow_id)
 
 
+def _read_session_auth_key(session_path: Path, log=None) -> dict:
+    """Read dc_id and auth_key from a Pyrogram SQLite session file.
+
+    Returns dict with dc_id, auth_key_len, auth_key_prefix (first 8 bytes hex),
+    or error info if the file is missing/corrupt.
+    """
+    import sqlite3
+
+    result: dict = {"exists": False, "size": 0, "dc_id": None, "auth_key_len": 0, "auth_key_prefix": ""}
+    try:
+        if not session_path.exists():
+            return result
+        result["exists"] = True
+        result["size"] = session_path.stat().st_size
+
+        conn = sqlite3.connect(str(session_path))
+        try:
+            row = conn.execute("SELECT dc_id, auth_key FROM sessions").fetchone()
+            if row:
+                result["dc_id"] = row[0]
+                auth_key = row[1] if row[1] else b""
+                if isinstance(auth_key, bytes):
+                    result["auth_key_len"] = len(auth_key)
+                    result["auth_key_prefix"] = auth_key[:8].hex() if auth_key else ""
+                else:
+                    result["auth_key_len"] = len(str(auth_key))
+                    result["auth_key_prefix"] = str(auth_key)[:16]
+            else:
+                result["dc_id"] = None
+                result["auth_key_len"] = 0
+                result["auth_key_prefix"] = "no_row"
+        finally:
+            conn.close()
+    except Exception as exc:
+        result["error"] = str(exc)[:200]
+        if log:
+            log.warning("event=read_session_auth_key_error path=%s error=%s", session_path, exc)
+    return result
+
+
 # ─── send_code ───────────────────────────────────────────────────────
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
@@ -394,6 +434,21 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
                 except Exception:
                     pass
 
+            # ── Diagnostic: dump auth_key written by send_code ──
+            session_path = _pre_auth_session_path(flow_id)
+            ak_info = _read_session_auth_key(session_path, log)
+            log.info(
+                "event=send_code_session_after_disconnect %s "
+                "session_exists=%s session_size=%s "
+                "dc_id=%s auth_key_len=%s auth_key_prefix=%s",
+                ctx,
+                ak_info.get("exists"),
+                ak_info.get("size"),
+                ak_info.get("dc_id"),
+                ak_info.get("auth_key_len"),
+                ak_info.get("auth_key_prefix"),
+            )
+
 
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def send_code_task(self, account_id: int, flow_id: str) -> None:
@@ -490,6 +545,20 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             ctx, send_code_dc, has_pre_auth_session, session_path,
         )
 
+        # ── Diagnostic: auth_key BEFORE client creation ──
+        ak_before = _read_session_auth_key(session_path, log)
+        log.info(
+            "event=confirm_code_auth_key_before_client %s "
+            "session_exists=%s session_size=%s "
+            "dc_id=%s auth_key_len=%s auth_key_prefix=%s",
+            ctx,
+            ak_before.get("exists"),
+            ak_before.get("size"),
+            ak_before.get("dc_id"),
+            ak_before.get("auth_key_len"),
+            ak_before.get("auth_key_prefix"),
+        )
+
         client = None
         try:
             log.info("event=confirm_code_started %s", ctx)
@@ -509,6 +578,42 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                 int((time.monotonic() - t_connect) * 1000),
             )
             _log_client_fingerprint(log, ctx, client)
+
+            # ── Diagnostic: auth_key AFTER connect (detect if Pyrogram overwrote it) ──
+            ak_after = _read_session_auth_key(session_path, log)
+            ak_match = (
+                ak_before.get("auth_key_prefix") == ak_after.get("auth_key_prefix")
+                and ak_before.get("auth_key_len") == ak_after.get("auth_key_len")
+            )
+            log.info(
+                "event=confirm_code_auth_key_after_connect %s "
+                "session_exists=%s session_size=%s "
+                "dc_id=%s auth_key_len=%s auth_key_prefix=%s "
+                "auth_key_MATCHES_before=%s "
+                "before_dc=%s after_dc=%s "
+                "before_prefix=%s after_prefix=%s",
+                ctx,
+                ak_after.get("exists"),
+                ak_after.get("size"),
+                ak_after.get("dc_id"),
+                ak_after.get("auth_key_len"),
+                ak_after.get("auth_key_prefix"),
+                ak_match,
+                ak_before.get("dc_id"),
+                ak_after.get("dc_id"),
+                ak_before.get("auth_key_prefix"),
+                ak_after.get("auth_key_prefix"),
+            )
+            if not ak_match:
+                log.error(
+                    "event=AUTH_KEY_MISMATCH %s "
+                    "BEFORE: dc_id=%s len=%s prefix=%s "
+                    "AFTER: dc_id=%s len=%s prefix=%s "
+                    "VERDICT: Pyrogram created a NEW auth_key — this WILL cause PhoneCodeExpired",
+                    ctx,
+                    ak_before.get("dc_id"), ak_before.get("auth_key_len"), ak_before.get("auth_key_prefix"),
+                    ak_after.get("dc_id"), ak_after.get("auth_key_len"), ak_after.get("auth_key_prefix"),
+                )
 
             # ── Diagnostic: verify hash stability ──
             log.info(
