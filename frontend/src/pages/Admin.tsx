@@ -479,6 +479,13 @@ const Admin = (): JSX.Element => {
           </div>
           {usersQuery.isLoading ? (
             <LoadingSkeleton rows={3} label="Загрузка пользователей" />
+          ) : usersQuery.isError ? (
+            <div className="text-red-500 p-4 text-center">
+              Ошибка загрузки пользователей.{" "}
+              <button type="button" onClick={() => usersQuery.refetch()} className="underline">
+                Повторить
+              </button>
+            </div>
           ) : (
             <div className="space-y-2 text-sm">
               {usersQuery.data?.items.map((user) => (
@@ -604,6 +611,13 @@ const Admin = (): JSX.Element => {
 
           {tariffsQuery.isLoading ? (
             <LoadingSkeleton rows={3} label="Загрузка тарифов" />
+          ) : tariffsQuery.isError ? (
+            <div className="text-red-500 p-4 text-center">
+              Ошибка загрузки тарифов.{" "}
+              <button type="button" onClick={() => tariffsQuery.refetch()} className="underline">
+                Повторить
+              </button>
+            </div>
           ) : (
             <div className="space-y-2">
               {tariffs.map((tariff) => (
@@ -651,6 +665,13 @@ const Admin = (): JSX.Element => {
         <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
           {proxiesQuery.isLoading ? (
             <LoadingSkeleton rows={3} label="Загрузка прокси" />
+          ) : proxiesQuery.isError ? (
+            <div className="text-red-500 p-4 text-center">
+              Ошибка загрузки прокси.{" "}
+              <button type="button" onClick={() => proxiesQuery.refetch()} className="underline">
+                Повторить
+              </button>
+            </div>
           ) : (
             proxiesQuery.data?.items.map((proxy) => (
               <div
@@ -689,6 +710,13 @@ const Admin = (): JSX.Element => {
         <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
           {accountsQuery.isLoading ? (
             <LoadingSkeleton rows={3} label="Загрузка аккаунтов" />
+          ) : accountsQuery.isError ? (
+            <div className="text-red-500 p-4 text-center">
+              Ошибка загрузки аккаунтов.{" "}
+              <button type="button" onClick={() => accountsQuery.refetch()} className="underline">
+                Повторить
+              </button>
+            </div>
           ) : (
             accountsQuery.data?.items.map((account) => (
               <div
