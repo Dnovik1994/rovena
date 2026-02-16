@@ -283,6 +283,14 @@ const Admin = (): JSX.Element => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-tariffs"] });
     },
+    onError: (error: any) => {
+      const status = error?.status;
+      if (status === 400 || status === 409) {
+        alert("Невозможно удалить тариф: к нему привязаны пользователи.");
+      } else {
+        alert("Ошибка при удалении тарифа.");
+      }
+    },
   });
 
   const createApiAppMutation = useMutation({
@@ -623,7 +631,11 @@ const Admin = (): JSX.Element => {
                     <button
                       type="button"
                       className="rounded-full border border-rose-400 px-3 py-1 text-rose-200"
-                      onClick={() => deleteTariffMutation.mutate({ id: tariff.id })}
+                      onClick={() => {
+                        if (window.confirm("Удалить тариф? Это действие необратимо.")) {
+                          deleteTariffMutation.mutate({ id: tariff.id });
+                        }
+                      }}
                     >
                       Delete
                     </button>
