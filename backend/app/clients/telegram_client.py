@@ -60,25 +60,36 @@ def _resolve_api_credentials(account: Any | None = None, api_app: Any | None = N
     app = api_app or (getattr(account, "api_app", None) if account else None)
     if app:
         if app.is_active:
-            return int(app.api_id), app.api_hash
-        # api_app is deactivated — log warning and try settings fallback
-        account_id = getattr(account, "id", None)
-        logger.warning(
-            "API app deactivated | api_app_id=%s api_id=%s account_id=%s — falling back to global settings",
-            app.id,
-            app.api_id,
-            account_id,
-        )
-        if settings.telegram_api_id and settings.telegram_api_hash:
-            return int(settings.telegram_api_id), settings.telegram_api_hash
-        raise RuntimeError(
-            f"API app {app.id} деактивировано"
-            f"{f' для аккаунта {account_id}' if account_id else ''}, "
-            "а глобальные TELEGRAM_API_ID/HASH не настроены"
-        )
-    if settings.telegram_api_id and settings.telegram_api_hash:
-        return int(settings.telegram_api_id), settings.telegram_api_hash
-    raise RuntimeError("TELEGRAM_API_ID/HASH not configured and account has no api_app")
+            api_id, api_hash = int(app.api_id), app.api_hash
+        else:
+            # api_app is deactivated — log warning and try settings fallback
+            account_id = getattr(account, "id", None)
+            logger.warning(
+                "API app deactivated | api_app_id=%s api_id=%s account_id=%s — falling back to global settings",
+                app.id,
+                app.api_id,
+                account_id,
+            )
+            if settings.telegram_api_id and settings.telegram_api_hash:
+                api_id, api_hash = int(settings.telegram_api_id), settings.telegram_api_hash
+            else:
+                raise RuntimeError(
+                    f"API app {app.id} деактивировано"
+                    f"{f' для аккаунта {account_id}' if account_id else ''}, "
+                    "а глобальные TELEGRAM_API_ID/HASH не настроены"
+                )
+    elif settings.telegram_api_id and settings.telegram_api_hash:
+        api_id, api_hash = int(settings.telegram_api_id), settings.telegram_api_hash
+    else:
+        raise RuntimeError("TELEGRAM_API_ID/HASH not configured and account has no api_app")
+
+    # Validate before passing to Pyrogram
+    if api_id <= 0:
+        raise RuntimeError(f"Invalid api_id={api_id}. Check api_app or TELEGRAM_API_ID setting.")
+    if not api_hash or len(api_hash) < 8:
+        raise RuntimeError("Invalid api_hash (empty or too short). Check api_app or TELEGRAM_API_HASH setting.")
+
+    return api_id, api_hash
 
 
 def get_client(account: Any, proxy: Proxy | None = None) -> Client:
