@@ -52,23 +52,28 @@ def _ensure_enabled() -> None:
         raise TelegramClientDisabledError()
 
 
-def _resolve_api_credentials(account: Any | None = None) -> tuple[int, str]:
-    """Return (api_id, api_hash) from account's api_app or fall back to settings."""
-    if account and getattr(account, "api_app", None):
-        api_app = account.api_app
-        if api_app.is_active:
-            return int(api_app.api_id), api_app.api_hash
+def _resolve_api_credentials(account: Any | None = None, api_app: Any | None = None) -> tuple[int, str]:
+    """Return (api_id, api_hash) from api_app, account's api_app, or fall back to settings.
+
+    *api_app* passed explicitly takes priority over ``account.api_app``.
+    """
+    app = api_app or (getattr(account, "api_app", None) if account else None)
+    if app:
+        if app.is_active:
+            return int(app.api_id), app.api_hash
         # api_app is deactivated — log warning and try settings fallback
+        account_id = getattr(account, "id", None)
         logger.warning(
             "API app deactivated | api_app_id=%s api_id=%s account_id=%s — falling back to global settings",
-            api_app.id,
-            api_app.api_id,
-            account.id,
+            app.id,
+            app.api_id,
+            account_id,
         )
         if settings.telegram_api_id and settings.telegram_api_hash:
             return int(settings.telegram_api_id), settings.telegram_api_hash
         raise RuntimeError(
-            f"API app {api_app.id} деактивировано для аккаунта {account.id}, "
+            f"API app {app.id} деактивировано"
+            f"{f' для аккаунта {account_id}' if account_id else ''}, "
             "а глобальные TELEGRAM_API_ID/HASH не настроены"
         )
     if settings.telegram_api_id and settings.telegram_api_hash:
@@ -175,10 +180,7 @@ def create_tg_account_client(
 # Сейчас используется fallback на settings для обратной совместимости
 def get_validator_client(proxy: Proxy, account: Any | None = None, api_app: Any | None = None) -> Client:
     _ensure_enabled()
-    if api_app and getattr(api_app, "api_id", None) and getattr(api_app, "api_hash", None):
-        api_id, api_hash = int(api_app.api_id), api_app.api_hash
-    else:
-        api_id, api_hash = _resolve_api_credentials(account)
+    api_id, api_hash = _resolve_api_credentials(account, api_app=api_app)
     proxy_config = _build_proxy(proxy)
     return Client(
         name=f"validator-{proxy.id}",
