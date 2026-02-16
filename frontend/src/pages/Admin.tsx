@@ -572,6 +572,9 @@ const Admin = (): JSX.Element => {
                 type="number"
                 {...tariffForm.register("max_accounts")}
               />
+              {tariffForm.formState.errors.max_accounts && (
+                <span className="text-red-500">{tariffForm.formState.errors.max_accounts.message}</span>
+              )}
             </div>
             <div className="space-y-1">
               <label className="label">Max invites / day</label>
@@ -580,6 +583,9 @@ const Admin = (): JSX.Element => {
                 type="number"
                 {...tariffForm.register("max_invites_day")}
               />
+              {tariffForm.formState.errors.max_invites_day && (
+                <span className="text-red-500">{tariffForm.formState.errors.max_invites_day.message}</span>
+              )}
             </div>
             <div className="space-y-1">
               <label className="label">Price</label>

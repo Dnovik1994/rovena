@@ -6,12 +6,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_active_user, get_tariff_limits
 from app.core.database import get_db
 from app.core.limits import get_daily_invites
-import logging
-
 from app.core.rate_limit import limiter, tariff_rate_limit
-from app.models.account import Account
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.project import Project
+from app.models.telegram_account import TelegramAccount
 from app.models.user import User
 from app.schemas.campaign import CampaignCreate, CampaignResponse, CampaignUpdate
 from app.workers.tasks import campaign_dispatch
@@ -19,7 +17,6 @@ from app.workers.tasks import campaign_dispatch
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["campaigns"])
-logger = logging.getLogger(__name__)
 
 
 @router.get("/campaigns", response_model=list[CampaignResponse])
@@ -167,7 +164,7 @@ def start_campaign(
         )
 
     max_accounts = tariff_limits["max_accounts"]
-    account_count = db.query(Account).filter(Account.owner_id == current_user.id).count()
+    account_count = db.query(TelegramAccount).filter(TelegramAccount.owner_user_id == current_user.id).count()
     if account_count > max_accounts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

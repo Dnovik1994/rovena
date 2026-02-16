@@ -26,6 +26,7 @@ class ApiAppUpdate(SanitizedModel):
     app_title: str | None = Field(default=None, max_length=255)
     max_accounts: int | None = Field(default=None, ge=1)
     is_active: bool | None = None
+    registered_phone: str | None = Field(default=None, max_length=20)
     notes: str | None = Field(default=None, max_length=2000)
 
 

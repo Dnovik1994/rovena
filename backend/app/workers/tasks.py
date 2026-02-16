@@ -308,10 +308,6 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
 @celery_app.task(
     bind=True,
     rate_limit="2/s",
-    autoretry_for=(FloodWait,),
-    retry_backoff=60,
-    retry_backoff_max=600,
-    retry_jitter=True,
     soft_time_limit=3600,
     time_limit=3900,
 )
@@ -523,10 +519,6 @@ async def _run_warming_cycle(account_id: int) -> None:
 
 @celery_app.task(
     bind=True,
-    autoretry_for=(FloodWait,),
-    retry_backoff=60,
-    retry_backoff_max=600,
-    retry_jitter=True,
     soft_time_limit=3600,
     time_limit=3900,
 )

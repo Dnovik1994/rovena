@@ -63,10 +63,6 @@ settings = get_settings()
 if settings.redis_url:
     manager.configure_redis(settings.redis_url)
 
-# ── Max network retries with jitter ──
-_MAX_NETWORK_RETRIES = 2
-
-
 def _mask_phone(phone: str) -> str:
     """Mask phone number for logging (no PII in logs).
     '+380501234567' -> '+380*****4567'
@@ -399,7 +395,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
                     pass
 
 
-@celery_app.task(bind=True, max_retries=2, soft_time_limit=300, time_limit=360)
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def send_code_task(self, account_id: int, flow_id: str) -> None:
     logger.info(
         "event=send_code_task_started account_id=%s flow_id=%s",
@@ -694,7 +690,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                     pass
 
 
-@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=360)
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
     logger.info(
         "event=confirm_code_task_started account_id=%s flow_id=%s",
@@ -884,7 +880,7 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
                     pass
 
 
-@celery_app.task(bind=True, max_retries=1, soft_time_limit=300, time_limit=360)
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def confirm_password_task(self, account_id: int, flow_id: str, password: str) -> None:
     logger.info(
         "event=confirm_password_task_started account_id=%s flow_id=%s",
@@ -1067,7 +1063,7 @@ async def _run_verify_account(account_id: int, task_id: str) -> None:
                     pass
 
 
-@celery_app.task(bind=True, max_retries=_MAX_NETWORK_RETRIES, default_retry_delay=5, soft_time_limit=300, time_limit=360)
+@celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def verify_account_task(self, account_id: int) -> None:
     """Celery wrapper for verify_account with lease-based idempotency."""
     task_id = self.request.id or str(uuid.uuid4())
