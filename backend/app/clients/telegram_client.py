@@ -171,9 +171,14 @@ def create_tg_account_client(
     return Client(name=name, **kwargs)
 
 
-def get_validator_client(proxy: Proxy, account: Any | None = None) -> Client:
+# TODO: после полной миграции на per-account api_id — требовать account или api_app
+# Сейчас используется fallback на settings для обратной совместимости
+def get_validator_client(proxy: Proxy, account: Any | None = None, api_app: Any | None = None) -> Client:
     _ensure_enabled()
-    api_id, api_hash = _resolve_api_credentials(account)
+    if api_app and getattr(api_app, "api_id", None) and getattr(api_app, "api_hash", None):
+        api_id, api_hash = int(api_app.api_id), api_app.api_hash
+    else:
+        api_id, api_hash = _resolve_api_credentials(account)
     proxy_config = _build_proxy(proxy)
     return Client(
         name=f"validator-{proxy.id}",
