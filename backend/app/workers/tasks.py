@@ -9,6 +9,7 @@ from celery import current_task
 
 from app.clients.telegram_client import TelegramClientDisabledError, get_client
 from app.core.database import SessionLocal
+# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
 from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.core.limits import increment_daily_invites
@@ -71,6 +72,7 @@ def _log_dispatch_error(
     )
 
 
+# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
 def _set_account_cooldown(db, account: Account, seconds: int) -> None:
     account.status = AccountStatus.cooldown
     account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
@@ -110,6 +112,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
             contacts_query = contacts_query.filter(Contact.source_id == campaign.source_id)
         contacts = contacts_query.order_by(Contact.id.asc()).all()
 
+        # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
         accounts = (
             db.query(Account)
             .filter(Account.owner_id == campaign.owner_id)
@@ -289,6 +292,7 @@ def account_health_check(account_id: int) -> None:
     asyncio.run(_run_account_health_check(account_id))
 
 
+# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
 async def _run_account_health_check(account_id: int) -> None:
     with SessionLocal() as db:
         account = db.get(Account, account_id)
@@ -347,6 +351,7 @@ async def perform_low_risk_action(client) -> int:
     return len(selected)
 
 
+# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
 async def _run_warming_cycle(account_id: int) -> None:
     with SessionLocal() as db:
         account = db.get(Account, account_id)
@@ -458,6 +463,7 @@ def perform_warming_action(account_id: int) -> None:
 def check_cooldowns() -> None:
     _log_task_started()
     with SessionLocal() as db:
+        # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
         accounts = (
             db.query(Account)
             .filter(Account.status == AccountStatus.cooldown)
@@ -504,6 +510,7 @@ def legacy_verify_account(account_id: int) -> None:
     asyncio.run(_run_legacy_verify(account_id))
 
 
+# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
 async def _run_legacy_verify(account_id: int) -> None:
     from app.core.metrics import verify_account_duration_seconds, verify_fail_total
     import time as _time

@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 60
 
     telegram_bot_token: str = ""
+    # TODO: убрать после полной миграции на per-account api_id (telegram_api_apps)
+    # Сейчас используется как fallback для legacy Account модели
     telegram_api_id: int = 0
     telegram_api_hash: str = ""
     telegram_client_enabled: bool | None = None
