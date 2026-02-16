@@ -336,7 +336,7 @@ def admin_create_checkout(
 ) -> dict[str, str]:
     if not settings.stripe_secret_key:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe is not configured",
         )
 
@@ -364,23 +364,29 @@ def admin_create_checkout(
             )
 
     stripe.api_key = settings.stripe_secret_key
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        payment_method_types=["card"],
-        line_items=[
-            {
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": tariff.name},
-                    "unit_amount": int(tariff.price * 100),
-                },
-                "quantity": 1,
-            }
-        ],
-        success_url=f"{settings.web_base_url}/subscription?status=success",
-        cancel_url=f"{settings.web_base_url}/subscription?status=cancel",
-        metadata={"user_id": str(user.id), "tariff_id": str(tariff.id)},
-    )
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": tariff.name},
+                        "unit_amount": int(tariff.price * 100),
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=f"{settings.web_base_url}/subscription?status=success",
+            cancel_url=f"{settings.web_base_url}/subscription?status=cancel",
+            metadata={"user_id": str(user.id), "tariff_id": str(tariff.id)},
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Stripe error: {str(e)}",
+        ) from e
     return {"checkout_url": session.url}
 
 
