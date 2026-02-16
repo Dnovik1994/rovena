@@ -5,16 +5,13 @@ import logging
 
 from redis import Redis
 
-from app.core.settings import get_settings
+from app.core.redis_client import get_sync_redis_decoded
 
 logger = logging.getLogger(__name__)
 
 
 def get_redis_client() -> Redis | None:
-    settings = get_settings()
-    if not settings.redis_url:
-        return None
-    return Redis.from_url(settings.redis_url, decode_responses=True)
+    return get_sync_redis_decoded()
 
 
 def _invite_key(user_id: int, now: datetime) -> str:

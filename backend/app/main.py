@@ -17,7 +17,6 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import sentry_sdk
-from redis import Redis
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 import stripe
@@ -32,6 +31,7 @@ from app.core.security import decode_access_token
 from app.core.settings import get_settings
 from app.services.websocket_manager import REDIS_WS_CHANNEL, manager
 from app.core.database import SessionLocal, get_db
+from app.core.redis_client import close_sync_redis, get_sync_redis
 from app.models.account import Account, AccountStatus
 from app.models.user import User
 from app.core.metrics import accounts_by_status, accounts_total, celery_queue_length
@@ -131,8 +131,12 @@ async def on_startup() -> None:
     if settings.redis_url:
         manager.configure_redis(settings.redis_url)
     try:
-        await asyncio.to_thread(lambda: Redis.from_url(settings.redis_url).ping())
-        logger.info("Redis connected")
+        redis_client = get_sync_redis()
+        if redis_client is not None:
+            await asyncio.to_thread(redis_client.ping)
+            logger.info("Redis connected")
+        else:
+            logger.warning("Redis connection failed: no redis_url configured")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Redis connection failed", extra={"error": str(exc)})
     await asyncio.to_thread(_bootstrap_admin)
@@ -150,6 +154,11 @@ async def on_startup() -> None:
         )
     logger.info("Application startup complete")
 
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await asyncio.to_thread(close_sync_redis)
+    logger.info("Sync Redis clients closed")
 
 
 
@@ -412,8 +421,11 @@ def metrics() -> Response:
             accounts_by_status.labels(status=status.value).set(count)
 
     try:
-        redis_client = Redis.from_url(settings.redis_url)
-        celery_queue_length.set(redis_client.llen("celery"))
+        redis_client = get_sync_redis()
+        if redis_client is not None:
+            celery_queue_length.set(redis_client.llen("celery"))
+        else:
+            celery_queue_length.set(0)
     except Exception:  # noqa: BLE001
         celery_queue_length.set(0)
 
