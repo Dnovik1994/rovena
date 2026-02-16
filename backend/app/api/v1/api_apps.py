@@ -85,8 +85,26 @@ def update_api_app(
     if not api_app:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API app not found")
 
+    update_data = payload.model_dump(exclude_unset=True)
+
+    if "max_accounts" in update_data:
+        linked_count = (
+            db.query(func.count(TelegramAccount.id))
+            .filter(TelegramAccount.api_app_id == app_id)
+            .scalar()
+        )
+        if update_data["max_accounts"] < linked_count:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Невозможно установить max_accounts={update_data['max_accounts']}: "
+                    f"к этому API-приложению привязано {linked_count} аккаунтов. "
+                    f"Сначала открепите лишние аккаунты."
+                ),
+            )
+
     _UPDATE_FIELDS = {"api_hash", "app_title", "max_accounts", "is_active", "notes"}
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    for field, value in update_data.items():
         if field not in _UPDATE_FIELDS:
             continue
         setattr(api_app, field, value)
