@@ -17,6 +17,7 @@ from pyrogram.errors import FloodWait
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.core.database import SessionLocal
 from app.core.settings import get_settings
+from app.core.tz import is_expired
 from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.services.websocket_manager import manager
@@ -213,3 +214,113 @@ def start_tg_warming(self, account_id: int) -> None:
                 account.last_error = "Warming task timed out"
                 db.commit()
     logger.info("event=start_tg_warming_finished account_id=%s", account_id)
+
+
+# ---------------------------------------------------------------------------
+# Periodic tasks (celery beat)
+# ---------------------------------------------------------------------------
+
+MAX_CONCURRENT_WARMING_TASKS = 5
+
+
+@celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
+def check_tg_cooldowns(self) -> None:
+    """Transition TelegramAccounts out of cooldown when cooldown_until expires.
+
+    - warming_actions_completed < target → back to ``warming``
+    - otherwise → ``active``
+    """
+    logger.info("event=check_tg_cooldowns_started task_id=%s", self.request.id)
+    try:
+        with SessionLocal() as db:
+            accounts = (
+                db.query(TelegramAccount)
+                .filter(TelegramAccount.status == TelegramAccountStatus.cooldown)
+                .filter(TelegramAccount.cooldown_until.isnot(None))
+                .all()
+            )
+            for account in accounts:
+                if not is_expired(account.cooldown_until):
+                    continue
+
+                target = account.target_warming_actions or 10
+                if account.warming_actions_completed < target:
+                    new_status = TelegramAccountStatus.warming
+                else:
+                    new_status = TelegramAccountStatus.active
+
+                old_status = account.status
+                account.status = new_status
+                account.cooldown_until = None
+                account.last_error = None
+
+                logger.info(
+                    "event=tg_cooldown_expired account_id=%s old_status=%s new_status=%s",
+                    account.id,
+                    old_status,
+                    new_status,
+                )
+                _broadcast_warming_update(
+                    account.owner_user_id,
+                    account.id,
+                    new_status,
+                    account.warming_actions_completed,
+                    target,
+                    None,
+                )
+            db.commit()
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit", self.request.id)
+    except Exception as exc:  # noqa: BLE001
+        sentry_sdk.capture_exception(exc)
+        logger.exception("check_tg_cooldowns failed: %s", exc)
+
+
+@celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
+def resume_tg_warming(self) -> None:
+    """Dispatch start_tg_warming for accounts stuck in ``warming`` status.
+
+    Guards:
+    - skip accounts whose cooldown_until is still in the future (task recently
+      set cooldown but status was reverted before commit — defensive)
+    - limit to MAX_CONCURRENT_WARMING_TASKS dispatches per run
+    """
+    logger.info("event=resume_tg_warming_started task_id=%s", self.request.id)
+    try:
+        with SessionLocal() as db:
+            accounts = (
+                db.query(TelegramAccount)
+                .filter(TelegramAccount.status == TelegramAccountStatus.warming)
+                .limit(MAX_CONCURRENT_WARMING_TASKS)
+                .all()
+            )
+
+            dispatched = 0
+            for account in accounts:
+                # Skip if cooldown_until is set and still in the future —
+                # means a warming task recently put it in cooldown but the
+                # status hasn't been updated yet (race).
+                if account.cooldown_until and not is_expired(account.cooldown_until):
+                    logger.debug(
+                        "event=resume_tg_warming_skip account_id=%s reason=cooldown_active",
+                        account.id,
+                    )
+                    continue
+
+                start_tg_warming.delay(account.id)
+                dispatched += 1
+                logger.info(
+                    "event=resume_tg_warming_dispatched account_id=%s",
+                    account.id,
+                )
+
+            logger.info(
+                "event=resume_tg_warming_finished dispatched=%s total_warming=%s",
+                dispatched,
+                len(accounts),
+            )
+    except SoftTimeLimitExceeded:
+        logger.warning("Task %s hit soft time limit", self.request.id)
+    except Exception as exc:  # noqa: BLE001
+        sentry_sdk.capture_exception(exc)
+        logger.exception("resume_tg_warming failed: %s", exc)

@@ -94,6 +94,16 @@ celery_app.conf.update(
         "socket_timeout": 5,
         "retry_on_timeout": False,
     },
+    beat_schedule={
+        "check-tg-cooldowns-every-2-min": {
+            "task": "app.workers.tg_warming_tasks.check_tg_cooldowns",
+            "schedule": 120.0,
+        },
+        "resume-tg-warming-every-5-min": {
+            "task": "app.workers.tg_warming_tasks.resume_tg_warming",
+            "schedule": 300.0,
+        },
+    },
 )
 logger.info("Task queue ready")
 
