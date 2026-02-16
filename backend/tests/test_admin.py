@@ -443,6 +443,88 @@ def test_admin_user_update_syncs_is_admin(client):
     assert resp.json()["is_admin"] is False
 
 
+# ─── Superadmin escalation prevention ────────────────────────────────
+
+
+def _create_superadmin(telegram_id: int) -> User:
+    with SessionLocal() as db:
+        user = User(
+            telegram_id=telegram_id,
+            username=f"superadmin{telegram_id}",
+            is_admin=True,
+            role=UserRole.superadmin,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+
+def test_admin_cannot_assign_superadmin_role(client):
+    """Regular admin must not be able to assign superadmin role."""
+    admin = _create_user(telegram_id=30001, is_admin=True)
+    target = _create_user(telegram_id=30002, is_admin=False)
+    token = create_access_token(str(admin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={"role": "superadmin"},
+        headers=headers,
+    )
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+    assert "Only superadmin can assign superadmin role" in resp.json()["error"]["message"]
+
+
+def test_admin_cannot_modify_superadmin_user(client):
+    """Regular admin must not be able to change role of a superadmin user."""
+    admin = _create_user(telegram_id=30003, is_admin=True)
+    superadmin = _create_superadmin(telegram_id=30004)
+    token = create_access_token(str(admin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{superadmin.id}",
+        json={"role": "user"},
+        headers=headers,
+    )
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+    assert "Only superadmin can modify superadmin users" in resp.json()["error"]["message"]
+
+
+def test_superadmin_can_assign_superadmin_role(client):
+    """Superadmin must be able to promote a user to superadmin."""
+    superadmin = _create_superadmin(telegram_id=30005)
+    target = _create_user(telegram_id=30006, is_admin=False)
+    token = create_access_token(str(superadmin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={"role": "superadmin"},
+        headers=headers,
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert resp.json()["role"] == "superadmin"
+    assert resp.json()["is_admin"] is True
+
+
+def test_superadmin_can_demote_superadmin_user(client):
+    """Superadmin must be able to demote another superadmin."""
+    superadmin = _create_superadmin(telegram_id=30007)
+    target_superadmin = _create_superadmin(telegram_id=30008)
+    token = create_access_token(str(superadmin.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{target_superadmin.id}",
+        json={"role": "admin"},
+        headers=headers,
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert resp.json()["role"] == "admin"
+
+
 def test_admin_users_list_derives_is_admin_from_role(client):
     """GET /admin/users must derive is_admin from role, not the DB column.
     When the DB has is_admin=False but role=admin, the response must show is_admin=True."""
