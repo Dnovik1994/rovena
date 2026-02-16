@@ -47,6 +47,7 @@ class VerifyReasonCode(str, Enum):
 
 
 VERIFY_LEASE_TTL_SECONDS = 900  # 15 minutes
+WARMING_LEASE_TTL_SECONDS = 5400  # 90 minutes
 
 
 class TelegramAccount(Base):
@@ -89,6 +90,10 @@ class TelegramAccount(Base):
     warming_joined_channels: Mapped[list | None] = mapped_column(JSON, nullable=True)
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ── Warming lease/lock fields ──
+    warming_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    warming_task_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_device_regenerated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -151,3 +156,44 @@ class TelegramAccount(Base):
         self.verifying_task_id = None
         self.verify_status = status.value
         self.verify_reason = reason.value if reason else None
+
+    # ── Warming lease ──
+
+    def acquire_warming_lease(self, task_id: str, db: Session) -> bool:
+        """Atomic lease acquisition for warming tasks.
+
+        Issues a single UPDATE ... WHERE that only succeeds if the row
+        has no active warming lease (or the existing lease has expired).
+        Returns True if this worker acquired the lease, False otherwise.
+        """
+        from app.core.tz import ensure_utc
+        now = ensure_utc(datetime.utcnow())
+        lease_ttl = timedelta(seconds=WARMING_LEASE_TTL_SECONDS)
+
+        result = db.execute(
+            update(TelegramAccount)
+            .where(
+                TelegramAccount.id == self.id,
+                or_(
+                    TelegramAccount.warming_task_id == None,  # noqa: E711
+                    TelegramAccount.warming_task_started_at == None,  # noqa: E711
+                    TelegramAccount.warming_task_started_at < now - lease_ttl,
+                ),
+            )
+            .values(
+                warming_task_id=task_id,
+                warming_task_started_at=now,
+            )
+        )
+        db.commit()
+
+        if result.rowcount == 1:
+            db.refresh(self)
+            return True
+        return False
+
+    def release_warming_lease(self, db: Session) -> None:
+        """Release the warming lease."""
+        self.warming_task_id = None
+        self.warming_task_started_at = None
+        db.commit()
