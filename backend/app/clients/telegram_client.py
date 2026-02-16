@@ -55,7 +55,22 @@ def _ensure_enabled() -> None:
 def _resolve_api_credentials(account: Any | None = None) -> tuple[int, str]:
     """Return (api_id, api_hash) from account's api_app or fall back to settings."""
     if account and getattr(account, "api_app", None):
-        return int(account.api_app.api_id), account.api_app.api_hash
+        api_app = account.api_app
+        if api_app.is_active:
+            return int(api_app.api_id), api_app.api_hash
+        # api_app is deactivated — log warning and try settings fallback
+        logger.warning(
+            "API app deactivated | api_app_id=%s api_id=%s account_id=%s — falling back to global settings",
+            api_app.id,
+            api_app.api_id,
+            account.id,
+        )
+        if settings.telegram_api_id and settings.telegram_api_hash:
+            return int(settings.telegram_api_id), settings.telegram_api_hash
+        raise RuntimeError(
+            f"API app {api_app.id} деактивировано для аккаунта {account.id}, "
+            "а глобальные TELEGRAM_API_ID/HASH не настроены"
+        )
     if settings.telegram_api_id and settings.telegram_api_hash:
         return int(settings.telegram_api_id), settings.telegram_api_hash
     raise RuntimeError("TELEGRAM_API_ID/HASH not configured and account has no api_app")
