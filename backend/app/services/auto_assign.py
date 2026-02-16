@@ -23,9 +23,11 @@ def assign_api_app(account: TelegramAccount, db: Session) -> TelegramApiApp:
     ----------------
     1. Only active apps (``is_active=True``).
     2. Current account count must be **< max_accounts**.
-    3. If *account* already has a proxy, exclude apps that are used by
-       other accounts on the **same proxy** — this keeps the
-       (api_id + IP) combination unique.
+    3. Exclude apps that are used by other accounts on the **same proxy**
+       (or both without a proxy) — this keeps the (api_id + IP)
+       combination unique.  The ``proxy_id IS NULL`` case needs explicit
+       application-level enforcement because the DB constraint
+       ``UNIQUE(api_app_id, proxy_id)`` treats every NULL as distinct.
     4. Among the remaining candidates pick the one with the fewest
        linked accounts.
 
@@ -61,8 +63,8 @@ def assign_api_app(account: TelegramAccount, db: Session) -> TelegramApiApp:
         )
     )
 
-    # 3) If the account already sits behind a proxy, avoid api_apps that
-    #    are already paired with other accounts on the same proxy.
+    # 3) Avoid api_apps that are already paired with other accounts on the
+    #    same proxy (or both without a proxy).
     if account.proxy_id is not None:
         used_on_same_proxy = (
             db.query(TelegramAccount.api_app_id)
@@ -74,6 +76,21 @@ def assign_api_app(account: TelegramAccount, db: Session) -> TelegramApiApp:
             .subquery()
         )
         query = query.filter(TelegramApiApp.id.notin_(used_on_same_proxy))
+    else:
+        # proxy_id IS NULL: the DB UNIQUE(api_app_id, proxy_id) constraint
+        # does NOT catch duplicates when proxy_id is NULL because in SQL
+        # NULL != NULL.  We enforce uniqueness at the application level:
+        # at most one account without a proxy per api_app.
+        used_without_proxy = (
+            db.query(TelegramAccount.api_app_id)
+            .filter(
+                TelegramAccount.proxy_id.is_(None),
+                TelegramAccount.api_app_id.isnot(None),
+                TelegramAccount.id != account.id,
+            )
+            .subquery()
+        )
+        query = query.filter(TelegramApiApp.id.notin_(used_without_proxy))
 
     # 4) Least loaded first
     result = query.order_by("cnt").first()
