@@ -1,5 +1,5 @@
 import { Account, AccountVerifyResponse } from "../types/account";
-import { AdminAccount, AdminProxy, AdminStats, AdminTariff, AdminUser } from "../types/admin";
+import { AdminAccount, AdminApiApp, AdminProxy, AdminStats, AdminTariff, AdminUser, ApiAppCreateResponse, ApiAppHashReveal } from "../types/admin";
 import { Campaign } from "../types/campaign";
 import { Contact } from "../types/contact";
 import { Project } from "../types/project";
@@ -359,4 +359,54 @@ export const updateOnboarding = (token: string, completed: boolean): Promise<voi
     { method: "PATCH", body: JSON.stringify({ onboarding_completed: completed }) },
     token
   );
+};
+
+// ─── API Apps ─────────────────────────────────────────────────────────
+
+export const fetchApiApps = (token: string): Promise<AdminApiApp[]> => {
+  return apiFetch<AdminApiApp[]>("/api-apps", {}, token);
+};
+
+export const createApiApp = (
+  token: string,
+  data: {
+    api_id: number;
+    api_hash: string;
+    app_title?: string;
+    max_accounts?: number;
+    registered_phone?: string;
+    notes?: string;
+  }
+): Promise<ApiAppCreateResponse> => {
+  return apiFetch<ApiAppCreateResponse>(
+    "/api-apps",
+    { method: "POST", body: JSON.stringify(data) },
+    token
+  );
+};
+
+export const updateApiApp = (
+  token: string,
+  id: number,
+  data: {
+    app_title?: string | null;
+    max_accounts?: number;
+    is_active?: boolean;
+    registered_phone?: string | null;
+    notes?: string | null;
+  }
+): Promise<AdminApiApp> => {
+  return apiFetch<AdminApiApp>(
+    `/api-apps/${id}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+    token
+  );
+};
+
+export const deleteApiApp = (token: string, id: number): Promise<void> => {
+  return apiFetch<void>(`/api-apps/${id}`, { method: "DELETE" }, token);
+};
+
+export const revealApiAppHash = (token: string, id: number): Promise<ApiAppHashReveal> => {
+  return apiFetch<ApiAppHashReveal>(`/api-apps/${id}/reveal-hash`, {}, token);
 };

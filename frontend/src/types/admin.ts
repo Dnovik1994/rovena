@@ -30,6 +30,13 @@ export interface AdminProxy {
   latency_ms?: number | null;
 }
 
+export interface ApiAppBrief {
+  id: number;
+  api_id: number;
+  app_title: string | null;
+  is_active: boolean;
+}
+
 export interface AdminAccount {
   id: number;
   telegram_id: number;
@@ -42,8 +49,40 @@ export interface AdminAccount {
     port: number;
     status: string | null;
   } | null;
+  api_app: ApiAppBrief | null;
   warming_actions_completed: number;
   target_warming_actions: number;
+}
+
+export interface AdminApiApp {
+  id: number;
+  api_id: number;
+  api_hash: string;
+  app_title: string | null;
+  registered_phone: string | null;
+  max_accounts: number;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  current_accounts_count: number;
+}
+
+export interface ApiAppCreateResponse {
+  id: number;
+  api_id: number;
+  api_hash: string;
+  app_title: string | null;
+  registered_phone: string | null;
+  max_accounts: number;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ApiAppHashReveal {
+  id: number;
+  api_id: number;
+  api_hash: string;
 }
 
 export interface AdminTariff {
