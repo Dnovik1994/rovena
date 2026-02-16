@@ -69,6 +69,8 @@ def create_api_app(
         api_hash=payload.api_hash,
         app_title=payload.app_title,
         max_accounts=payload.max_accounts,
+        registered_phone=payload.registered_phone,
+        notes=payload.notes,
     )
     db.add(api_app)
     db.commit()

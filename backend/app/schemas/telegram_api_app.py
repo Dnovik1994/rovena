@@ -17,6 +17,8 @@ class ApiAppCreate(SanitizedModel):
     api_hash: str = Field(min_length=1, max_length=64)
     app_title: str | None = Field(default=None, max_length=255)
     max_accounts: int = Field(default=3, ge=1)
+    registered_phone: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class ApiAppUpdate(SanitizedModel):
