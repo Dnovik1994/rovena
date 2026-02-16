@@ -708,6 +708,7 @@ def tg_warmup(
     account.status = TelegramAccountStatus.warming
     account.warming_started_at = datetime.now(timezone.utc)
     account.warming_actions_completed = 0
+    account.warming_joined_channels = None
     account.cooldown_until = None
     db.commit()
     db.refresh(account)
