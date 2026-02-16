@@ -41,6 +41,8 @@ class VerifyReasonCode(str, Enum):
     client_disabled = "client_disabled"
     phone_invalid = "phone_invalid"
     code_expired = "code_expired"
+    phone_banned = "phone_banned"
+    session_revoked = "session_revoked"
     unknown = "unknown"
 
 

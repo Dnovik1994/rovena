@@ -20,12 +20,15 @@ from app.core.tz import ensure_utc, is_expired, utcnow
 
 from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import (
+    AuthKeyUnregistered,
     BadRequest,
     FloodWait,
     PhoneCodeExpired,
     PhoneCodeInvalid,
+    PhoneNumberBanned,
     PhoneNumberInvalid,
     SessionPasswordNeeded,
+    SessionRevoked,
 )
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
@@ -344,6 +347,29 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             _cleanup_pre_auth_session(flow_id, log)
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
+        except PhoneNumberBanned:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Phone number is banned by Telegram"
+            account.status = TelegramAccountStatus.banned
+            account.last_error = "Phone number is banned by Telegram"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_banned.value).inc()
+            log.warning("event=send_code_failed reason=phone_banned %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+        except (SessionRevoked, AuthKeyUnregistered):
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Session revoked or auth key unregistered"
+            account.status = TelegramAccountStatus.error
+            account.session_encrypted = None
+            account.last_error = "Session revoked or auth key unregistered"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.session_revoked.value).inc()
+            log.warning("event=send_code_failed reason=session_revoked %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -614,6 +640,31 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             log.warning("event=confirm_code_failed reason=flood_wait wait_s=%s %s", exc.value, ctx)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
+        except PhoneNumberBanned:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Phone number is banned by Telegram"
+            account.status = TelegramAccountStatus.banned
+            account.last_error = "Phone number is banned by Telegram"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_banned.value).inc()
+            log.warning("event=confirm_code_failed reason=phone_banned %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+
+        except (SessionRevoked, AuthKeyUnregistered):
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Session revoked or auth key unregistered"
+            account.status = TelegramAccountStatus.error
+            account.session_encrypted = None
+            account.last_error = "Session revoked or auth key unregistered"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.session_revoked.value).inc()
+            log.warning("event=confirm_code_failed reason=session_revoked %s", ctx)
+            _cleanup_pre_auth_session(flow_id, log)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -782,6 +833,29 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             )
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
 
+        except PhoneNumberBanned:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Phone number is banned by Telegram"
+            account.status = TelegramAccountStatus.banned
+            account.last_error = "Phone number is banned by Telegram"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_banned.value).inc()
+            log.warning("event=confirm_password_failed reason=phone_banned %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+
+        except (SessionRevoked, AuthKeyUnregistered):
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Session revoked or auth key unregistered"
+            account.status = TelegramAccountStatus.error
+            account.session_encrypted = None
+            account.last_error = "Session revoked or auth key unregistered"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.session_revoked.value).inc()
+            log.warning("event=confirm_password_failed reason=session_revoked %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+
         except Exception as exc:
             err_msg = _sanitize_error(str(exc)[:500])
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -943,6 +1017,25 @@ async def _run_verify_account(account_id: int, task_id: str) -> None:
                 "event=verify_account_failed reason=floodwait wait_s=%d %s",
                 wait_s, ctx,
             )
+            _broadcast_account_update(account)
+
+        except PhoneNumberBanned:
+            account.status = TelegramAccountStatus.banned
+            account.last_error = "Phone number is banned by Telegram"
+            account.release_verify_lease(VerifyStatus.failed, VerifyReasonCode.phone_banned)
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_banned.value).inc()
+            log.warning("event=verify_account_failed reason=phone_banned %s", ctx)
+            _broadcast_account_update(account)
+
+        except (SessionRevoked, AuthKeyUnregistered):
+            account.status = TelegramAccountStatus.error
+            account.session_encrypted = None
+            account.last_error = "Session revoked or auth key unregistered"
+            account.release_verify_lease(VerifyStatus.failed, VerifyReasonCode.session_revoked)
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.session_revoked.value).inc()
+            log.warning("event=verify_account_failed reason=session_revoked %s", ctx)
             _broadcast_account_update(account)
 
         except Exception as exc:
