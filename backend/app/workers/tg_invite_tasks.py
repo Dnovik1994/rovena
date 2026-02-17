@@ -45,7 +45,7 @@ async def _resolve_target_chat_id(client, target_link: str) -> int:
     The calling account joins the target chat first (idempotent).
     """
     if _is_invite_link(target_link):
-        chat = await client.join_chat(target_link)
+        chat = await asyncio.wait_for(client.join_chat(target_link), timeout=10)
         return chat.id
 
     # Public username — strip URL prefix if present
@@ -55,10 +55,10 @@ async def _resolve_target_chat_id(client, target_link: str) -> int:
     username = username.lstrip("@")
 
     try:
-        chat = await client.join_chat(username)
+        chat = await asyncio.wait_for(client.join_chat(username), timeout=10)
         return chat.id
     except UserAlreadyParticipant:
-        chat = await client.get_chat(username)
+        chat = await asyncio.wait_for(client.get_chat(username), timeout=10)
         return chat.id
 
 
@@ -176,7 +176,9 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                 continue
             proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
             try:
-                client = create_tg_account_client(account, proxy)
+                client = create_tg_account_client(
+                    account, proxy, in_memory=False, workdir="/data/pyrogram_sessions",
+                )
             except TelegramClientDisabledError:
                 logger.warning("invite_dispatch: TG client disabled account_id=%d", acct_id)
                 for td in task_data:
@@ -202,14 +204,6 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
         try:
             async with client:
-                # Populate peer cache via get_dialogs (in_memory sessions have empty cache)
-                try:
-                    async for _ in client.get_dialogs():
-                        pass
-                    logger.info("invite_dispatch: peer cache populated via get_dialogs for account_id=%d", acct_id)
-                except Exception as exc:
-                    logger.warning("invite_dispatch: get_dialogs failed for account_id=%d: %s", acct_id, exc)
-
                 # Resolve target: use target_chat_id directly, or resolve target_link
                 if campaign_target_chat_id is not None:
                     target_chat_id = campaign_target_chat_id
@@ -268,7 +262,7 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
                     # Resolve user peer cache before invite
                     try:
-                        await client.get_users(telegram_id)
+                        await asyncio.wait_for(client.get_users(telegram_id), timeout=5)
                     except Exception:
                         pass  # If unresolvable — add_chat_members will raise
 
