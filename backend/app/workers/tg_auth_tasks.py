@@ -921,9 +921,9 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     _broadcast_flow_update(flow, account_id, owner_user_id)
                     return
 
-                # Bypass SQLAlchemy identity-map cache: read state
-                # directly so we see changes committed by the frontend.
-                db.expire_all()  # DIAGNOSTIC — REMOVE AFTER DEBUG
+                # Close current transaction so next SELECT sees fresh data
+                # (MySQL REPEATABLE-READ returns snapshot from first read).
+                db.commit()
                 row = db.execute(
                     select(TelegramAuthFlow.state, TelegramAuthFlow.meta_json)
                     .where(TelegramAuthFlow.id == flow_id)
@@ -933,18 +933,6 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     return
                 current_state = row.state
                 current_meta = row.meta_json or {}
-                # DIAGNOSTIC — REMOVE AFTER DEBUG (start)
-                log.info(
-                    "event=poll_diagnostic flow_id=%s row_state=%s row_state_type=%s "
-                    "raw=%r identity_map_size=%d is_async=%s",
-                    flow_id,
-                    current_state,
-                    type(current_state).__name__,
-                    row[0] if row else None,
-                    len(db.identity_map),
-                    asyncio.get_event_loop().is_running(),
-                )
-                # DIAGNOSTIC — REMOVE AFTER DEBUG (end)
 
                 if poll_count % 5 == 0:
                     log.info(
@@ -1087,8 +1075,9 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                             _broadcast_flow_update(flow, account_id, owner_user_id)
                             return
 
-                        # Bypass SQLAlchemy identity-map cache
-                        db.expire_all()  # DIAGNOSTIC — REMOVE AFTER DEBUG
+                        # Close current transaction so next SELECT sees fresh data
+                        # (MySQL REPEATABLE-READ returns snapshot from first read).
+                        db.commit()
                         row = db.execute(
                             select(TelegramAuthFlow.state, TelegramAuthFlow.meta_json)
                             .where(TelegramAuthFlow.id == flow_id)
@@ -1098,18 +1087,6 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                             return
                         current_state = row.state
                         current_meta = row.meta_json or {}
-                        # DIAGNOSTIC — REMOVE AFTER DEBUG (start)
-                        log.info(
-                            "event=poll_diagnostic_retry flow_id=%s row_state=%s row_state_type=%s "
-                            "raw=%r identity_map_size=%d is_async=%s",
-                            flow_id,
-                            current_state,
-                            type(current_state).__name__,
-                            row[0] if row else None,
-                            len(db.identity_map),
-                            asyncio.get_event_loop().is_running(),
-                        )
-                        # DIAGNOSTIC — REMOVE AFTER DEBUG (end)
 
                         if retry_poll_count % 5 == 0:
                             log.info(
