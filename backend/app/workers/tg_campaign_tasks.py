@@ -10,6 +10,7 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
+from app.workers.tg_timeout_helpers import collect_async_gen, safe_call
 from app.core.database import SessionLocal
 from app.models.contact import Contact
 from app.models.proxy import Proxy
@@ -88,7 +89,9 @@ async def _run_parse_source_members(
             if source_link.startswith("https://t.me/+") or source_link.startswith("https://t.me/joinchat/"):
                 # Invite link — join via link, use returned chat id
                 try:
-                    joined_chat = await client.join_chat(source_link)
+                    joined_chat = await safe_call(client.join_chat(source_link), timeout=30)
+                    if joined_chat is None:
+                        raise TimeoutError("join_chat timed out")
                     chat_identifier = joined_chat.id
                     logger.info(
                         "parse_source_members: joined via invite link source_id=%d chat_id=%s",
@@ -100,7 +103,9 @@ async def _run_parse_source_members(
                         source_id, type(exc).__name__,
                     )
                     try:
-                        joined_chat = await client.join_chat(source_link)
+                        joined_chat = await safe_call(client.join_chat(source_link), timeout=30)
+                        if joined_chat is None:
+                            raise TimeoutError("join_chat retry timed out")
                         chat_identifier = joined_chat.id
                     except Exception:
                         logger.error(
@@ -114,7 +119,9 @@ async def _run_parse_source_members(
                 if "t.me/" in username:
                     username = username.rstrip("/").split("t.me/")[-1]
                 try:
-                    joined_chat = await client.join_chat(username)
+                    joined_chat = await safe_call(client.join_chat(username), timeout=30)
+                    if joined_chat is None:
+                        raise TimeoutError("join_chat timed out")
                     chat_identifier = joined_chat.id
                     logger.info(
                         "parse_source_members: joined @%s source_id=%d chat_id=%s",
@@ -128,7 +135,10 @@ async def _run_parse_source_members(
                     chat_identifier = username
 
             # Parse members
-            async for member in client.get_chat_members(chat_identifier):
+            members = await collect_async_gen(
+                client.get_chat_members(chat_identifier), timeout=300, max_items=50_000,
+            )
+            for member in members:
                 user = member.user
                 if not user:
                     stats["skipped"] += 1

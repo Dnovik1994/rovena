@@ -10,6 +10,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.exc import IntegrityError
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client, get_client
+from app.workers.tg_timeout_helpers import collect_async_gen, safe_call
 from app.core.database import SessionLocal
 # Legacy Account model — kept for tasks that have not been migrated yet
 from app.models.account import Account, AccountStatus
@@ -222,7 +223,10 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                         if not campaign or not contact:
                             continue
                         try:
-                            await client.add_chat_members(target_link, [contact.telegram_id])
+                            await asyncio.wait_for(
+                                client.add_chat_members(target_link, [contact.telegram_id]),
+                                timeout=30,
+                            )
                             success += 1
                             campaign.progress = round((success / total_contacts) * 100, 2)
                             db.commit()
@@ -401,13 +405,13 @@ async def perform_low_risk_action(client) -> int:
     performed = 0
 
     async def _do_get_me():
-        await client.get_me()
+        await safe_call(client.get_me(), timeout=15)
 
     async def _do_read_telegram():
-        _ = [m async for m in client.get_chat_history("telegram", limit=5)]
+        _ = await collect_async_gen(client.get_chat_history("telegram", limit=5), timeout=60)
 
     async def _do_get_dialogs():
-        _ = [d async for d in client.get_dialogs(limit=3)]
+        _ = await collect_async_gen(client.get_dialogs(limit=3), timeout=60)
 
     actions = [_do_get_me, _do_read_telegram, _do_get_dialogs]
     random.shuffle(actions)

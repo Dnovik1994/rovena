@@ -15,6 +15,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import FloodWait
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
+from app.workers.tg_timeout_helpers import collect_async_gen, safe_call
 from app.core.database import SessionLocal
 from app.core.settings import get_settings
 from app.core.tz import is_expired
@@ -68,13 +69,13 @@ async def _perform_low_risk_action(client) -> int:
     performed = 0
 
     async def _do_get_me():
-        await client.get_me()
+        await safe_call(client.get_me(), timeout=15)
 
     async def _do_read_telegram():
-        _ = [m async for m in client.get_chat_history("telegram", limit=5)]
+        _ = await collect_async_gen(client.get_chat_history("telegram", limit=5), timeout=60)
 
     async def _do_get_dialogs():
-        _ = [d async for d in client.get_dialogs(limit=3)]
+        _ = await collect_async_gen(client.get_dialogs(limit=3), timeout=60)
 
     actions = [_do_get_me, _do_read_telegram, _do_get_dialogs]
     random.shuffle(actions)
@@ -94,36 +95,41 @@ async def _perform_low_risk_action(client) -> int:
 
 async def _action_read_channel(client, channel_username: str) -> int:
     """Read recent messages from a channel."""
-    messages = [m async for m in client.get_chat_history(channel_username, limit=random.randint(3, 10))]
+    messages = await collect_async_gen(
+        client.get_chat_history(channel_username, limit=random.randint(3, 10)),
+        timeout=60,
+    )
     return len(messages)
 
 
 async def _action_react_to_message(client, channel_username: str) -> bool:
     """React to a random recent message in a channel."""
-    messages = [m async for m in client.get_chat_history(channel_username, limit=5)]
+    messages = await collect_async_gen(
+        client.get_chat_history(channel_username, limit=5), timeout=60,
+    )
     if messages:
         msg = random.choice(messages)
         emoji = random.choice(["👍", "❤️", "🔥", "👏", "😂", "🎉", "💯", "👀"])
-        await client.send_reaction(channel_username, msg.id, emoji=emoji)
+        await safe_call(client.send_reaction(channel_username, msg.id, emoji=emoji), timeout=15)
         return True
     return False
 
 
 async def _action_join_channel(client, channel_username: str) -> bool:
     """Join a public channel or group."""
-    await client.join_chat(channel_username)
-    return True
+    result = await safe_call(client.join_chat(channel_username), timeout=30)
+    return result is not None
 
 
 async def _action_view_profile(client) -> bool:
     """View own profile (get_me)."""
-    await client.get_me()
-    return True
+    result = await safe_call(client.get_me(), timeout=15)
+    return result is not None
 
 
 async def _action_get_dialogs(client) -> bool:
     """Fetch dialog list."""
-    _ = [d async for d in client.get_dialogs(limit=random.randint(3, 10))]
+    _ = await collect_async_gen(client.get_dialogs(limit=random.randint(3, 10)), timeout=60)
     return True
 
 
@@ -134,8 +140,8 @@ async def _action_send_saved_message(client) -> bool:
         "📅 дела", "💡 идея", "✅ готово",
         str(random.randint(1000, 9999)),
     ]
-    await client.send_message("me", random.choice(phrases))
-    return True
+    result = await safe_call(client.send_message("me", random.choice(phrases)), timeout=15)
+    return result is not None
 
 
 async def _action_update_profile(client) -> bool:
@@ -144,8 +150,8 @@ async def _action_update_profile(client) -> bool:
         "", "🇺🇦", "👋", "📱", "🌍",
         "Life is good", "Hello world", "🎵🎶",
     ]
-    await client.update_profile(bio=random.choice(bios))
-    return True
+    result = await safe_call(client.update_profile(bio=random.choice(bios)), timeout=15)
+    return result is not None
 
 
 async def _action_set_profile_photo(client) -> bool:

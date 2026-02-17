@@ -11,6 +11,7 @@ from pyrogram.errors import FloodWait, PeerFlood, UserAlreadyParticipant, UserPr
 from sqlalchemy import update
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
+from app.workers.tg_timeout_helpers import safe_call
 from app.core.database import SessionLocal
 from app.models.invite_campaign import InviteCampaign, InviteCampaignStatus
 from app.models.invite_task import InviteTask, InviteTaskStatus
@@ -20,6 +21,9 @@ from app.models.tg_user import TgUser
 from app.workers import celery_app
 
 logger = logging.getLogger(__name__)
+
+# Maximum seconds a dispatch lease is considered valid
+_DISPATCH_LEASE_TTL_SECONDS = 600
 
 
 def _is_invite_link(link: str) -> bool:
@@ -62,14 +66,55 @@ async def _resolve_target_chat_id(client, target_link: str) -> int:
         return chat.id
 
 
-async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
+async def _run_invite_campaign_dispatch(campaign_id: int, task_id: str | None = None) -> None:
     """Core dispatch logic — runs inside asyncio.run()."""
 
-    # --- Phase 1: load campaign primitives -----------------------------------
+    now = datetime.now(timezone.utc)
+
+    # --- Phase 0: acquire dispatch lease (prevent parallel runs) -------------
     with SessionLocal() as db:
         campaign = db.get(InviteCampaign, campaign_id)
         if not campaign:
             logger.warning("invite_dispatch: campaign not found id=%d", campaign_id)
+            return
+
+        # Check if another dispatch is already running
+        if (
+            campaign.dispatch_task_id
+            and campaign.dispatch_task_id != task_id
+            and campaign.dispatch_started_at
+            and (now - campaign.dispatch_started_at).total_seconds() < _DISPATCH_LEASE_TTL_SECONDS
+        ):
+            logger.info(
+                "invite_dispatch: another dispatch running for campaign %d (task_id=%s)",
+                campaign_id, campaign.dispatch_task_id,
+            )
+            return
+
+        # Acquire lease
+        campaign.dispatch_task_id = task_id
+        campaign.dispatch_started_at = now
+        db.commit()
+
+    # --- Phase 1: load campaign primitives -----------------------------------
+    try:
+        await _run_invite_campaign_dispatch_inner(campaign_id)
+    finally:
+        # --- Release dispatch lease ---
+        with SessionLocal() as db:
+            campaign = db.get(InviteCampaign, campaign_id)
+            if campaign and campaign.dispatch_task_id == task_id:
+                campaign.dispatch_task_id = None
+                campaign.dispatch_started_at = None
+                db.commit()
+
+
+async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
+    """Inner dispatch logic, called after lease is acquired."""
+
+    with SessionLocal() as db:
+        campaign = db.get(InviteCampaign, campaign_id)
+        if not campaign:
             return
         if campaign.status != InviteCampaignStatus.active:
             logger.info("invite_dispatch: campaign %d not active (status=%s)", campaign_id, campaign.status)
@@ -268,7 +313,10 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
                     # Perform the invite (no DB session held)
                     try:
-                        await client.add_chat_members(target_chat_id, [telegram_id])
+                        await asyncio.wait_for(
+                            client.add_chat_members(target_chat_id, [telegram_id]),
+                            timeout=30,
+                        )
 
                         # Success
                         with SessionLocal() as db:
@@ -411,17 +459,24 @@ def invite_campaign_dispatch(self, campaign_id: int) -> None:
         self.request.id, campaign_id,
     )
     try:
-        asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+        asyncio.run(_run_invite_campaign_dispatch(campaign_id, task_id=self.request.id))
     except SoftTimeLimitExceeded:
         logger.warning(
             "invite_campaign_dispatch hit soft time limit | task_id=%s campaign_id=%d",
             self.request.id, campaign_id,
         )
-        # Reschedule if still active
+        # Release dispatch lease on timeout
         with SessionLocal() as db:
             campaign = db.get(InviteCampaign, campaign_id)
-            if campaign and campaign.status == InviteCampaignStatus.active:
-                invite_campaign_dispatch.apply_async(
-                    args=[campaign_id],
-                    countdown=60,
-                )
+            if campaign:
+                if campaign.dispatch_task_id == self.request.id:
+                    campaign.dispatch_task_id = None
+                    campaign.dispatch_started_at = None
+                if campaign.status == InviteCampaignStatus.active:
+                    db.commit()
+                    invite_campaign_dispatch.apply_async(
+                        args=[campaign_id],
+                        countdown=60,
+                    )
+                else:
+                    db.commit()
