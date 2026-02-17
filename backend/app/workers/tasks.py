@@ -9,9 +9,9 @@ from celery import current_task
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.exc import IntegrityError
 
-from app.clients.telegram_client import TelegramClientDisabledError, get_client
+from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client, get_client
 from app.core.database import SessionLocal
-# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+# Legacy Account model — kept for tasks that have not been migrated yet
 from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.core.limits import increment_daily_invites
@@ -20,6 +20,7 @@ from app.models.campaign_dispatch_log import CampaignDispatchLog, DispatchErrorT
 from app.models.contact import Contact
 from app.models.proxy import Proxy
 from app.models.target import Target
+from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.services.proxy_sync import sync_3proxy
 from app.services.proxy_validation import validate_proxy
 from app.services.websocket_manager import manager
@@ -108,6 +109,24 @@ def _set_account_cooldown(db, account: Account, seconds: int) -> None:
     )
 
 
+def _set_tg_account_cooldown(db, account: TelegramAccount, seconds: int) -> None:
+    """Set cooldown on a TelegramAccount and broadcast the update."""
+    account.status = TelegramAccountStatus.cooldown
+    account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    db.commit()
+    manager.broadcast_sync(
+        {
+            "type": "account_update",
+            "user_id": account.owner_user_id,
+            "account_id": account.id,
+            "status": _serialize_status(account.status),
+            "actions_completed": account.warming_actions_completed,
+            "target_actions": account.target_warming_actions,
+            "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
+        }
+    )
+
+
 async def _run_campaign_dispatch(campaign_id: int) -> None:
     # --- Phase 1: load IDs / primitives in a short-lived session ----------
     with SessionLocal() as db:
@@ -131,13 +150,12 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
             contacts_query = contacts_query.filter(Contact.source_id == campaign.source_id)
         contact_ids = [c.id for c in contacts_query.order_by(Contact.id.asc()).all()]
 
-        # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
         account_ids = [
             a.id
-            for a in db.query(Account)
-            .filter(Account.owner_id == campaign.owner_id)
-            .filter(Account.status == AccountStatus.active)
-            .order_by(Account.id.asc())
+            for a in db.query(TelegramAccount)
+            .filter(TelegramAccount.owner_user_id == campaign.owner_id)
+            .filter(TelegramAccount.status == TelegramAccountStatus.active)
+            .order_by(TelegramAccount.id.asc())
             .all()
         ]
 
@@ -162,23 +180,23 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
     success = 0
 
     for acct_id in account_ids:
-        # Load account & proxy in a short-lived session, build client
+        # Load TelegramAccount & proxy in a short-lived session, build client
         with SessionLocal() as db:
-            account = db.get(Account, acct_id)
-            if not account or account.status != AccountStatus.active:
+            account = db.get(TelegramAccount, acct_id)
+            if not account or account.status != TelegramAccountStatus.active:
                 continue
             proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
             try:
-                client = get_client(account, proxy)
+                client = create_tg_account_client(account, proxy)
             except TelegramClientDisabledError as exc:
                 _log_dispatch_error(
                     db, campaign_id, account.id, None,
                     DispatchErrorType.other, str(exc), owner_id=owner_id,
                 )
                 continue
-            except RuntimeError as e:
-                logger.error(f"Cannot create Telegram client: {e}")
-                account.status = AccountStatus.error
+            except Exception as e:
+                logger.error("Cannot create TG client: %s", e)
+                account.status = TelegramAccountStatus.error
                 account.last_error = str(e)
                 db.commit()
                 _log_dispatch_error(
@@ -200,7 +218,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                     with SessionLocal() as db:
                         campaign = db.get(Campaign, campaign_id)
                         contact = db.get(Contact, contact_id)
-                        account = db.get(Account, acct_id)
+                        account = db.get(TelegramAccount, acct_id)
                         if not campaign or not contact:
                             continue
                         try:
@@ -223,7 +241,7 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
                         except FloodWait as exc:
                             sentry_sdk.capture_exception(exc)
                             if account:
-                                _set_account_cooldown(db, account, exc.value)
+                                _set_tg_account_cooldown(db, account, exc.value)
                             _log_dispatch_error(
                                 db, campaign_id, acct_id, contact.id,
                                 DispatchErrorType.flood_wait,

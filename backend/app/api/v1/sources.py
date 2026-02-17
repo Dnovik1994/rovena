@@ -7,6 +7,7 @@ from app.models.project import Project
 from app.models.source import Source
 from app.models.user import User
 from app.schemas.source import SourceCreate, SourceResponse, SourceUpdate
+from app.workers.tg_campaign_tasks import parse_source_members
 
 router = APIRouter(tags=["sources"])
 
@@ -106,3 +107,24 @@ def delete_source(
     db.delete(source)
     db.commit()
     return None
+
+
+@router.post("/sources/{source_id}/parse")
+def start_parse_source(
+    source_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    source = (
+        db.query(Source)
+        .filter(Source.owner_id == current_user.id, Source.id == source_id)
+        .first()
+    )
+    if not source:
+        existing = db.get(Source, source_id)
+        if existing and existing.owner_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+
+    parse_source_members.delay(source_id)
+    return {"status": "parsing_started", "source_id": source_id}
