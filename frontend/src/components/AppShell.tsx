@@ -10,6 +10,7 @@ const navItems = [
   { to: "/targets", label: "Targets" },
   { to: "/contacts", label: "Contacts" },
   { to: "/campaigns", label: "Campaigns" },
+  { to: "/invite-campaigns", label: "Inviter" },
   { to: "/subscription", label: "Subscription" },
 ];
 

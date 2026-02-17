@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -649,6 +650,16 @@ const Accounts = (): JSX.Element => {
                     >
                       {account.status === "warming" ? "Warming..." : "Start Warmup"}
                     </button>
+                  )}
+                  {["verified", "active", "warming", "cooldown"].includes(account.status) && (
+                    <Link
+                      to={`/accounts/${account.id}/chats`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button className="rounded-lg border border-indigo-700 px-3 py-1 text-xs font-semibold text-indigo-300">
+                        View Chats
+                      </button>
+                    </Link>
                   )}
                   {canHealthCheck(account.status) && (
                     <button
