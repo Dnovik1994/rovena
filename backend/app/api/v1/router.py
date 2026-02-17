@@ -9,6 +9,7 @@ from app.api.v1 import (
     campaigns,
     contacts,
     health,
+    invite_campaigns,
     projects,
     proxies,
     sources,
@@ -31,5 +32,6 @@ router.include_router(tg_accounts.router)
 router.include_router(proxies.router)
 router.include_router(api_apps.router)
 router.include_router(admin.router, prefix="/admin")
+router.include_router(invite_campaigns.router)
 router.include_router(analytics.router)
 router.include_router(health.router)
