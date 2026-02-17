@@ -53,6 +53,6 @@ def downgrade() -> None:
 
     if "role" in columns:
         op.drop_column("users", "role")
-        op.execute("DROP TYPE IF EXISTS userrole")
+        # MySQL auto-drops ENUM with column, no separate DROP TYPE needed
     if "is_active" in columns:
         op.drop_column("users", "is_active")

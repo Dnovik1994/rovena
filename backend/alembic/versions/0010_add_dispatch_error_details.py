@@ -80,7 +80,7 @@ def downgrade() -> None:
         op.drop_column("campaign_dispatch_logs", "error_message")
     if "error_type" in log_columns:
         op.drop_column("campaign_dispatch_logs", "error_type")
-        op.execute("DROP TYPE IF EXISTS dispatcherrortype")
+        # MySQL auto-drops ENUM with column, no separate DROP TYPE needed
 
     if "is_blocked" in contact_columns:
         op.drop_column("contacts", "is_blocked")

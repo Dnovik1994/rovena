@@ -81,6 +81,5 @@ def downgrade() -> None:
 
     op.drop_table("proxies")
 
-    op.execute("DROP TYPE IF EXISTS accountstatus")
-    op.execute("DROP TYPE IF EXISTS proxytype")
-    op.execute("DROP TYPE IF EXISTS proxystatus")
+    # MySQL auto-drops ENUM with column, no separate DROP TYPE needed
+    pass

@@ -68,7 +68,10 @@ async def _run_parse_source_members(
         proxy = db.get(Proxy, tg_account.proxy_id) if tg_account.proxy_id else None
 
         try:
-            client = create_tg_account_client(tg_account, proxy)
+            client = create_tg_account_client(
+                tg_account, proxy,
+                in_memory=False, workdir="/data/pyrogram_sessions",
+            )
         except TelegramClientDisabledError:
             logger.warning("parse_source_members: TG client disabled, account_id=%d", account_id)
             return
@@ -82,7 +85,7 @@ async def _run_parse_source_members(
     try:
         async with client:
             # Get our own user id so we can skip ourselves
-            me = await client.get_me()
+            me = await asyncio.wait_for(client.get_me(), timeout=15)
             own_user_id = me.id
 
             # Join the source group/channel and resolve numeric chat_id

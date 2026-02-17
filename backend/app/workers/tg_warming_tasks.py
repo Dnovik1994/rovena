@@ -256,7 +256,10 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         try:
-            client = create_tg_account_client(account, proxy, phone=account.phone_e164)
+            client = create_tg_account_client(
+                account, proxy, phone=account.phone_e164,
+                in_memory=False, workdir="/data/pyrogram_sessions",
+            )
         except TelegramClientDisabledError:
             account.status = TelegramAccountStatus.cooldown
             account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=300)

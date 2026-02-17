@@ -327,7 +327,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             )
 
             t_connect = time.monotonic()
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=30)
             dc_before = await _get_dc_id(client)
             log.info(
                 "event=client_connected %s dc_id=%s elapsed_ms=%d",
@@ -336,7 +336,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
             _log_client_fingerprint(log, ctx, client)
 
             t_send = time.monotonic()
-            sent_code = await client.send_code(account.phone_e164)
+            sent_code = await asyncio.wait_for(client.send_code(account.phone_e164), timeout=30)
             dc_after = await _get_dc_id(client)
             log.info(
                 "event=telegram_send_code_ok %s type=%s dc_before=%s dc_after=%s elapsed_ms=%d",
@@ -460,7 +460,7 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
         finally:
             if client is not None:
                 try:
-                    await client.disconnect()
+                    await asyncio.wait_for(client.disconnect(), timeout=10)
                 except Exception:
                     pass
 
@@ -612,7 +612,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             )
 
             t_connect = time.monotonic()
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=30)
             confirm_dc = await _get_dc_id(client)
             log.info(
                 "event=client_connected %s dc_id=%s send_code_dc=%s "
@@ -642,11 +642,13 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             # ── sign_in with one-retry on DC-migrate error ──
             t_sign = time.monotonic()
             try:
-                signed_in = await client.sign_in(
+                signed_in = await asyncio.wait_for(client.sign_in(
                     phone_number=account.phone_e164,
                     phone_code_hash=phone_code_hash,
                     phone_code=code,
-                )
+                ), timeout=30)
+            except asyncio.TimeoutError:
+                raise
             except Exception as sign_exc:
                 if not _is_dc_migrate_error(sign_exc):
                     raise
@@ -656,21 +658,21 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                 log.warning(
                     "event=sign_in_dc_migrate target_dc=%d %s", target_dc, ctx,
                 )
-                await client.disconnect()
+                await asyncio.wait_for(client.disconnect(), timeout=10)
                 await _set_dc_id(client, target_dc)
-                await client.connect()
-                signed_in = await client.sign_in(
+                await asyncio.wait_for(client.connect(), timeout=30)
+                signed_in = await asyncio.wait_for(client.sign_in(
                     phone_number=account.phone_e164,
                     phone_code_hash=phone_code_hash,
                     phone_code=code,
-                )
+                ), timeout=30)
             log.info(
                 "event=sign_in_ok %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_sign) * 1000),
             )
 
             # Success - save session
-            session_string = await client.export_session_string()
+            session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
             account.session_encrypted = encrypt_session(session_string)
             account.tg_user_id = signed_in.id
             account.tg_username = getattr(signed_in, "username", None)
@@ -702,7 +704,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
             # Save the partial session so we can continue with password
             if client is not None:
                 try:
-                    session_string = await client.export_session_string()
+                    session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
                     account.session_encrypted = encrypt_session(session_string)
                 except Exception:
                     pass
@@ -791,7 +793,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
         finally:
             if client is not None:
                 try:
-                    await client.disconnect()
+                    await asyncio.wait_for(client.disconnect(), timeout=10)
                 except Exception:
                     pass
             _cleanup_pre_auth_session(flow_id, log)
@@ -874,7 +876,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
             )
 
             t_connect = time.monotonic()
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=30)
             dc_before = await _get_dc_id(client)
             log.info(
                 "event=client_connected %s dc_id=%s elapsed_ms=%d",
@@ -884,7 +886,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
 
             # ── Phase 2: Send code ───────────────────────────────────
             t_send = time.monotonic()
-            sent_code = await client.send_code(phone_number)
+            sent_code = await asyncio.wait_for(client.send_code(phone_number), timeout=30)
             dc_after = await _get_dc_id(client)
             log.info(
                 "event=telegram_send_code_ok %s type=%s dc_before=%s dc_after=%s elapsed_ms=%d",
@@ -985,11 +987,13 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                 try:
                     t_sign = time.monotonic()
                     try:
-                        signed_in = await client.sign_in(
+                        signed_in = await asyncio.wait_for(client.sign_in(
                             phone_number=phone_number,
                             phone_code_hash=phone_code_hash,
                             phone_code=code,
-                        )
+                        ), timeout=30)
+                    except asyncio.TimeoutError:
+                        raise
                     except Exception as sign_exc:
                         if not _is_dc_migrate_error(sign_exc):
                             raise
@@ -1000,14 +1004,14 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                             "event=sign_in_dc_migrate target_dc=%d %s",
                             target_dc, ctx,
                         )
-                        await client.disconnect()
+                        await asyncio.wait_for(client.disconnect(), timeout=10)
                         await _set_dc_id(client, target_dc)
-                        await client.connect()
-                        signed_in = await client.sign_in(
+                        await asyncio.wait_for(client.connect(), timeout=30)
+                        signed_in = await asyncio.wait_for(client.sign_in(
                             phone_number=phone_number,
                             phone_code_hash=phone_code_hash,
                             phone_code=code,
-                        )
+                        ), timeout=30)
 
                     log.info(
                         "event=sign_in_ok %s elapsed_ms=%d",
@@ -1015,7 +1019,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     )
 
                     # ── Success — save session ──
-                    session_string = await client.export_session_string()
+                    session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
                     account.session_encrypted = encrypt_session(session_string)
                     account.tg_user_id = signed_in.id
                     account.tg_username = getattr(signed_in, "username", None)
@@ -1056,7 +1060,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     )
                     if client is not None:
                         try:
-                            session_string = await client.export_session_string()
+                            session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
                             account.session_encrypted = encrypt_session(session_string)
                         except Exception:
                             pass
@@ -1220,7 +1224,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
         finally:
             if client is not None:
                 try:
-                    await client.disconnect()
+                    await asyncio.wait_for(client.disconnect(), timeout=10)
                 except Exception:
                     pass
             _cleanup_pre_auth_session(flow_id, log)
@@ -1315,23 +1319,23 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             client = create_tg_account_client(account, proxy, phone=account.phone_e164)
 
             t_connect = time.monotonic()
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=30)
             log.info(
                 "event=client_connected %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_connect) * 1000),
             )
 
             t_check = time.monotonic()
-            await client.check_password(password)
+            await asyncio.wait_for(client.check_password(password), timeout=30)
             log.info(
                 "event=check_password_ok %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_check) * 1000),
             )
 
-            session_string = await client.export_session_string()
+            session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
             account.session_encrypted = encrypt_session(session_string)
 
-            me = await client.get_me()
+            me = await asyncio.wait_for(client.get_me(), timeout=15)
             account.tg_user_id = me.id
             account.tg_username = me.username
             account.first_name = me.first_name
@@ -1428,7 +1432,7 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
         finally:
             if client is not None:
                 try:
-                    await client.disconnect()
+                    await asyncio.wait_for(client.disconnect(), timeout=10)
                 except Exception:
                     pass
 
@@ -1500,14 +1504,14 @@ async def _run_verify_account(account_id: int, task_id: str) -> None:
             client = create_tg_account_client(account, proxy, phone=account.phone_e164)
 
             t_connect = time.monotonic()
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=30)
             log.info(
                 "event=verify_client_connected %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_connect) * 1000),
             )
 
             t_get_me = time.monotonic()
-            me = await client.get_me()
+            me = await asyncio.wait_for(client.get_me(), timeout=15)
             log.info(
                 "event=verify_get_me_ok %s elapsed_ms=%d",
                 ctx, int((time.monotonic() - t_get_me) * 1000),
@@ -1611,7 +1615,7 @@ async def _run_verify_account(account_id: int, task_id: str) -> None:
             active_verifications.dec()
             if client is not None:
                 try:
-                    await client.disconnect()
+                    await asyncio.wait_for(client.disconnect(), timeout=10)
                 except Exception:
                     pass
 
