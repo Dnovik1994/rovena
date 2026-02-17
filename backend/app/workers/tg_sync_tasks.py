@@ -12,6 +12,7 @@ from pyrogram.errors import (
     ChatAdminRequired,
     FloodWait,
 )
+from sqlalchemy.exc import IntegrityError
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.core.database import SessionLocal
@@ -208,31 +209,38 @@ async def _run_sync_account(account_id: int) -> None:
                         is_admin = True
 
                     # Upsert tg_account_chats
-                    existing_chat = db.query(TgAccountChat).filter(
-                        TgAccountChat.account_id == account_id,
-                        TgAccountChat.chat_id == chat.id,
-                    ).first()
+                    try:
+                        existing_chat = db.query(TgAccountChat).filter(
+                            TgAccountChat.account_id == account_id,
+                            TgAccountChat.chat_id == chat.id,
+                        ).first()
 
-                    if existing_chat:
-                        existing_chat.title = chat.title
-                        existing_chat.username = chat.username
-                        existing_chat.members_count = getattr(chat, "members_count", None)
-                        existing_chat.is_admin = is_admin
-                        existing_chat.updated_at = datetime.now(timezone.utc)
-                    else:
-                        new_chat = TgAccountChat(
-                            account_id=account_id,
-                            chat_id=chat.id,
-                            title=chat.title,
-                            username=chat.username,
-                            chat_type=chat_type,
-                            members_count=getattr(chat, "members_count", None),
-                            is_creator=is_creator,
-                            is_admin=is_admin,
+                        if existing_chat:
+                            existing_chat.title = chat.title
+                            existing_chat.username = chat.username
+                            existing_chat.members_count = getattr(chat, "members_count", None)
+                            existing_chat.is_admin = is_admin
+                            existing_chat.updated_at = datetime.now(timezone.utc)
+                        else:
+                            new_chat = TgAccountChat(
+                                account_id=account_id,
+                                chat_id=chat.id,
+                                title=chat.title,
+                                username=chat.username,
+                                chat_type=chat_type,
+                                members_count=getattr(chat, "members_count", None),
+                                is_creator=is_creator,
+                                is_admin=is_admin,
+                            )
+                            db.add(new_chat)
+
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
+                        log.debug(
+                            "event=sync_chat_duplicate account_id=%d chat_id=%d",
+                            account_id, chat.id,
                         )
-                        db.add(new_chat)
-
-                    db.commit()
                     chat_count += 1
                     await asyncio.sleep(random.uniform(0.5, 1.5))
 

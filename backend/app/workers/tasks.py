@@ -398,22 +398,27 @@ async def _run_account_health_check(account_id: int) -> None:
 
 
 async def perform_low_risk_action(client) -> int:
-    actions = [
-        client.get_me,
-        lambda: client.get_history("telegram", limit=5),
-        lambda: client.get_dialogs(limit=3),
-    ]
-    if random.random() < 0.4:
-        actions.append(lambda: client.join_chat("public_test_group"))
+    performed = 0
 
+    async def _do_get_me():
+        await client.get_me()
+
+    async def _do_read_telegram():
+        _ = [m async for m in client.get_chat_history("telegram", limit=5)]
+
+    async def _do_get_dialogs():
+        _ = [d async for d in client.get_dialogs(limit=3)]
+
+    actions = [_do_get_me, _do_read_telegram, _do_get_dialogs]
     random.shuffle(actions)
-    selected = actions[: random.randint(3, min(8, len(actions)))]
+    selected = actions[: random.randint(2, len(actions))]
 
     for action in selected:
         await action()
+        performed += 1
         await asyncio.sleep(random.uniform(60, 300))
 
-    return len(selected)
+    return performed
 
 
 # TODO: заменить Account на TelegramAccount для поддержки per-account api_id

@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import BigInteger, DateTime, Integer, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,7 +22,7 @@ class InviteCampaign(Base):
     __tablename__ = "invite_campaigns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    owner_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[InviteCampaignStatus] = mapped_column(
         SqlEnum(InviteCampaignStatus), default=InviteCampaignStatus.draft,
