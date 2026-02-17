@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import EmptyState from "../components/EmptyState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
@@ -71,7 +72,7 @@ const Contacts = (): JSX.Element => {
   return (
     <section className="page">
       <div>
-        <h2 className="page__title">Contacts</h2>
+        <h2 className="page__title">Контакты</h2>
         <p className="page__subtitle">Спарсенные контакты аудитории.</p>
       </div>
 
@@ -84,8 +85,12 @@ const Contacts = (): JSX.Element => {
       ) : !summary || summary.total_contacts === 0 ? (
         <EmptyState
           title="Нет спарсенных контактов"
-          description="Перейдите в Accounts → View Chats и спарсите участников."
-        />
+          description="Перейдите в Аккаунты → Чаты и спарсите участников."
+        >
+          <Link to="/accounts" className="btn btn--primary mt-3">
+            Перейти к аккаунтам
+          </Link>
+        </EmptyState>
       ) : (
         <>
           {/* ── Total contacts ──── */}

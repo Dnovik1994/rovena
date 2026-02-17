@@ -3,15 +3,15 @@ import { NavLink } from "react-router-dom";
 
 import Toast from "./Toast";
 const navItems = [
-  { to: "/", label: "Dashboard" },
-  { to: "/accounts", label: "Accounts" },
+  { to: "/", label: "Главная" },
+  { to: "/accounts", label: "Аккаунты" },
   { to: "/projects", label: "Projects" },
   { to: "/sources", label: "Sources" },
   { to: "/targets", label: "Targets" },
-  { to: "/contacts", label: "Contacts" },
+  { to: "/contacts", label: "Контакты" },
   { to: "/campaigns", label: "Campaigns" },
-  { to: "/invite-campaigns", label: "Inviter" },
-  { to: "/subscription", label: "Subscription" },
+  { to: "/invite-campaigns", label: "Инвайтер" },
+  { to: "/subscription", label: "Подписка" },
 ];
 
 interface AppShellProps {
