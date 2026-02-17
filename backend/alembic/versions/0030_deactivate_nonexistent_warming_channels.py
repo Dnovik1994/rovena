@@ -2,16 +2,16 @@
 
 Sets is_active=0 for channels whose existence could not be verified.
 
-Revision ID: 0029_deactivate_nonexistent_warming_channels
-Revises: 0028_add_parsing_and_invite_system
+Revision ID: 0030_deactivate_nonexistent_warming_channels
+Revises: 0029_add_target_chat_id_nullable_source
 Create Date: 2026-02-17 06:00:00.000000
 """
 
 from alembic import op
 from sqlalchemy import inspect as sa_inspect, text
 
-revision = "0029_deactivate_nonexistent_warming_channels"
-down_revision = "0028_add_parsing_and_invite_system"
+revision = "0030_deactivate_nonexistent_warming_channels"
+down_revision = "0029_add_target_chat_id_nullable_source"
 branch_labels = None
 depends_on = None
 

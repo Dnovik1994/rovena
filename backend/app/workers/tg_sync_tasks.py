@@ -15,6 +15,7 @@ from pyrogram.errors import (
 from sqlalchemy.exc import IntegrityError
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
+from app.workers.tg_timeout_helpers import collect_async_gen
 from app.core.database import SessionLocal
 from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
@@ -174,8 +175,9 @@ async def _run_sync_account(account_id: int) -> None:
         # ── PHASE 1: Sync dialogs ────────────────────────────────────
         try:
             async with client:
+                dialogs = await collect_async_gen(client.get_dialogs(), timeout=120)
                 chat_count = 0
-                async for dialog in client.get_dialogs():
+                for dialog in dialogs:
                     chat = dialog.chat
                     if not chat:
                         continue
@@ -242,7 +244,6 @@ async def _run_sync_account(account_id: int) -> None:
                             account_id, chat.id,
                         )
                     chat_count += 1
-                    await asyncio.sleep(random.uniform(0.5, 1.5))
 
                 log.info(
                     "event=sync_chats_done account_id=%d synced=%d",
@@ -271,7 +272,12 @@ async def _run_sync_account(account_id: int) -> None:
                 for account_chat in groups:
                     parsed_count = 0
                     try:
-                        async for member in client.get_chat_members(account_chat.chat_id):
+                        members = await collect_async_gen(
+                            client.get_chat_members(account_chat.chat_id),
+                            timeout=300,
+                            max_items=50_000,
+                        )
+                        for member in members:
                             if not member.user:
                                 continue
                             if member.user.is_bot or member.user.is_deleted:
@@ -288,7 +294,6 @@ async def _run_sync_account(account_id: int) -> None:
                             # Batch commit every N records
                             if parsed_count % _BATCH_COMMIT_SIZE == 0:
                                 db.commit()
-                                await asyncio.sleep(random.uniform(0.3, 0.8))
 
                         db.commit()
 
@@ -399,7 +404,12 @@ async def _run_parse_single_chat(account_id: int, chat_id: int) -> None:
         parsed_count = 0
         try:
             async with client:
-                async for member in client.get_chat_members(chat_id):
+                members = await collect_async_gen(
+                    client.get_chat_members(chat_id),
+                    timeout=300,
+                    max_items=50_000,
+                )
+                for member in members:
                     if not member.user:
                         continue
 
@@ -410,7 +420,6 @@ async def _run_parse_single_chat(account_id: int, chat_id: int) -> None:
 
                     if parsed_count % _BATCH_COMMIT_SIZE == 0:
                         db.commit()
-                        await asyncio.sleep(random.uniform(0.3, 0.8))
 
                 db.commit()
 

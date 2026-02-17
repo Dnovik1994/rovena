@@ -46,6 +46,10 @@ class InviteCampaign(Base):
     invites_completed: Mapped[int] = mapped_column(Integer, default=0)
     invites_failed: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Dispatch lease (prevents parallel dispatches for the same campaign)
+    dispatch_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dispatch_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
