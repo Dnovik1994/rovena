@@ -131,6 +131,7 @@ services:
     volumes:
       - 3proxy-cfg:/app/3proxy-cfg
       - pre-auth-sessions:/data/pyrogram_pre_auth
+      - pyrogram-sessions:/data/pyrogram_sessions
     environment:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -236,3 +237,4 @@ volumes:
   redis-data:
   3proxy-cfg:
   pre-auth-sessions:
+  pyrogram-sessions:
