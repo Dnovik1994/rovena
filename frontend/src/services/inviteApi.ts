@@ -5,6 +5,8 @@ import type {
   InviteCampaign,
   InviteCampaignDetail,
   CreateInviteCampaign,
+  ParsedContactsSummary,
+  AdminChat,
 } from "../types/invite";
 
 // Account chats
@@ -25,6 +27,21 @@ export const fetchChatMembers = (
     {},
     token,
   );
+
+export const parseChat = (token: string, accountId: number, chatId: number) =>
+  apiFetch<{ status: string; chat_id: number }>(
+    `/tg-accounts/${accountId}/chats/${chatId}/parse`,
+    { method: "POST" },
+    token,
+  );
+
+// Parsed contacts
+export const fetchParsedContactsSummary = (token: string) =>
+  apiFetch<ParsedContactsSummary>("/parsed-contacts/summary", {}, token);
+
+// Admin chats (where user is admin)
+export const fetchMyAdminChats = (token: string) =>
+  apiFetch<AdminChat[]>("/my-admin-chats", {}, token);
 
 // Invite campaigns
 export const fetchInviteCampaigns = (token: string) =>

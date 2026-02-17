@@ -9,11 +9,17 @@ import {
   startInviteCampaign,
   pauseInviteCampaign,
   resumeInviteCampaign,
-  fetchAccountChats,
+  fetchMyAdminChats,
+  fetchParsedContactsSummary,
 } from "../services/inviteApi";
 import { fetchTgAccounts } from "../services/resources";
 import { useAuth } from "../stores/auth";
-import type { InviteCampaign, InviteCampaignDetail, AccountChat, CreateInviteCampaign } from "../types/invite";
+import type {
+  InviteCampaign,
+  InviteCampaignDetail,
+  CreateInviteCampaign,
+  AdminChat,
+} from "../types/invite";
 import type { TgAccount } from "../types/telegram_account";
 
 /* ── Helper: extract error message ──────────────────────────────── */
@@ -80,18 +86,20 @@ const InviteCampaigns = (): JSX.Element => {
 
   // Form fields
   const [formName, setFormName] = useState("");
-  const [formTargetLink, setFormTargetLink] = useState("");
-  const [formTargetTitle, setFormTargetTitle] = useState("");
   const [formMaxInvites, setFormMaxInvites] = useState(100);
   const [formInvitesPerHour, setFormInvitesPerHour] = useState(10);
-  const [formMaxAccounts, setFormMaxAccounts] = useState(1);
 
-  // Account & chat selection for source
+  // Account selection (checkboxes)
   const [accounts, setAccounts] = useState<TgAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [accountChats, setAccountChats] = useState<AccountChat[]>([]);
-  const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
-  const [loadingChats, setLoadingChats] = useState(false);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
+
+  // Target chat (admin chats dropdown)
+  const [adminChats, setAdminChats] = useState<AdminChat[]>([]);
+  const [selectedTargetChatId, setSelectedTargetChatId] = useState<number | null>(null);
+  const [loadingAdminChats, setLoadingAdminChats] = useState(false);
+
+  // Available contacts
+  const [availableContacts, setAvailableContacts] = useState<number>(0);
 
   /* ── Load campaigns ─── */
   const loadCampaigns = useCallback(async () => {
@@ -112,80 +120,52 @@ const InviteCampaigns = (): JSX.Element => {
     loadCampaigns();
   }, [loadCampaigns]);
 
-  /* ── Load accounts for form ─── */
-  const loadAccounts = useCallback(async () => {
+  /* ── Load form data (accounts, admin chats, available contacts) ─── */
+  const loadFormData = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await fetchTgAccounts(token);
-      // Only show accounts that can be used for inviting
-      setAccounts(data.filter((a) => ["verified", "active", "warming", "cooldown"].includes(a.status)));
+      const [accs, chats, summary] = await Promise.all([
+        fetchTgAccounts(token),
+        fetchMyAdminChats(token).catch(() => [] as AdminChat[]),
+        fetchParsedContactsSummary(token).catch(() => ({ total_contacts: 0, chats: [] })),
+      ]);
+      setAccounts(accs.filter((a) => a.status === "active"));
+      setAdminChats(chats);
+      setAvailableContacts(summary.total_contacts);
     } catch {
-      // ignore — form will show empty list
+      // partial failure is ok — individual catches above
     }
   }, [token]);
-
-  /* ── Load chats when account selected ─── */
-  useEffect(() => {
-    if (!token || !selectedAccountId) {
-      setAccountChats([]);
-      setSelectedChatId(null);
-      return;
-    }
-    let cancelled = false;
-    const loadChats = async () => {
-      setLoadingChats(true);
-      try {
-        const data = await fetchAccountChats(token, selectedAccountId);
-        if (!cancelled) {
-          // Only show groups/supergroups as source
-          setAccountChats(data.filter((c) => c.chat_type !== "channel"));
-        }
-      } catch {
-        if (!cancelled) setAccountChats([]);
-      } finally {
-        if (!cancelled) setLoadingChats(false);
-      }
-    };
-    loadChats();
-    return () => { cancelled = true; };
-  }, [token, selectedAccountId]);
-
-  /* ── Pre-fill from sessionStorage (from AccountChats "Use as Source") ─── */
-  useEffect(() => {
-    const saved = sessionStorage.getItem("invite_source_chat");
-    if (saved) {
-      try {
-        const data = JSON.parse(saved) as {
-          account_id: number;
-          chat_id: number;
-          title: string;
-          members_count: number;
-        };
-        setSelectedAccountId(data.account_id);
-        setSelectedChatId(data.chat_id);
-        setShowForm(true);
-        sessionStorage.removeItem("invite_source_chat");
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
 
   /* ── Open create form ─── */
   const handleOpenForm = () => {
     setShowForm(true);
-    loadAccounts();
+    setLoadingAdminChats(true);
+    loadFormData().finally(() => setLoadingAdminChats(false));
+  };
+
+  /* ── Toggle account selection ─── */
+  const toggleAccount = (id: number) => {
+    setSelectedAccountIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   /* ── Create campaign ─── */
   const handleCreate = async () => {
-    if (!token || !selectedChatId) return;
+    if (!token || !selectedTargetChatId) return;
     if (!formName.trim()) {
-      setError("Campaign name is required");
+      setError("Введите название кампании");
       return;
     }
-    if (!formTargetLink.trim()) {
-      setError("Target link is required");
+    if (selectedAccountIds.size === 0) {
+      setError("Выберите хотя бы один аккаунт");
       return;
     }
     try {
@@ -193,20 +173,17 @@ const InviteCampaigns = (): JSX.Element => {
       setError(null);
       const payload: CreateInviteCampaign = {
         name: formName.trim(),
-        source_chat_id: selectedChatId,
-        target_link: formTargetLink.trim(),
+        target_chat_id: selectedTargetChatId,
         max_invites_total: formMaxInvites,
         invites_per_hour_per_account: formInvitesPerHour,
-        max_accounts: formMaxAccounts,
+        max_accounts: selectedAccountIds.size,
+        source_chat_id: null,
       };
-      if (formTargetTitle.trim()) {
-        payload.target_title = formTargetTitle.trim();
-      }
       const created = await createInviteCampaign(token, payload);
       setCampaigns((prev) => [created, ...prev]);
       setShowForm(false);
       resetForm();
-      setActionMessage("Campaign created successfully.");
+      setActionMessage("Кампания создана.");
     } catch (err) {
       setError(extractError(err));
     } finally {
@@ -216,14 +193,13 @@ const InviteCampaigns = (): JSX.Element => {
 
   const resetForm = () => {
     setFormName("");
-    setFormTargetLink("");
-    setFormTargetTitle("");
     setFormMaxInvites(100);
     setFormInvitesPerHour(10);
-    setFormMaxAccounts(1);
-    setSelectedAccountId(null);
-    setSelectedChatId(null);
-    setAccountChats([]);
+    setSelectedAccountIds(new Set());
+    setSelectedTargetChatId(null);
+    setAdminChats([]);
+    setAccounts([]);
+    setAvailableContacts(0);
   };
 
   /* ── Campaign actions ─── */
@@ -327,87 +303,78 @@ const InviteCampaigns = (): JSX.Element => {
             className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold mb-4">Create Campaign</h3>
+            <h3 className="text-base font-semibold mb-4">Создать кампанию</h3>
             <div className="space-y-3">
               {/* Name */}
               <div>
-                <label className="label">Name</label>
+                <label className="label">Название</label>
                 <input
                   className="input"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  placeholder="Campaign name"
+                  placeholder="Название кампании"
                 />
               </div>
 
-              {/* Account select */}
+              {/* Accounts (checkboxes) */}
               <div>
-                <label className="label">Account</label>
-                <select
-                  className="input"
-                  value={selectedAccountId ?? ""}
-                  onChange={(e) => {
-                    const val = e.target.value ? Number(e.target.value) : null;
-                    setSelectedAccountId(val);
-                    setSelectedChatId(null);
-                  }}
-                >
-                  <option value="">Select account...</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.tg_username ? `@${a.tg_username}` : a.phone_e164} ({a.status})
-                    </option>
-                  ))}
-                </select>
+                <label className="label">Аккаунты</label>
+                {accounts.length === 0 ? (
+                  <p className="text-xs text-slate-500">
+                    {loadingAdminChats ? "Загрузка..." : "Нет активных аккаунтов"}
+                  </p>
+                ) : (
+                  <div className="space-y-1 mt-1">
+                    {accounts.map((a) => (
+                      <label
+                        key={a.id}
+                        className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2 cursor-pointer hover:border-indigo-400"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAccountIds.has(a.id)}
+                          onChange={() => toggleAccount(a.id)}
+                          className="accent-indigo-500"
+                        />
+                        <span className="text-sm text-slate-200">
+                          {a.tg_username ? `@${a.tg_username}` : a.phone_e164}
+                        </span>
+                        <span className="ml-auto text-xs text-slate-500">{a.status}</span>
+                      </label>
+                    ))}
+                    <p className="text-xs text-slate-400 mt-1">
+                      Выбрано: {selectedAccountIds.size} из {accounts.length} аккаунтов
+                    </p>
+                  </div>
+                )}
               </div>
 
-              {/* Source chat select */}
+              {/* Target chat (admin chats dropdown) */}
               <div>
-                <label className="label">Source Chat</label>
-                {loadingChats ? (
-                  <p className="text-xs text-slate-500">Loading chats...</p>
+                <label className="label">Целевая группа</label>
+                {loadingAdminChats ? (
+                  <p className="text-xs text-slate-500">Загрузка...</p>
                 ) : (
                   <select
                     className="input"
-                    value={selectedChatId ?? ""}
-                    onChange={(e) => setSelectedChatId(e.target.value ? Number(e.target.value) : null)}
-                    disabled={!selectedAccountId}
+                    value={selectedTargetChatId ?? ""}
+                    onChange={(e) =>
+                      setSelectedTargetChatId(e.target.value ? Number(e.target.value) : null)
+                    }
                   >
-                    <option value="">Select source chat...</option>
-                    {accountChats.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title} ({c.members_count} members)
+                    <option value="">Выберите группу...</option>
+                    {adminChats.map((c) => (
+                      <option key={c.id} value={c.chat_id}>
+                        {c.title} ({c.members_count})
                       </option>
                     ))}
                   </select>
                 )}
               </div>
 
-              {/* Target link */}
-              <div>
-                <label className="label">Target Link</label>
-                <input
-                  className="input"
-                  value={formTargetLink}
-                  onChange={(e) => setFormTargetLink(e.target.value)}
-                  placeholder="https://t.me/+invite_link or @username"
-                />
-              </div>
-
-              {/* Target title */}
-              <div>
-                <label className="label">Target Title (optional)</label>
-                <input
-                  className="input"
-                  value={formTargetTitle}
-                  onChange={(e) => setFormTargetTitle(e.target.value)}
-                  placeholder="Target group name"
-                />
-              </div>
-
               {/* Max invites */}
               <div>
-                <label className="label">Max Invites Total</label>
+                <label className="label">Количество контактов</label>
                 <input
                   className="input"
                   type="number"
@@ -415,11 +382,14 @@ const InviteCampaigns = (): JSX.Element => {
                   value={formMaxInvites}
                   onChange={(e) => setFormMaxInvites(Number(e.target.value))}
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  Доступно: {availableContacts} контактов
+                </p>
               </div>
 
               {/* Invites per hour per account */}
               <div>
-                <label className="label">Invites per Hour per Account</label>
+                <label className="label">Контактов в час на аккаунт</label>
                 <input
                   className="input"
                   type="number"
@@ -429,32 +399,25 @@ const InviteCampaigns = (): JSX.Element => {
                 />
               </div>
 
-              {/* Max accounts */}
-              <div>
-                <label className="label">Max Accounts</label>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  value={formMaxAccounts}
-                  onChange={(e) => setFormMaxAccounts(Number(e.target.value))}
-                />
-              </div>
-
               {/* Actions */}
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={handleCreate}
-                  disabled={formSubmitting || !selectedChatId || !formName.trim() || !formTargetLink.trim()}
+                  disabled={
+                    formSubmitting ||
+                    !selectedTargetChatId ||
+                    !formName.trim() ||
+                    selectedAccountIds.size === 0
+                  }
                   className="btn btn--primary text-xs disabled:opacity-50"
                 >
-                  {formSubmitting ? "Creating..." : "Create"}
+                  {formSubmitting ? "Создаём..." : "Создать"}
                 </button>
                 <button
                   onClick={() => { setShowForm(false); resetForm(); }}
                   className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-200"
                 >
-                  Cancel
+                  Отмена
                 </button>
               </div>
             </div>

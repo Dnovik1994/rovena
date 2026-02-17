@@ -47,10 +47,31 @@ export interface InviteCampaignDetail extends InviteCampaign {
 
 export interface CreateInviteCampaign {
   name: string;
-  source_chat_id: number;
-  target_link: string;
-  target_title?: string;
+  target_chat_id: number;
   max_invites_total: number;
   invites_per_hour_per_account: number;
   max_accounts: number;
+  source_chat_id?: number | null;
+}
+
+export interface ParsedContactsSummary {
+  total_contacts: number;
+  chats: ParsedChatInfo[];
+}
+
+export interface ParsedChatInfo {
+  chat_id: number;
+  title: string;
+  chat_type: string;
+  members_parsed: number;
+  last_parsed_at: string;
+}
+
+export interface AdminChat {
+  id: number;
+  chat_id: number;
+  title: string;
+  username: string | null;
+  chat_type: string;
+  members_count: number;
 }
