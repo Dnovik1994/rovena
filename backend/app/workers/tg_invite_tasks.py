@@ -11,7 +11,6 @@ from pyrogram.errors import FloodWait, PeerFlood, UserAlreadyParticipant, UserPr
 from sqlalchemy import update
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
-from app.workers.tg_timeout_helpers import safe_call
 from app.core.database import SessionLocal
 from app.models.invite_campaign import InviteCampaign, InviteCampaignStatus
 from app.models.invite_task import InviteTask, InviteTaskStatus

@@ -112,7 +112,7 @@ def list_my_admin_chats(
             (TgAccountChat.is_admin.is_(True)) | (TgAccountChat.is_creator.is_(True)),
             TgAccountChat.chat_type.in_(["group", "supergroup", "channel"]),
         )
-        .order_by(TgAccountChat.members_count.desc().nullslast())
+        .order_by(TgAccountChat.members_count.desc())
         .all()
     )
 
