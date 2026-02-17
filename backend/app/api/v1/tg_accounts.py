@@ -22,6 +22,9 @@ from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
+from app.models.tg_account_chat import TgAccountChat
+from app.models.tg_chat_member import TgChatMember
+from app.models.tg_user import TgUser
 from app.models.user import User
 from app.models.telegram_account import VerifyStatus
 from app.models.telegram_api_app import TelegramApiApp
@@ -46,6 +49,7 @@ from app.workers.tg_auth_tasks import (
     unified_auth_task,
     verify_account_task,
 )
+from app.workers.tg_sync_tasks import sync_account_data
 from app.workers.tasks import account_health_check
 from app.workers.tg_warming_tasks import start_tg_warming
 
@@ -771,3 +775,130 @@ def tg_regenerate_device(
     db.commit()
     db.refresh(account)
     return TgAccountResponse.model_validate(account)
+
+
+# ─── SYNC (manual trigger) ───────────────────────────────────────────
+
+@router.post("/{account_id}/sync")
+def trigger_sync(
+    account_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "update")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manually trigger full account sync (dialogs + members)."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    if account.status not in (
+        TelegramAccountStatus.verified,
+        TelegramAccountStatus.active,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot sync in state '{account.status.value}'. "
+            "Account must be verified or active.",
+        )
+
+    _safe_dispatch(sync_account_data, account.id)
+
+    return {"status": "sync_started"}
+
+
+# ─── ACCOUNT CHATS ───────────────────────────────────────────────────
+
+@router.get("/{account_id}/chats")
+def list_account_chats(
+    account_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "list")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """List chats associated with the account."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    chats = (
+        db.query(TgAccountChat)
+        .filter(TgAccountChat.account_id == account.id)
+        .order_by(TgAccountChat.members_count.desc())
+        .all()
+    )
+
+    return [
+        {
+            "id": c.id,
+            "chat_id": c.chat_id,
+            "title": c.title,
+            "username": c.username,
+            "chat_type": c.chat_type,
+            "members_count": c.members_count,
+            "is_creator": c.is_creator,
+            "is_admin": c.is_admin,
+            "last_parsed_at": c.last_parsed_at.isoformat() if c.last_parsed_at else None,
+            "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in chats
+    ]
+
+
+# ─── CHAT MEMBERS ────────────────────────────────────────────────────
+
+@router.get("/{account_id}/chats/{chat_id}/members")
+def list_chat_members(
+    account_id: int,
+    chat_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "list")),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="last_online_at"),
+) -> list[dict]:
+    """List parsed members of a specific chat."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    # Verify the chat belongs to this account
+    account_chat = (
+        db.query(TgAccountChat)
+        .filter(
+            TgAccountChat.account_id == account.id,
+            TgAccountChat.chat_id == chat_id,
+        )
+        .first()
+    )
+    if not account_chat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found for this account",
+        )
+
+    # Determine sort column
+    sort_column_map = {
+        "last_online_at": TgUser.last_online_at,
+        "username": TgUser.username,
+        "first_name": TgUser.first_name,
+        "first_seen_at": TgChatMember.first_seen_at,
+    }
+    sort_col = sort_column_map.get(sort_by, TgUser.last_online_at)
+
+    members = (
+        db.query(TgUser, TgChatMember)
+        .join(TgChatMember, TgChatMember.user_id == TgUser.id)
+        .filter(TgChatMember.chat_id == chat_id)
+        .order_by(sort_col.desc().nullslast())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "user_id": user.id,
+            "telegram_id": user.telegram_id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_premium": user.is_premium,
+            "last_online_at": user.last_online_at.isoformat() if user.last_online_at else None,
+            "role": member.role.value if hasattr(member.role, "value") else str(member.role),
+            "joined_at": member.joined_at.isoformat() if member.joined_at else None,
+        }
+        for user, member in members
+    ]

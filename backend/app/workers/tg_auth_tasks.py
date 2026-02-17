@@ -1024,6 +1024,15 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
 
                     _broadcast_account_update(account)
                     _broadcast_flow_update(flow, account_id, owner_user_id)
+
+                    # Auto-trigger account sync after successful verification
+                    try:
+                        from app.workers.tg_sync_tasks import sync_account_data
+                        sync_account_data.delay(account_id)
+                        log.info("event=sync_dispatched_after_auth account_id=%d", account_id)
+                    except Exception as sync_exc:
+                        log.warning("event=sync_dispatch_failed account_id=%d error=%s", account_id, sync_exc)
+
                     return
 
                 except SessionPasswordNeeded:
@@ -1330,6 +1339,14 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
 
             _broadcast_account_update(account)
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
+
+            # Auto-trigger account sync after successful 2FA verification
+            try:
+                from app.workers.tg_sync_tasks import sync_account_data
+                sync_account_data.delay(account_id)
+                log.info("event=sync_dispatched_after_2fa account_id=%d", account_id)
+            except Exception as sync_exc:
+                log.warning("event=sync_dispatch_failed account_id=%d error=%s", account_id, sync_exc)
 
         except BadRequest as exc:
             if "PASSWORD_HASH_INVALID" in str(exc):
