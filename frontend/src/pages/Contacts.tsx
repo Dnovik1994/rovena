@@ -1,73 +1,52 @@
 import React, { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 
 import EmptyState from "../components/EmptyState";
-import ErrorState from "../components/ErrorState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
-import { createContact, fetchContacts } from "../services/resources";
+import { fetchParsedContactsSummary } from "../services/inviteApi";
 import { useAuth } from "../stores/auth";
-import { Contact } from "../types/contact";
+import type { ParsedContactsSummary } from "../types/invite";
 
-const schema = z.object({
-  project_id: z.coerce.number().int().positive(),
-  telegram_id: z.coerce.number().int().positive(),
-  first_name: z.string().min(1),
-  last_name: z.string().optional(),
-  username: z.string().optional(),
-  phone: z.string().optional(),
-});
+// TODO: manual contact form — hidden for now
 
-type FormValues = z.infer<typeof schema>;
+/* ── Chat type icon ─────────────────────────────────────────────── */
+
+function chatIcon(chatType: string): string {
+  return chatType === "channel" ? "\u{1F4E2}" : "\u{1F465}";
+}
+
+/* ── Component ──────────────────────────────────────────────────── */
 
 const Contacts = (): JSX.Element => {
   const { token } = useAuth();
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [summary, setSummary] = useState<ParsedContactsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-    reset,
-  } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-  });
-
-  const load = async () => {
+  useEffect(() => {
     if (!token) {
       setLoading(false);
       return;
     }
-    try {
-      setLoading(true);
-      const data = await fetchContacts(token);
-      setContacts(data);
-    } catch (err) {
-      setError("Не удалось загрузить контакты.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const data = await fetchParsedContactsSummary(token);
+        setSummary(data);
+      } catch {
+        setError("Не удалось загрузить данные о контактах.");
+      } finally {
+        setLoading(false);
+      }
+    };
     load();
   }, [token]);
 
-  const onSubmit = async (values: FormValues) => {
-    if (!token) {
-      setError("Нужна авторизация.");
-      return;
-    }
+  /* ── Format date ─── */
+  const formatDate = (dateStr: string) => {
     try {
-      const created = await createContact(token, values);
-      setContacts((prev) => [created, ...prev]);
-      reset({ project_id: values.project_id, telegram_id: values.telegram_id, first_name: "", last_name: "", username: "", phone: "" });
-      setError(null);
-    } catch (err) {
-      setError("Не удалось создать контакт.");
+      return new Date(dateStr).toLocaleString();
+    } catch {
+      return dateStr;
     }
   };
 
@@ -75,124 +54,50 @@ const Contacts = (): JSX.Element => {
     <section className="page">
       <div>
         <h2 className="page__title">Contacts</h2>
-        <p className="page__subtitle">Контакты аудитории и метки.</p>
+        <p className="page__subtitle">Спарсенные контакты аудитории.</p>
       </div>
 
-      <form
-        onSubmit={handleSubmit(onSubmit)}
-        className="space-y-3 rounded-2xl bg-[var(--tg-theme-secondary-bg)] p-4"
-      >
-        <div>
-          <label className="label">Project ID</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
-            type="number"
-            {...register("project_id")}
-          />
-          {errors.project_id && (
-            <p className="text-xs text-rose-400">Укажите project_id.</p>
-          )}
-        </div>
-        <div>
-          <label className="label">Telegram ID</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
-            type="number"
-            {...register("telegram_id")}
-          />
-          {errors.telegram_id && (
-            <p className="text-xs text-rose-400">Укажите Telegram ID.</p>
-          )}
-        </div>
-        <div>
-          <label className="label">Имя</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
-            {...register("first_name")}
-          />
-          {errors.first_name && (
-            <p className="text-xs text-rose-400">Укажите имя.</p>
-          )}
-        </div>
-        <div>
-          <label className="label">Фамилия</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
-            {...register("last_name")}
-          />
-        </div>
-        <div>
-          <label className="label">Username</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
-            {...register("username")}
-          />
-        </div>
-        <div>
-          <label className="label">Phone</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-slate-800 bg-[var(--tg-theme-bg)] px-3 py-2 text-sm"
-            {...register("phone")}
-          />
-        </div>
-        <button
-          type="submit"
-          className="btn btn--primary"
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? "Сохраняем..." : "Добавить контакт"}
-        </button>
-        {error && <p className="hint">{error}</p>}
-      </form>
-
-      {error && !loading && (
-        <ErrorState title="Ошибка загрузки" description={error} />
+      {error && (
+        <div className="rounded-xl bg-rose-900/40 p-3 text-sm text-rose-300">{error}</div>
       )}
 
       {loading ? (
         <LoadingSkeleton rows={4} label="Загрузка контактов" />
-      ) : contacts.length === 0 ? (
+      ) : !summary || summary.total_contacts === 0 ? (
         <EmptyState
-          title="Контактов нет"
-          description="Контакты появятся после парсинга источников."
+          title="Нет спарсенных контактов"
+          description="Перейдите в Accounts → View Chats и спарсите участников."
         />
       ) : (
-        <div className="space-y-3">
-          {contacts.map((contact) => {
-            const isBlocked = contact.blocked;
-            const tooltip = contact.blocked_reason || "Blocked";
+        <>
+          {/* ── Total contacts ──── */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-2xl font-bold text-slate-100">
+              Всего контактов: {summary.total_contacts}
+            </p>
+          </div>
 
-            return (
+          {/* ── Chat breakdown ──── */}
+          <div className="space-y-3">
+            {summary.chats.map((chat) => (
               <div
-                key={contact.id}
-                title={isBlocked ? tooltip : undefined}
-                className={[
-                  "rounded-2xl border p-4",
-                  isBlocked
-                    ? "border-rose-500/70 bg-rose-500/10"
-                    : "border-slate-800 bg-[var(--tg-theme-secondary-bg)]",
-                ].join(" ")}
+                key={chat.chat_id}
+                className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
               >
-                <div className="flex items-center justify-between">
-                  <h3 className={["text-base font-semibold", isBlocked ? "text-rose-200" : ""].join(" ")}>
-                    {contact.first_name}
-                  </h3>
-                  <span className={["text-xs", isBlocked ? "text-rose-300" : "text-slate-400"].join(" ")}>
-                    #{contact.telegram_id}
-                  </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{chatIcon(chat.chat_type)}</span>
+                  <h3 className="text-base font-semibold">{chat.title}</h3>
                 </div>
-                <p className={["text-xs", isBlocked ? "text-rose-300/80" : "text-slate-500"].join(" ")}>
-                  {contact.username || "no username"}
+                <p className="mt-1 text-xs text-emerald-400">
+                  Спарсено: {chat.members_parsed} контактов
                 </p>
-                {isBlocked && (
-                  <p className="mt-2 text-xs text-rose-300">
-                    Blocked: {tooltip}
-                  </p>
-                )}
+                <p className="text-xs text-slate-500">
+                  Последний парсинг: {formatDate(chat.last_parsed_at)}
+                </p>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </>
       )}
     </section>
   );
