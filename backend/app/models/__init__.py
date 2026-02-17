@@ -3,6 +3,8 @@ from app.models.campaign import Campaign, CampaignStatus
 from app.models.campaign_contact import CampaignContact, InviteStatus
 from app.models.campaign_dispatch_log import CampaignDispatchLog, DispatchErrorType
 from app.models.contact import Contact
+from app.models.invite_campaign import InviteCampaign, InviteCampaignStatus
+from app.models.invite_task import InviteTask, InviteTaskStatus
 from app.models.project import Project
 from app.models.proxy import Proxy, ProxyStatus, ProxyType
 from app.models.source import Source, SourceType
@@ -28,7 +30,11 @@ __all__ = [
     "ChatMemberRole",
     "DispatchErrorType",
     "Contact",
+    "InviteCampaign",
+    "InviteCampaignStatus",
     "InviteStatus",
+    "InviteTask",
+    "InviteTaskStatus",
     "Project",
     "Proxy",
     "ProxyStatus",
