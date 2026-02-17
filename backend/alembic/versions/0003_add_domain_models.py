@@ -119,6 +119,5 @@ def downgrade() -> None:
     op.drop_index("ix_sources_project_id", table_name="sources")
     op.drop_table("sources")
 
-    op.execute("DROP TYPE IF EXISTS sourcetype")
-    op.execute("DROP TYPE IF EXISTS targettype")
-    op.execute("DROP TYPE IF EXISTS campaignstatus")
+    # MySQL auto-drops ENUM with column, no separate DROP TYPE needed
+    pass
