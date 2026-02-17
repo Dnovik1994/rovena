@@ -49,7 +49,7 @@ from app.workers.tg_auth_tasks import (
     unified_auth_task,
     verify_account_task,
 )
-from app.workers.tg_sync_tasks import sync_account_data
+from app.workers.tg_sync_tasks import parse_single_chat, sync_account_data
 from app.workers.tasks import account_health_check
 from app.workers.tg_warming_tasks import start_tg_warming
 
@@ -801,6 +801,37 @@ def trigger_sync(
     _safe_dispatch(sync_account_data, account.id)
 
     return {"status": "sync_started"}
+
+
+# ─── PARSE SINGLE CHAT ──────────────────────────────────────────────
+
+@router.post("/{account_id}/chats/{chat_id}/parse")
+def trigger_parse_single_chat(
+    account_id: int,
+    chat_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "update")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Trigger parsing of members for a single chat."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    account_chat = (
+        db.query(TgAccountChat)
+        .filter(
+            TgAccountChat.account_id == account.id,
+            TgAccountChat.chat_id == chat_id,
+        )
+        .first()
+    )
+    if not account_chat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found for this account",
+        )
+
+    _safe_dispatch(parse_single_chat, account.id, chat_id)
+
+    return {"status": "parsing_started", "chat_id": chat_id}
 
 
 # ─── ACCOUNT CHATS ───────────────────────────────────────────────────

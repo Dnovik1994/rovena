@@ -28,12 +28,13 @@ class InviteCampaign(Base):
         SqlEnum(InviteCampaignStatus), default=InviteCampaignStatus.draft,
     )
 
-    # Source: where to get contacts — Telegram chat ID
-    source_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Source: where to get contacts — Telegram chat ID (null = all parsed contacts)
+    source_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Target: where to add members
-    target_link: Mapped[str] = mapped_column(String(500), nullable=False)
+    target_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    target_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
     target_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Limits
