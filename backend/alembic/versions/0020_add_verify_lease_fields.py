@@ -1,7 +1,7 @@
 """Add verify lease/lock fields to telegram_accounts
 
 Revision ID: 0020_add_verify_lease_fields
-Revises: 0019_widen_telegram_id_bigint
+Revises: 0020_add_account_error_status_and_last_error
 Create Date: 2026-02-11 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 from sqlalchemy import inspect as sa_inspect
 
 revision = "0020_add_verify_lease_fields"
-down_revision = "0019_widen_telegram_id_bigint"
+down_revision = "0020_add_account_error_status_and_last_error"
 branch_labels = None
 depends_on = None
 
