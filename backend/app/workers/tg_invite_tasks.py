@@ -77,6 +77,7 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
         owner_id = campaign.owner_id
         target_link = campaign.target_link
+        campaign_target_chat_id = campaign.target_chat_id
         max_accounts = campaign.max_accounts
         invites_per_hour = campaign.invites_per_hour_per_account
 
@@ -201,16 +202,29 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
         try:
             async with client:
-                # Resolve target_link to numeric chat_id (handles invite links)
-                try:
-                    target_chat_id = await _resolve_target_chat_id(client, target_link)
-                except Exception as exc:
-                    logger.error(
-                        "invite_dispatch: cannot resolve target_link=%s account_id=%d: %s",
-                        target_link, acct_id, exc,
-                    )
-                    sentry_sdk.capture_exception(exc)
-                    # Revert tasks to pending
+                # Resolve target: use target_chat_id directly, or resolve target_link
+                if campaign_target_chat_id is not None:
+                    target_chat_id = campaign_target_chat_id
+                elif target_link:
+                    try:
+                        target_chat_id = await _resolve_target_chat_id(client, target_link)
+                    except Exception as exc:
+                        logger.error(
+                            "invite_dispatch: cannot resolve target_link=%s account_id=%d: %s",
+                            target_link, acct_id, exc,
+                        )
+                        sentry_sdk.capture_exception(exc)
+                        # Revert tasks to pending
+                        with SessionLocal() as db:
+                            for td in task_data:
+                                task = db.get(InviteTask, td["task_id"])
+                                if task:
+                                    task.status = InviteTaskStatus.pending
+                                    task.account_id = None
+                            db.commit()
+                        continue
+                else:
+                    logger.error("invite_dispatch: no target_chat_id or target_link for campaign=%d", campaign_id)
                     with SessionLocal() as db:
                         for td in task_data:
                             task = db.get(InviteTask, td["task_id"])

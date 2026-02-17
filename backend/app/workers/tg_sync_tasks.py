@@ -356,3 +356,114 @@ def sync_account_data(self, account_id: int) -> None:
         "event=sync_account_task_finished account_id=%d task_id=%s",
         account_id, self.request.id,
     )
+
+
+# ── Single-chat parsing ─────────────────────────────────────────────
+
+async def _run_parse_single_chat(account_id: int, chat_id: int) -> None:
+    """Parse members of a single chat and upsert into tg_users / tg_chat_members."""
+    log = logger.getChild("parse_single_chat")
+
+    with SessionLocal() as db:
+        account = db.get(TelegramAccount, account_id)
+        if not account:
+            log.warning("event=parse_single_chat_account_not_found account_id=%d", account_id)
+            return
+
+        account_chat = (
+            db.query(TgAccountChat)
+            .filter(
+                TgAccountChat.account_id == account_id,
+                TgAccountChat.chat_id == chat_id,
+            )
+            .first()
+        )
+        if not account_chat:
+            log.warning(
+                "event=parse_single_chat_chat_not_found account_id=%d chat_id=%d",
+                account_id, chat_id,
+            )
+            return
+
+        proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+
+        try:
+            client = create_tg_account_client(account, proxy)
+        except TelegramClientDisabledError:
+            log.warning("event=parse_single_chat_client_disabled account_id=%d", account_id)
+            return
+        except Exception as exc:
+            log.error("event=parse_single_chat_client_error account_id=%d error=%s", account_id, exc)
+            return
+
+        parsed_count = 0
+        try:
+            async with client:
+                async for member in client.get_chat_members(chat_id):
+                    if not member.user:
+                        continue
+
+                    tg_user = upsert_tg_user(db, member.user)
+                    upsert_chat_member(db, chat_id, tg_user.id, member)
+
+                    parsed_count += 1
+
+                    if parsed_count % _BATCH_COMMIT_SIZE == 0:
+                        db.commit()
+                        await asyncio.sleep(random.uniform(0.3, 0.8))
+
+                db.commit()
+
+                # Update last_parsed_at
+                account_chat.last_parsed_at = datetime.now(timezone.utc)
+                db.commit()
+
+        except FloodWait as e:
+            log.warning(
+                "event=parse_single_chat_floodwait account_id=%d chat_id=%d wait_s=%d",
+                account_id, chat_id, e.value,
+            )
+            account.status = TelegramAccountStatus.cooldown
+            account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=e.value)
+            db.commit()
+            return
+
+        except (ChatAdminRequired, ChannelPrivate) as e:
+            log.warning(
+                "event=parse_single_chat_access_denied account_id=%d chat_id=%d error=%s",
+                account_id, chat_id, type(e).__name__,
+            )
+            return
+
+        except Exception as exc:
+            log.exception(
+                "event=parse_single_chat_error account_id=%d chat_id=%d error=%s",
+                account_id, chat_id, str(exc)[:500],
+            )
+            return
+
+        log.info(
+            "event=parse_single_chat_done account_id=%d chat_id=%d parsed=%d",
+            account_id, chat_id, parsed_count,
+        )
+
+
+@celery_app.task(bind=True, soft_time_limit=1800, time_limit=1900)
+def parse_single_chat(self, account_id: int, chat_id: int) -> None:
+    """Parse members of a single chat."""
+    logger.info(
+        "event=parse_single_chat_task_started account_id=%d chat_id=%d task_id=%s",
+        account_id, chat_id, self.request.id,
+    )
+    try:
+        asyncio.run(_run_parse_single_chat(account_id, chat_id))
+    except SoftTimeLimitExceeded:
+        logger.warning(
+            "event=parse_single_chat_task_timeout account_id=%d chat_id=%d task_id=%s",
+            account_id, chat_id, self.request.id,
+        )
+        return
+    logger.info(
+        "event=parse_single_chat_task_finished account_id=%d chat_id=%d task_id=%s",
+        account_id, chat_id, self.request.id,
+    )

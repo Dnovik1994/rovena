@@ -18,8 +18,9 @@ class InviteCampaignStatusEnum(str, Enum):
 
 class InviteCampaignCreate(SanitizedModel):
     name: str = Field(min_length=2, max_length=255)
-    source_chat_id: int
-    target_link: str = Field(min_length=1, max_length=500)
+    source_chat_id: int | None = None
+    target_chat_id: int | None = None
+    target_link: str | None = Field(default=None, max_length=500)
     target_title: str | None = Field(default=None, max_length=255)
     max_invites_total: int = Field(ge=1)
     invites_per_hour_per_account: int = Field(default=10, ge=1, le=100)
@@ -31,9 +32,10 @@ class InviteCampaignResponse(BaseModel):
     owner_id: int
     name: str
     status: InviteCampaignStatusEnum
-    source_chat_id: int
+    source_chat_id: int | None
     source_title: str | None
-    target_link: str
+    target_chat_id: int | None
+    target_link: str | None
     target_title: str | None
     max_invites_total: int
     invites_per_hour_per_account: int
@@ -56,3 +58,25 @@ class InviteCampaignDetailResponse(InviteCampaignResponse):
     success: int = 0
     failed: int = 0
     skipped: int = 0
+
+
+class ParsedChatInfo(BaseModel):
+    chat_id: int
+    title: str | None
+    chat_type: str
+    members_parsed: int
+    last_parsed_at: datetime | None
+
+
+class ParsedContactsSummaryResponse(BaseModel):
+    total_contacts: int
+    chats: list[ParsedChatInfo]
+
+
+class AdminChatResponse(BaseModel):
+    id: int
+    chat_id: int
+    title: str | None
+    username: str | None
+    chat_type: str
+    members_count: int | None
