@@ -913,7 +913,7 @@ def list_chat_members(
         db.query(TgUser, TgChatMember)
         .join(TgChatMember, TgChatMember.user_id == TgUser.id)
         .filter(TgChatMember.chat_id == chat_id)
-        .order_by(sort_col.desc().nullslast())
+        .order_by(sort_col.desc())
         .offset(offset)
         .limit(limit)
         .all()

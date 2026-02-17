@@ -385,7 +385,7 @@ async def _run_account_health_check(account_id: int) -> None:
 
         try:
             async with client:
-                await client.get_me()
+                await asyncio.wait_for(client.get_me(), timeout=15)
             account.last_activity_at = datetime.now(timezone.utc)
             if account.status == AccountStatus.cooldown and account.cooldown_until:
                 if is_expired(account.cooldown_until):
@@ -678,7 +678,7 @@ async def _run_legacy_verify(account_id: int) -> None:
 
         try:
             async with client:
-                me = await client.get_me()
+                me = await asyncio.wait_for(client.get_me(), timeout=15)
         except FloodWait as exc:
             elapsed = _time.monotonic() - t0
             verify_account_duration_seconds.observe(elapsed)
