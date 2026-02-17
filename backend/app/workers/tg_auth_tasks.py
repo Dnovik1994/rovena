@@ -19,6 +19,7 @@ from pathlib import Path
 
 from app.core.tz import ensure_utc, is_expired, utcnow
 
+from sqlalchemy import select
 from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import (
     AuthKeyUnregistered,
@@ -903,9 +904,11 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
             # ── Phase 3: Poll DB for submitted code ──────────────────
             poll_start = time.monotonic()
             max_poll_seconds = 280  # slightly less than flow TTL (300s)
+            poll_count = 0
 
             code = None
             while True:
+                poll_count += 1
                 elapsed_poll = time.monotonic() - poll_start
                 if elapsed_poll >= max_poll_seconds:
                     flow.state = AuthFlowState.expired
@@ -918,18 +921,36 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     _broadcast_flow_update(flow, account_id, owner_user_id)
                     return
 
-                db.refresh(flow)
+                # Bypass SQLAlchemy identity-map cache: read state
+                # directly so we see changes committed by the frontend.
+                row = db.execute(
+                    select(TelegramAuthFlow.state, TelegramAuthFlow.meta_json)
+                    .where(TelegramAuthFlow.id == flow_id)
+                ).first()
+                if not row:
+                    log.warning("event=unified_auth_flow_disappeared %s", ctx)
+                    return
+                current_state = row.state
+                current_meta = row.meta_json or {}
 
-                if flow.state == AuthFlowState.code_submitted:
-                    meta = flow.meta_json or {}
-                    code = meta.get("submitted_code")
+                if poll_count % 5 == 0:
+                    log.info(
+                        "event=unified_auth_polling %s poll_count=%d elapsed=%d state=%s",
+                        ctx, poll_count, int(elapsed_poll), current_state,
+                    )
+
+                if current_state == AuthFlowState.code_submitted:
+                    code = current_meta.get("submitted_code")
                     if code:
+                        # Sync the ORM object so subsequent writes are consistent
+                        db.expire(flow)
+                        db.refresh(flow)
                         log.info("event=unified_auth_code_received %s", ctx)
                         break
-                elif flow.state in (AuthFlowState.expired, AuthFlowState.failed):
+                elif current_state in (AuthFlowState.expired, AuthFlowState.failed):
                     log.info(
                         "event=unified_auth_flow_terminated state=%s %s",
-                        flow.state, ctx,
+                        current_state, ctx,
                     )
                     return
 
@@ -1038,7 +1059,9 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
 
                     # Wait for a new code (re-enter poll loop)
                     code = None
+                    retry_poll_count = 0
                     while True:
+                        retry_poll_count += 1
                         total_elapsed = time.monotonic() - poll_start
                         if total_elapsed >= max_poll_seconds:
                             flow.state = AuthFlowState.expired
@@ -1051,17 +1074,34 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                             _broadcast_flow_update(flow, account_id, owner_user_id)
                             return
 
-                        db.refresh(flow)
-                        if flow.state == AuthFlowState.code_submitted:
-                            meta = flow.meta_json or {}
-                            code = meta.get("submitted_code")
+                        # Bypass SQLAlchemy identity-map cache
+                        row = db.execute(
+                            select(TelegramAuthFlow.state, TelegramAuthFlow.meta_json)
+                            .where(TelegramAuthFlow.id == flow_id)
+                        ).first()
+                        if not row:
+                            log.warning("event=unified_auth_flow_disappeared_retry %s", ctx)
+                            return
+                        current_state = row.state
+                        current_meta = row.meta_json or {}
+
+                        if retry_poll_count % 5 == 0:
+                            log.info(
+                                "event=unified_auth_polling_retry %s poll_count=%d elapsed=%d state=%s",
+                                ctx, retry_poll_count, int(total_elapsed), current_state,
+                            )
+
+                        if current_state == AuthFlowState.code_submitted:
+                            code = current_meta.get("submitted_code")
                             if code:
+                                db.expire(flow)
+                                db.refresh(flow)
                                 log.info("event=unified_auth_retry_code_received %s", ctx)
                                 break
-                        elif flow.state in (AuthFlowState.expired, AuthFlowState.failed):
+                        elif current_state in (AuthFlowState.expired, AuthFlowState.failed):
                             log.info(
                                 "event=unified_auth_flow_terminated state=%s %s",
-                                flow.state, ctx,
+                                current_state, ctx,
                             )
                             return
 
