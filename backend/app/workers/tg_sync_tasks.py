@@ -173,7 +173,7 @@ async def _run_sync_account(account_id: int) -> None:
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
 
         try:
-            client = create_tg_account_client(account, proxy)
+            client = create_tg_account_client(account, proxy, in_memory=False, workdir="/data/pyrogram_sessions")
         except TelegramClientDisabledError:
             log.warning("event=sync_account_client_disabled account_id=%d", account_id)
             return
@@ -415,7 +415,7 @@ async def _run_parse_single_chat(account_id: int, chat_id: int) -> None:
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
 
         try:
-            client = create_tg_account_client(account, proxy)
+            client = create_tg_account_client(account, proxy, in_memory=False, workdir="/data/pyrogram_sessions")
         except TelegramClientDisabledError:
             log.warning("event=parse_single_chat_client_disabled account_id=%d", account_id)
             return

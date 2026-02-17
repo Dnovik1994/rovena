@@ -1,3 +1,9 @@
+# ============================================================
+# LEGACY TASKS — используют старую модель Account
+# TODO: мигрировать на TelegramAccount или удалить
+# Новый код использует tg_invite_tasks.py, tg_sync_tasks.py
+# ============================================================
+
 import asyncio
 import logging
 import random
@@ -92,7 +98,7 @@ def _log_dispatch_error(
     )
 
 
-# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+# LEGACY — TODO: заменить на TelegramAccount
 def _set_account_cooldown(db, account: Account, seconds: int) -> None:
     account.status = AccountStatus.cooldown
     account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
@@ -346,6 +352,7 @@ def campaign_dispatch(self, campaign_id: int) -> None:
                 db.commit()
 
 
+# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def account_health_check(self, account_id: int) -> None:
     _log_task_started(account_id=account_id)
@@ -355,7 +362,7 @@ def account_health_check(self, account_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
-# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+# LEGACY — TODO: заменить на TelegramAccount
 async def _run_account_health_check(account_id: int) -> None:
     with SessionLocal() as db:
         account = db.get(Account, account_id)
@@ -425,7 +432,7 @@ async def perform_low_risk_action(client) -> int:
     return performed
 
 
-# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+# LEGACY — TODO: заменить на TelegramAccount
 async def _run_warming_cycle(account_id: int) -> None:
     # --- Phase 1: load data & build client in a short-lived session -------
     with SessionLocal() as db:
@@ -544,6 +551,7 @@ async def _run_warming_cycle(account_id: int) -> None:
             )
 
 
+# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(
     bind=True,
     soft_time_limit=3600,
@@ -563,6 +571,7 @@ def start_warming(self, account_id: int) -> None:
                 db.commit()
 
 
+# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
 def perform_warming_action(self, account_id: int) -> None:
     _log_task_started(account_id=account_id)
@@ -572,12 +581,13 @@ def perform_warming_action(self, account_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
+# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
 def check_cooldowns(self) -> None:
     _log_task_started()
     try:
         with SessionLocal() as db:
-            # TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+            # LEGACY — TODO: заменить на TelegramAccount
             accounts = (
                 db.query(Account)
                 .filter(Account.status == AccountStatus.cooldown)
@@ -624,6 +634,7 @@ def validate_proxy_task(self, proxy_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (proxy_id=%s)", self.request.id, proxy_id)
 
 
+# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def legacy_verify_account(self, account_id: int) -> None:
     """Async-safe verify for legacy Account model.
@@ -638,7 +649,7 @@ def legacy_verify_account(self, account_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
-# TODO: заменить Account на TelegramAccount для поддержки per-account api_id
+# LEGACY — TODO: заменить на TelegramAccount
 async def _run_legacy_verify(account_id: int) -> None:
     from app.core.metrics import verify_account_duration_seconds, verify_fail_total
     import time as _time

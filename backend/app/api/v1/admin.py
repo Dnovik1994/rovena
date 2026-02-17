@@ -83,8 +83,8 @@ def admin_users(
         pattern = f"%{safe_search}%"
         query = query.filter(
             or_(
-                User.username.ilike(pattern),
-                cast(User.telegram_id, String).ilike(pattern),
+                User.username.like(pattern),
+                cast(User.telegram_id, String).like(pattern),
             )
         )
     if tariff:

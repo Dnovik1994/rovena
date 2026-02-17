@@ -274,6 +274,8 @@ services:
     logging: *default-logging
     networks:
       - data
+    deploy:
+      replicas: 1
     init: true
     stop_grace_period: 15s
     env_file:

@@ -9,6 +9,7 @@ with lease-based idempotency.
 
 import asyncio
 import base64
+import inspect
 import logging
 import os
 import re
@@ -152,10 +153,20 @@ async def _get_dc_id(client) -> str:
     try:
         dc = client.storage.dc_id
         if callable(dc):
-            return str(await dc())
+            dc_val = dc()
+            if inspect.isawaitable(dc_val):
+                dc_val = await dc_val
+            return str(dc_val)
         return str(dc)
     except Exception:
         return "unknown"
+
+
+async def _set_dc_id(client, dc_id: int) -> None:
+    """Set dc_id on a Pyrogram client storage (sync/async safe)."""
+    dc_val = client.storage.dc_id(dc_id)
+    if inspect.isawaitable(dc_val):
+        await dc_val
 
 
 def _is_dc_migrate_error(exc: Exception) -> bool:
@@ -646,7 +657,7 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
                     "event=sign_in_dc_migrate target_dc=%d %s", target_dc, ctx,
                 )
                 await client.disconnect()
-                await client.storage.dc_id(target_dc)
+                await _set_dc_id(client, target_dc)
                 await client.connect()
                 signed_in = await client.sign_in(
                     phone_number=account.phone_e164,
@@ -990,7 +1001,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                             target_dc, ctx,
                         )
                         await client.disconnect()
-                        await client.storage.dc_id(target_dc)
+                        await _set_dc_id(client, target_dc)
                         await client.connect()
                         signed_in = await client.sign_in(
                             phone_number=phone_number,
