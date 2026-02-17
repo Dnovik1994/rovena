@@ -202,28 +202,17 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
         try:
             async with client:
+                # Populate peer cache via get_dialogs (in_memory sessions have empty cache)
+                try:
+                    async for _ in client.get_dialogs():
+                        pass
+                    logger.info("invite_dispatch: peer cache populated via get_dialogs for account_id=%d", acct_id)
+                except Exception as exc:
+                    logger.warning("invite_dispatch: get_dialogs failed for account_id=%d: %s", acct_id, exc)
+
                 # Resolve target: use target_chat_id directly, or resolve target_link
                 if campaign_target_chat_id is not None:
                     target_chat_id = campaign_target_chat_id
-                    # Resolve peer cache — in_memory sessions have empty cache
-                    try:
-                        await client.get_chat(target_chat_id)
-                    except Exception as exc:
-                        logger.warning("invite_dispatch: get_chat(%s) failed, trying get_dialogs: %s", target_chat_id, exc)
-                        try:
-                            async for _ in client.get_dialogs():
-                                pass
-                            await client.get_chat(target_chat_id)
-                        except Exception as exc2:
-                            logger.error("invite_dispatch: cannot resolve target_chat_id=%s: %s", target_chat_id, exc2)
-                            with SessionLocal() as db2:
-                                for td in task_data:
-                                    task = db2.get(InviteTask, td["task_id"])
-                                    if task:
-                                        task.status = InviteTaskStatus.pending
-                                        task.account_id = None
-                                db2.commit()
-                            continue
                 elif target_link:
                     try:
                         target_chat_id = await _resolve_target_chat_id(client, target_link)
@@ -389,7 +378,16 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
             .count()
         )
 
-        if pending_count == 0:
+        in_progress_count = (
+            db.query(InviteTask)
+            .filter(
+                InviteTask.campaign_id == campaign_id,
+                InviteTask.status == InviteTaskStatus.in_progress,
+            )
+            .count()
+        )
+
+        if pending_count == 0 and in_progress_count == 0:
             campaign.status = InviteCampaignStatus.completed
             campaign.completed_at = datetime.now(timezone.utc)
             db.commit()
@@ -402,8 +400,8 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                 countdown=60,
             )
             logger.info(
-                "invite_dispatch: campaign %d rescheduled, %d pending tasks remain",
-                campaign_id, pending_count,
+                "invite_dispatch: campaign %d rescheduled, %d pending / %d in_progress tasks remain",
+                campaign_id, pending_count, in_progress_count,
             )
 
 

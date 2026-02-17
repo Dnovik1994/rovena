@@ -205,6 +205,11 @@ def create_invite_campaign(
     db.add(campaign)
     db.flush()  # get campaign.id
 
+    # Exclude telegram_ids that belong to our own accounts
+    own_tg_ids = [a.tg_user_id for a in db.query(TelegramAccount)
+        .filter(TelegramAccount.owner_user_id == current_user.id)
+        .filter(TelegramAccount.tg_user_id.isnot(None)).all()]
+
     # Build members query depending on source_chat_id
     if payload.source_chat_id is not None:
         # Select tg_users from a specific chat
@@ -214,12 +219,13 @@ def create_invite_campaign(
             .filter(TgChatMember.chat_id == payload.source_chat_id)
             .filter(TgUser.is_bot.is_(False))
             .filter(TgUser.is_deleted.is_(False))
-            .order_by(
+        )
+        if own_tg_ids:
+            members_query = members_query.filter(~TgUser.telegram_id.in_(own_tg_ids))
+        members_query = members_query.order_by(
                 case((TgUser.last_online_at.is_(None), 1), else_=0),
                 TgUser.last_online_at.desc(),
-            )
-            .limit(payload.max_invites_total)
-        )
+            ).limit(payload.max_invites_total)
         user_ids = [row[0] for row in members_query.all()]
     else:
         # Select from ALL parsed contacts across user's accounts
@@ -237,13 +243,13 @@ def create_invite_campaign(
                 TgUser.is_bot.is_(False),
                 TgUser.is_deleted.is_(False),
             )
-            .group_by(TgUser.id)
-            .order_by(
+        )
+        if own_tg_ids:
+            members_query = members_query.filter(~TgUser.telegram_id.in_(own_tg_ids))
+        members_query = members_query.group_by(TgUser.id).order_by(
                 case((func.max(TgUser.last_online_at).is_(None), 1), else_=0),
                 func.max(TgUser.last_online_at).desc(),
-            )
-            .limit(payload.max_invites_total)
-        )
+            ).limit(payload.max_invites_total)
         user_ids = [row[0] for row in members_query.all()]
 
     if not user_ids:
