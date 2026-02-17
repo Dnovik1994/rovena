@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import EmptyState from "../components/EmptyState";
 import SkeletonList from "../components/SkeletonList";
@@ -119,6 +119,58 @@ const InviteCampaigns = (): JSX.Element => {
   useEffect(() => {
     loadCampaigns();
   }, [loadCampaigns]);
+
+  /* ── Polling: refetch campaigns every 5s while any is active ─── */
+  const listPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const hasActive = campaigns.some((c) => c.status === "active");
+
+    if (hasActive && !listPollingRef.current) {
+      listPollingRef.current = setInterval(async () => {
+        if (!token) return;
+        try {
+          const data = await fetchInviteCampaigns(token);
+          setCampaigns(data);
+        } catch {
+          // ignore polling errors
+        }
+      }, 5000);
+    } else if (!hasActive && listPollingRef.current) {
+      clearInterval(listPollingRef.current);
+      listPollingRef.current = null;
+    }
+
+    return () => {
+      if (listPollingRef.current) {
+        clearInterval(listPollingRef.current);
+        listPollingRef.current = null;
+      }
+    };
+  }, [campaigns, token]);
+
+  /* ── Polling: refetch detail every 5s when detail view is open ─── */
+  const detailPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (detail && token) {
+      detailPollingRef.current = setInterval(async () => {
+        try {
+          const data = await fetchInviteCampaign(token, detail.id);
+          setDetail(data);
+        } catch {
+          // ignore polling errors
+        }
+      }, 5000);
+    }
+
+    return () => {
+      if (detailPollingRef.current) {
+        clearInterval(detailPollingRef.current);
+        detailPollingRef.current = null;
+      }
+    };
+  }, [detail?.id, token]);
 
   /* ── Load form data (accounts, admin chats, available contacts) ─── */
   const loadFormData = useCallback(async () => {
