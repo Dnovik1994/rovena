@@ -14,6 +14,14 @@ if [[ "${WAIT_FOR_DEPS:-1}" == "1" ]]; then
   /app/scripts/wait-for-deps.sh
 fi
 
+# Auto-apply database migrations
+if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
+  log "Running alembic migrations..."
+  alembic upgrade head || {
+    log "WARNING: alembic upgrade failed (exit $?), continuing anyway"
+  }
+fi
+
 if [[ $# -eq 0 ]]; then
   uvicorn_host="${UVICORN_HOST:-${HOST:-0.0.0.0}}"
   uvicorn_port="${UVICORN_PORT:-${PORT:-8000}}"
