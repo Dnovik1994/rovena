@@ -277,7 +277,9 @@ def _read_session_auth_key(session_path: Path, log=None) -> dict:
     return result
 
 
-# ─── send_code ───────────────────────────────────────────────────────
+# ─── send_code (DEPRECATED — use unified_auth_task) ─────────────────
+# Kept for backward compatibility with tasks already in the Celery queue
+# at the time of deployment.  New flows use unified_auth_task instead.
 
 async def _run_send_code(account_id: int, flow_id: str) -> None:
     t0 = time.monotonic()
@@ -467,7 +469,8 @@ async def _run_send_code(account_id: int, flow_id: str) -> None:
 
 
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
-def send_code_task(self, account_id: int, flow_id: str) -> None:
+def send_code_task(self, account_id: int, flow_id: str) -> None:  # DEPRECATED
+    """Deprecated: kept for tasks already in queue. New flows use unified_auth_task."""
     logger.info(
         "event=send_code_task_started account_id=%s flow_id=%s",
         account_id, flow_id,
@@ -494,7 +497,9 @@ def send_code_task(self, account_id: int, flow_id: str) -> None:
     )
 
 
-# ─── confirm_code ────────────────────────────────────────────────────
+# ─── confirm_code (DEPRECATED — use unified_auth_task) ──────────────
+# Kept for backward compatibility with tasks already in the Celery queue
+# at the time of deployment.  New flows use unified_auth_task instead.
 
 async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
     t0 = time.monotonic()
@@ -781,7 +786,8 @@ async def _run_confirm_code(account_id: int, flow_id: str, code: str) -> None:
 
 
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
-def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
+def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:  # DEPRECATED
+    """Deprecated: kept for tasks already in queue. New flows use unified_auth_task."""
     logger.info(
         "event=confirm_code_task_started account_id=%s flow_id=%s",
         account_id, flow_id,
@@ -803,6 +809,393 @@ def confirm_code_task(self, account_id: int, flow_id: str, code: str) -> None:
         return
     logger.info(
         "event=confirm_code_task_finished account_id=%s flow_id=%s",
+        account_id, flow_id,
+    )
+
+
+# ─── unified_auth (single-connection send_code + sign_in) ───────────
+
+async def _run_unified_auth(account_id: int, flow_id: str) -> None:
+    """Send code and sign in within a single Pyrogram connection.
+
+    Pyrogram 2.0.106 overwrites the auth_key on every ``client.connect()``
+    for file-based sessions that haven't completed authorisation.  This makes
+    it impossible to split send_code / sign_in into two separate Celery tasks
+    with separate connections.
+
+    This function keeps ONE connection alive, polls the DB for the code
+    submitted by the frontend, and calls ``sign_in`` on the same session.
+    """
+    t0 = time.monotonic()
+    log = logger.getChild("unified_auth")
+    ctx = {"account_id": account_id, "flow_id": flow_id}
+
+    with SessionLocal() as db:
+        account = db.get(TelegramAccount, account_id)
+        flow = db.get(TelegramAuthFlow, flow_id)
+        if not account or not flow:
+            log.warning("event=unified_auth_not_found %s", ctx)
+            return
+
+        masked = _mask_phone(account.phone_e164)
+        ctx["phone"] = masked
+        phone_number = account.phone_e164
+        owner_user_id = account.owner_user_id
+        proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+
+        client = None
+        try:
+            log.info("event=unified_auth_started %s", ctx)
+
+            # ── Phase 1: Create client & connect (ONCE) ──────────────
+            t_client = time.monotonic()
+            _ensure_pre_auth_dir()
+            client = create_tg_account_client(
+                account, proxy,
+                phone=phone_number,
+                workdir=str(_PRE_AUTH_DIR),
+                session_name=_pre_auth_session_name(flow_id),
+            )
+            log.info(
+                "event=client_created %s elapsed_ms=%d",
+                ctx, int((time.monotonic() - t_client) * 1000),
+            )
+
+            t_connect = time.monotonic()
+            await client.connect()
+            dc_before = await _get_dc_id(client)
+            log.info(
+                "event=client_connected %s dc_id=%s elapsed_ms=%d",
+                ctx, dc_before, int((time.monotonic() - t_connect) * 1000),
+            )
+            _log_client_fingerprint(log, ctx, client)
+
+            # ── Phase 2: Send code ───────────────────────────────────
+            t_send = time.monotonic()
+            sent_code = await client.send_code(phone_number)
+            dc_after = await _get_dc_id(client)
+            log.info(
+                "event=telegram_send_code_ok %s type=%s dc_before=%s dc_after=%s elapsed_ms=%d",
+                ctx, getattr(sent_code, "type", "unknown"),
+                dc_before, dc_after,
+                int((time.monotonic() - t_send) * 1000),
+            )
+
+            phone_code_hash = sent_code.phone_code_hash
+
+            flow.state = AuthFlowState.wait_code
+            flow.sent_at = datetime.now(timezone.utc)
+            flow.expires_at = datetime.now(timezone.utc) + timedelta(
+                seconds=settings.auth_flow_ttl_seconds,
+            )
+            flow.meta_json = {
+                "phone_code_hash": phone_code_hash,
+                "dc_id": str(dc_after),
+            }
+            account.status = TelegramAccountStatus.code_sent
+            account.last_error = None
+            db.commit()
+
+            log.info("event=unified_auth_code_sent %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+
+            # ── Phase 3: Poll DB for submitted code ──────────────────
+            poll_start = time.monotonic()
+            max_poll_seconds = 280  # slightly less than flow TTL (300s)
+
+            code = None
+            while True:
+                elapsed_poll = time.monotonic() - poll_start
+                if elapsed_poll >= max_poll_seconds:
+                    flow.state = AuthFlowState.expired
+                    flow.last_error = "No code submitted within timeout"
+                    account.status = TelegramAccountStatus.error
+                    account.last_error = "Verification flow expired — no code submitted"
+                    db.commit()
+                    log.info("event=unified_auth_poll_timeout %s elapsed=%.0f", ctx, elapsed_poll)
+                    _broadcast_account_update(account)
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+                    return
+
+                db.refresh(flow)
+
+                if flow.state == AuthFlowState.code_submitted:
+                    meta = flow.meta_json or {}
+                    code = meta.get("submitted_code")
+                    if code:
+                        log.info("event=unified_auth_code_received %s", ctx)
+                        break
+                elif flow.state in (AuthFlowState.expired, AuthFlowState.failed):
+                    log.info(
+                        "event=unified_auth_flow_terminated state=%s %s",
+                        flow.state, ctx,
+                    )
+                    return
+
+                await asyncio.sleep(3)
+
+            # ── Phase 4: sign_in (with retry on PhoneCodeInvalid) ────
+            while True:
+                flow.attempts += 1
+                if flow.attempts > settings.auth_flow_max_attempts:
+                    flow.state = AuthFlowState.failed
+                    flow.last_error = "Too many attempts"
+                    account.status = TelegramAccountStatus.error
+                    account.last_error = "Too many verification attempts"
+                    db.commit()
+                    log.warning("event=unified_auth_too_many_attempts %s", ctx)
+                    _broadcast_account_update(account)
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+                    return
+
+                try:
+                    t_sign = time.monotonic()
+                    try:
+                        signed_in = await client.sign_in(
+                            phone_number=phone_number,
+                            phone_code_hash=phone_code_hash,
+                            phone_code=code,
+                        )
+                    except Exception as sign_exc:
+                        if not _is_dc_migrate_error(sign_exc):
+                            raise
+                        target_dc = _extract_migrate_dc(sign_exc)
+                        if target_dc is None:
+                            raise
+                        log.warning(
+                            "event=sign_in_dc_migrate target_dc=%d %s",
+                            target_dc, ctx,
+                        )
+                        await client.disconnect()
+                        await client.storage.dc_id(target_dc)
+                        await client.connect()
+                        signed_in = await client.sign_in(
+                            phone_number=phone_number,
+                            phone_code_hash=phone_code_hash,
+                            phone_code=code,
+                        )
+
+                    log.info(
+                        "event=sign_in_ok %s elapsed_ms=%d",
+                        ctx, int((time.monotonic() - t_sign) * 1000),
+                    )
+
+                    # ── Success — save session ──
+                    session_string = await client.export_session_string()
+                    account.session_encrypted = encrypt_session(session_string)
+                    account.tg_user_id = signed_in.id
+                    account.tg_username = getattr(signed_in, "username", None)
+                    account.first_name = getattr(signed_in, "first_name", None)
+                    account.last_name = getattr(signed_in, "last_name", None)
+                    account.status = TelegramAccountStatus.verified
+                    account.verified_at = datetime.now(timezone.utc)
+                    account.last_seen_at = datetime.now(timezone.utc)
+                    account.last_error = None
+
+                    flow.state = AuthFlowState.done
+                    flow.last_error = None
+                    db.commit()
+
+                    elapsed_total = int((time.monotonic() - t0) * 1000)
+                    log.info("event=unified_auth_ok %s elapsed_ms=%d", ctx, elapsed_total)
+
+                    _broadcast_account_update(account)
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+                    return
+
+                except SessionPasswordNeeded:
+                    account.status = TelegramAccountStatus.password_required
+                    account.last_error = None
+                    flow.state = AuthFlowState.wait_password
+                    flow.last_error = None
+                    flow.expires_at = utcnow() + timedelta(
+                        seconds=settings.auth_flow_ttl_seconds,
+                    )
+                    if client is not None:
+                        try:
+                            session_string = await client.export_session_string()
+                            account.session_encrypted = encrypt_session(session_string)
+                        except Exception:
+                            pass
+                    db.commit()
+                    log.info("event=unified_auth_2fa_required %s", ctx)
+                    _broadcast_account_update(account)
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+                    return
+
+                except PhoneCodeInvalid:
+                    flow.last_error = "Invalid verification code"
+                    account.last_error = "Invalid verification code"
+                    flow.state = AuthFlowState.wait_code
+                    db.commit()
+                    verify_fail_total.labels(reason=VerifyReasonCode.invalid_code.value).inc()
+                    log.warning(
+                        "event=unified_auth_code_invalid attempt=%d %s",
+                        flow.attempts, ctx,
+                    )
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+
+                    # Wait for a new code (re-enter poll loop)
+                    code = None
+                    while True:
+                        total_elapsed = time.monotonic() - poll_start
+                        if total_elapsed >= max_poll_seconds:
+                            flow.state = AuthFlowState.expired
+                            flow.last_error = "No code submitted within timeout"
+                            account.status = TelegramAccountStatus.error
+                            account.last_error = "Verification flow expired"
+                            db.commit()
+                            log.info("event=unified_auth_poll_timeout_retry %s", ctx)
+                            _broadcast_account_update(account)
+                            _broadcast_flow_update(flow, account_id, owner_user_id)
+                            return
+
+                        db.refresh(flow)
+                        if flow.state == AuthFlowState.code_submitted:
+                            meta = flow.meta_json or {}
+                            code = meta.get("submitted_code")
+                            if code:
+                                log.info("event=unified_auth_retry_code_received %s", ctx)
+                                break
+                        elif flow.state in (AuthFlowState.expired, AuthFlowState.failed):
+                            log.info(
+                                "event=unified_auth_flow_terminated state=%s %s",
+                                flow.state, ctx,
+                            )
+                            return
+
+                        await asyncio.sleep(3)
+
+                    continue  # retry sign_in with new code
+
+                except PhoneCodeExpired:
+                    flow.state = AuthFlowState.expired
+                    flow.last_error = (
+                        "PhoneCodeExpired: Telegram server rejected the code "
+                        "(server-side timeout)"
+                    )
+                    account.status = TelegramAccountStatus.error
+                    account.last_error = "PhoneCodeExpired (Telegram server rejected the code)"
+                    db.commit()
+                    verify_fail_total.labels(reason=VerifyReasonCode.code_expired.value).inc()
+                    log.warning("event=unified_auth_code_expired %s", ctx)
+                    _broadcast_account_update(account)
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+                    return
+
+        # ── Top-level exception handlers (cover both send_code & sign_in phases) ──
+        except TelegramClientDisabledError:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Telegram client disabled"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Telegram client disabled"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.client_disabled.value).inc()
+            log.warning("event=unified_auth_failed reason=client_disabled %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+        except PhoneNumberInvalid:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Invalid phone number"
+            account.status = TelegramAccountStatus.error
+            account.last_error = "Invalid phone number"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_invalid.value).inc()
+            log.warning("event=unified_auth_failed reason=phone_invalid %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+        except FloodWait as exc:
+            flow.state = AuthFlowState.failed
+            flow.last_error = f"FloodWait: retry after {exc.value}s"
+            _handle_floodwait(account, exc, db)
+            verify_fail_total.labels(reason=VerifyReasonCode.floodwait.value).inc()
+            log.warning("event=unified_auth_failed reason=flood_wait wait_s=%s %s", exc.value, ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+        except PhoneNumberBanned:
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Phone number is banned by Telegram"
+            account.status = TelegramAccountStatus.banned
+            account.last_error = "Phone number is banned by Telegram"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.phone_banned.value).inc()
+            log.warning("event=unified_auth_failed reason=phone_banned %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+        except (SessionRevoked, AuthKeyUnregistered):
+            flow.state = AuthFlowState.failed
+            flow.last_error = "Session revoked or auth key unregistered"
+            account.status = TelegramAccountStatus.error
+            account.session_encrypted = None
+            account.last_error = "Session revoked or auth key unregistered"
+            db.commit()
+            verify_fail_total.labels(reason=VerifyReasonCode.session_revoked.value).inc()
+            log.warning("event=unified_auth_failed reason=session_revoked %s", ctx)
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+        except Exception as exc:
+            err_msg = _sanitize_error(str(exc)[:500])
+            elapsed = int((time.monotonic() - t0) * 1000)
+
+            reason = VerifyReasonCode.network if _is_network_error(exc) else VerifyReasonCode.unknown
+            if reason == VerifyReasonCode.network and proxy:
+                _mark_proxy_unhealthy(proxy, db)
+
+            log.exception(
+                "event=unified_auth_failed reason=%s %s error=%s elapsed_ms=%d",
+                reason.value, ctx, err_msg, elapsed,
+            )
+            flow.state = AuthFlowState.failed
+            flow.last_error = err_msg
+            account.status = TelegramAccountStatus.error
+            account.last_error = err_msg
+            db.commit()
+            verify_fail_total.labels(reason=reason.value).inc()
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, owner_user_id)
+        finally:
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            _cleanup_pre_auth_session(flow_id, log)
+
+
+@celery_app.task(bind=True, soft_time_limit=330, time_limit=360)
+def unified_auth_task(self, account_id: int, flow_id: str) -> None:
+    """Single-connection auth task: send_code + poll for code + sign_in.
+
+    Replaces the two-step send_code_task / confirm_code_task flow to work
+    around Pyrogram 2.0.106 overwriting auth_key on every connect() for
+    pre-auth file sessions.
+    """
+    logger.info(
+        "event=unified_auth_task_started account_id=%s flow_id=%s",
+        account_id, flow_id,
+    )
+    try:
+        asyncio.run(_run_unified_auth(account_id, flow_id))
+    except SoftTimeLimitExceeded:
+        logger.warning(
+            "Task %s hit soft time limit, graceful shutdown (account_id=%s, flow_id=%s)",
+            self.request.id, account_id, flow_id,
+        )
+        _cleanup_pre_auth_session(flow_id)
+        with SessionLocal() as db:
+            account = db.get(TelegramAccount, account_id)
+            flow = db.get(TelegramAuthFlow, flow_id)
+            if account:
+                account.status = TelegramAccountStatus.error
+                account.last_error = "Task timed out"
+            if flow:
+                flow.state = AuthFlowState.failed
+                flow.last_error = "Task timed out"
+            db.commit()
+        return
+    logger.info(
+        "event=unified_auth_task_finished account_id=%s flow_id=%s",
         account_id, flow_id,
     )
 
