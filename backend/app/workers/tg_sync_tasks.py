@@ -23,8 +23,17 @@ from app.models.tg_account_chat import TgAccountChat
 from app.models.tg_chat_member import ChatMemberRole, TgChatMember
 from app.models.tg_user import TgUser
 from app.workers import celery_app
+from app.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+# ── Redis client for distributed locks ────────────────────────────────
+_settings = get_settings()
+
+def _get_redis():
+    """Lazy Redis client for lease locks."""
+    import redis as _redis
+    return _redis.Redis.from_url(_settings.redis_url)
 
 # Maximum groups to parse members from in a single sync run
 _MAX_GROUPS_PER_SYNC = 10
@@ -345,6 +354,17 @@ async def _run_sync_account(account_id: int) -> None:
 @celery_app.task(bind=True, soft_time_limit=3600, time_limit=3700)
 def sync_account_data(self, account_id: int) -> None:
     """Full account sync: dialogs + group member parsing."""
+    lock_key = f"sync_lock:{account_id}"
+    r = _get_redis()
+
+    # Acquire lease — if key already exists, another sync is running
+    if not r.set(lock_key, self.request.id, ex=3600, nx=True):
+        logger.info(
+            "event=sync_account_lease_busy account_id=%d task_id=%s",
+            account_id, self.request.id,
+        )
+        return
+
     logger.info(
         "event=sync_account_task_started account_id=%d task_id=%s",
         account_id, self.request.id,
@@ -357,6 +377,8 @@ def sync_account_data(self, account_id: int) -> None:
             account_id, self.request.id,
         )
         return
+    finally:
+        r.delete(lock_key)
     logger.info(
         "event=sync_account_task_finished account_id=%d task_id=%s",
         account_id, self.request.id,
@@ -460,6 +482,17 @@ async def _run_parse_single_chat(account_id: int, chat_id: int) -> None:
 @celery_app.task(bind=True, soft_time_limit=1800, time_limit=1900)
 def parse_single_chat(self, account_id: int, chat_id: int) -> None:
     """Parse members of a single chat."""
+    lock_key = f"parse_lock:{account_id}:{chat_id}"
+    r = _get_redis()
+
+    # Acquire lease — if key already exists, another parse is running
+    if not r.set(lock_key, self.request.id, ex=1800, nx=True):
+        logger.info(
+            "event=parse_single_chat_lease_busy account_id=%d chat_id=%d task_id=%s",
+            account_id, chat_id, self.request.id,
+        )
+        return
+
     logger.info(
         "event=parse_single_chat_task_started account_id=%d chat_id=%d task_id=%s",
         account_id, chat_id, self.request.id,
@@ -472,6 +505,8 @@ def parse_single_chat(self, account_id: int, chat_id: int) -> None:
             account_id, chat_id, self.request.id,
         )
         return
+    finally:
+        r.delete(lock_key)
     logger.info(
         "event=parse_single_chat_task_finished account_id=%d chat_id=%d task_id=%s",
         account_id, chat_id, self.request.id,

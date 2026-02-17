@@ -37,7 +37,9 @@ const AccountChats = (): JSX.Element => {
 
   // Track which chats are currently being parsed
   const [parsingChats, setParsingChats] = useState<Set<number>>(new Set());
-  const pollingTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const [parsingTimeoutChats, setParsingTimeoutChats] = useState<Set<number>>(new Set());
+  const pollingTimers = useRef<Map<number, ReturnType<typeof setInterval>>>(new Map());
+  const pollingStartTimes = useRef<Map<number, number>>(new Map());
 
   /* ── Load chats ─── */
   const load = useCallback(async () => {
@@ -61,7 +63,9 @@ const AccountChats = (): JSX.Element => {
   // Cleanup polling timers on unmount
   useEffect(() => {
     return () => {
-      pollingTimers.current.forEach((timer) => clearTimeout(timer));
+      pollingTimers.current.forEach((timer) => clearInterval(timer));
+      pollingTimers.current.clear();
+      pollingStartTimes.current.clear();
     };
   }, []);
 
@@ -90,30 +94,60 @@ const AccountChats = (): JSX.Element => {
     try {
       setError(null);
       setParsingChats((prev) => new Set(prev).add(chat.id));
+      setParsingTimeoutChats((prev) => {
+        const next = new Set(prev);
+        next.delete(chat.id);
+        return next;
+      });
       await parseChat(token, numericAccountId, chat.id);
       setActionMessage(`Парсинг "${chat.title}" запущен...`);
 
-      // Start polling after 10 seconds to check for updates
-      const timer = setTimeout(async () => {
-        try {
-          const data = await fetchAccountChats(token, numericAccountId);
-          setChats(data);
-          // Check if this chat got parsed
-          const updated = data.find((c) => c.id === chat.id);
-          if (updated?.last_parsed_at) {
-            setActionMessage(`"${chat.title}" — парсинг завершён.`);
-          }
-        } catch {
-          // ignore polling error
-        } finally {
+      const originalParsedAt = chat.last_parsed_at;
+      pollingStartTimes.current.set(chat.id, Date.now());
+
+      // Poll every 5 seconds to check for updates
+      const timer = setInterval(async () => {
+        const startTime = pollingStartTimes.current.get(chat.id) ?? Date.now();
+        const elapsed = Date.now() - startTime;
+
+        // Timeout after 5 minutes
+        if (elapsed > 5 * 60 * 1000) {
+          clearInterval(timer);
+          pollingTimers.current.delete(chat.id);
+          pollingStartTimes.current.delete(chat.id);
           setParsingChats((prev) => {
             const next = new Set(prev);
             next.delete(chat.id);
             return next;
           });
-          pollingTimers.current.delete(chat.id);
+          setParsingTimeoutChats((prev) => new Set(prev).add(chat.id));
+          setActionMessage(`Парсинг "${chat.title}" занимает больше времени чем обычно`);
+          return;
         }
-      }, 10000);
+
+        try {
+          const data = await fetchAccountChats(token, numericAccountId);
+          setChats(data);
+          const updated = data.find((c) => c.id === chat.id);
+          // Check if last_parsed_at changed (became non-null or newer)
+          if (
+            updated?.last_parsed_at &&
+            updated.last_parsed_at !== originalParsedAt
+          ) {
+            clearInterval(timer);
+            pollingTimers.current.delete(chat.id);
+            pollingStartTimes.current.delete(chat.id);
+            setParsingChats((prev) => {
+              const next = new Set(prev);
+              next.delete(chat.id);
+              return next;
+            });
+            setActionMessage(`"${chat.title}" — парсинг завершён.`);
+          }
+        } catch {
+          // ignore polling error
+        }
+      }, 5000);
 
       pollingTimers.current.set(chat.id, timer);
     } catch (err) {
@@ -242,6 +276,11 @@ const AccountChats = (): JSX.Element => {
                     >
                       {isParsing ? "Parsing..." : "Спарсить"}
                     </button>
+                    {parsingTimeoutChats.has(chat.id) && (
+                      <p className="mt-1 text-xs text-amber-400">
+                        Парсинг занимает больше времени чем обычно
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import EmptyState from "../components/EmptyState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
@@ -22,24 +22,42 @@ const Contacts = (): JSX.Element => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
     if (!token) {
       setLoading(false);
       return;
     }
-    const load = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchParsedContactsSummary(token);
-        setSummary(data);
-      } catch {
-        setError("Не удалось загрузить данные о контактах.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await fetchParsedContactsSummary(token);
+      setSummary(data);
+    } catch {
+      setError("Не удалось загрузить данные о контактах.");
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleRefresh = async () => {
+    if (!token) return;
+    try {
+      setRefreshing(true);
+      setError(null);
+      const data = await fetchParsedContactsSummary(token);
+      setSummary(data);
+    } catch {
+      setError("Не удалось загрузить данные о контактах.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   /* ── Format date ─── */
   const formatDate = (dateStr: string) => {
@@ -72,9 +90,19 @@ const Contacts = (): JSX.Element => {
         <>
           {/* ── Total contacts ──── */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-2xl font-bold text-slate-100">
-              Всего контактов: {summary.total_contacts}
-            </p>
+            <div className="flex items-center gap-3">
+              <p className="text-2xl font-bold text-slate-100">
+                Всего контактов: {summary.total_contacts}
+              </p>
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="rounded-lg border border-slate-700 px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                title="Обновить"
+              >
+                {refreshing ? "..." : "\uD83D\uDD04"}
+              </button>
+            </div>
           </div>
 
           {/* ── Chat breakdown ──── */}

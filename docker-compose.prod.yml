@@ -289,8 +289,18 @@ services:
       ENVIRONMENT: production
     command: celery -A app.workers:celery_app beat --loglevel=info
     depends_on:
+      db:
+        condition: service_healthy
       redis:
         condition: service_healthy
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers inspect ping --timeout 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
 
   proxy:
     build:
