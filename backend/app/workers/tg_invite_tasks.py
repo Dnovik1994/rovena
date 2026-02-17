@@ -205,6 +205,25 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                 # Resolve target: use target_chat_id directly, or resolve target_link
                 if campaign_target_chat_id is not None:
                     target_chat_id = campaign_target_chat_id
+                    # Resolve peer cache — in_memory sessions have empty cache
+                    try:
+                        await client.get_chat(target_chat_id)
+                    except Exception as exc:
+                        logger.warning("invite_dispatch: get_chat(%s) failed, trying get_dialogs: %s", target_chat_id, exc)
+                        try:
+                            async for _ in client.get_dialogs():
+                                pass
+                            await client.get_chat(target_chat_id)
+                        except Exception as exc2:
+                            logger.error("invite_dispatch: cannot resolve target_chat_id=%s: %s", target_chat_id, exc2)
+                            with SessionLocal() as db2:
+                                for td in task_data:
+                                    task = db2.get(InviteTask, td["task_id"])
+                                    if task:
+                                        task.status = InviteTaskStatus.pending
+                                        task.account_id = None
+                                db2.commit()
+                            continue
                 elif target_link:
                     try:
                         target_chat_id = await _resolve_target_chat_id(client, target_link)
@@ -257,6 +276,12 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
                         continue
+
+                    # Resolve user peer cache before invite
+                    try:
+                        await client.get_users(telegram_id)
+                    except Exception:
+                        pass  # If unresolvable — add_chat_members will raise
 
                     # Perform the invite (no DB session held)
                     try:
