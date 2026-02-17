@@ -14,6 +14,8 @@ import Onboarding from "./pages/Onboarding";
 import Projects from "./pages/Projects";
 import Sources from "./pages/Sources";
 import Targets from "./pages/Targets";
+import AccountChats from "./pages/AccountChats";
+import InviteCampaigns from "./pages/InviteCampaigns";
 import { apiFetch } from "./shared/api/client";
 import { AuthProvider, useAuth } from "./stores/auth";
 import { UserProfile } from "./types/user";
@@ -87,6 +89,8 @@ const AppRoutes = (): JSX.Element => {
           <Route path="/targets" element={<Targets />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/campaigns" element={<Campaigns />} />
+          <Route path="/accounts/:accountId/chats" element={<AccountChats />} />
+          <Route path="/invite-campaigns" element={<InviteCampaigns />} />
           <Route path="/subscription" element={<Subscription />} />
           <Route path="/admin" element={isAdmin ? <Admin /> : <Navigate to="/" replace />} />
           <Route path="/onboarding" element={<Onboarding />} />
