@@ -1,5 +1,6 @@
 from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
+from app.models.campaign_contact import CampaignContact, InviteStatus
 from app.models.campaign_dispatch_log import CampaignDispatchLog, DispatchErrorType
 from app.models.contact import Contact
 from app.models.project import Project
@@ -10,6 +11,9 @@ from app.models.tariff import Tariff
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus, VerifyStatus, VerifyReasonCode, VERIFY_LEASE_TTL_SECONDS
 from app.models.telegram_api_app import TelegramApiApp
 from app.models.telegram_auth_flow import TelegramAuthFlow, AuthFlowState
+from app.models.tg_account_chat import TgAccountChat
+from app.models.tg_chat_member import TgChatMember, ChatMemberRole
+from app.models.tg_user import TgUser
 from app.models.user import User
 from app.models.warming_channel import WarmingChannel
 
@@ -18,10 +22,13 @@ __all__ = [
     "AccountStatus",
     "AuthFlowState",
     "Campaign",
+    "CampaignContact",
     "CampaignStatus",
     "CampaignDispatchLog",
+    "ChatMemberRole",
     "DispatchErrorType",
     "Contact",
+    "InviteStatus",
     "Project",
     "Proxy",
     "ProxyStatus",
@@ -35,6 +42,9 @@ __all__ = [
     "TelegramAccountStatus",
     "TelegramApiApp",
     "TelegramAuthFlow",
+    "TgAccountChat",
+    "TgChatMember",
+    "TgUser",
     "User",
     "VerifyStatus",
     "VerifyReasonCode",
