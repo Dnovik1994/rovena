@@ -39,7 +39,13 @@ from app.schemas.telegram_account import (
 )
 from app.services.auto_assign import NoAvailableApiAppError, assign_api_app
 from app.services.websocket_manager import manager
-from app.workers.tg_auth_tasks import confirm_code_task, confirm_password_task, send_code_task, verify_account_task
+from app.workers.tg_auth_tasks import (
+    confirm_code_task,
+    confirm_password_task,
+    send_code_task,
+    unified_auth_task,
+    verify_account_task,
+)
 from app.workers.tasks import account_health_check
 from app.workers.tg_warming_tasks import start_tg_warming
 
@@ -377,12 +383,13 @@ def send_code(
             f"Allowed states: {', '.join(s.value for s in allowed_states)}",
         )
 
-    # Expire old flows
+    # Expire old flows (including code_submitted from unified_auth flows)
     db.query(TelegramAuthFlow).filter(
         TelegramAuthFlow.account_id == account.id,
         TelegramAuthFlow.state.in_([
             AuthFlowState.init, AuthFlowState.code_sent,
-            AuthFlowState.wait_code, AuthFlowState.wait_password,
+            AuthFlowState.wait_code, AuthFlowState.code_submitted,
+            AuthFlowState.wait_password,
         ]),
     ).update({"state": AuthFlowState.expired}, synchronize_session="fetch")
 
@@ -396,8 +403,8 @@ def send_code(
     db.commit()
     db.refresh(flow)
 
-    # Dispatch to worker — fail fast if Redis is down
-    _safe_dispatch(send_code_task, account.id, flow.id)
+    # Dispatch unified auth task (single connection for send_code + sign_in)
+    _safe_dispatch(unified_auth_task, account.id, flow.id)
 
     return SendCodeResponse(
         flow_id=flow.id,
@@ -480,7 +487,12 @@ def confirm_code(
             detail="Auth flow not found",
         )
 
-    if flow.state not in (AuthFlowState.wait_code, AuthFlowState.code_sent):
+    allowed_flow_states = (
+        AuthFlowState.wait_code,
+        AuthFlowState.code_sent,
+        AuthFlowState.code_submitted,  # allow re-submit after PhoneCodeInvalid
+    )
+    if flow.state not in allowed_flow_states:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Flow is in state '{flow.state.value}', expected 'wait_code'",
@@ -502,15 +514,33 @@ def confirm_code(
             detail="Too many verification attempts. Please start over.",
         )
 
-    # Dispatch to worker — fail fast if Redis is down
-    _safe_dispatch(confirm_code_task, account.id, flow.id, payload.code)
+    meta = flow.meta_json or {}
+
+    if meta.get("pre_auth_session"):
+        # Legacy flow (created before unified_auth_task deployment):
+        # dispatch the old confirm_code_task.
+        _safe_dispatch(confirm_code_task, account.id, flow.id, payload.code)
+        return ConfirmCodeResponse(
+            status=TgAccountResponse.model_validate(account).status,
+            flow_id=payload.flow_id,
+            state="processing",
+            next_step="poll",
+            message="Verifying code...",
+        )
+
+    # Unified flow: write code to DB for the polling task to pick up.
+    new_meta = dict(meta)
+    new_meta["submitted_code"] = payload.code
+    flow.meta_json = new_meta
+    flow.state = AuthFlowState.code_submitted
+    db.commit()
 
     return ConfirmCodeResponse(
         status=TgAccountResponse.model_validate(account).status,
         flow_id=payload.flow_id,
-        state="processing",
+        state="code_submitted",
         next_step="poll",
-        message="Verifying code...",
+        message="Code submitted, verifying...",
     )
 
 
