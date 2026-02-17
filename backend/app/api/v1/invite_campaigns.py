@@ -11,6 +11,7 @@ from app.api.deps import get_current_active_user
 from app.core.database import get_db
 from app.models.invite_campaign import InviteCampaign, InviteCampaignStatus
 from app.models.invite_task import InviteTask, InviteTaskStatus
+from app.models.telegram_account import TelegramAccount
 from app.models.tg_account_chat import TgAccountChat
 from app.models.tg_chat_member import TgChatMember
 from app.models.tg_user import TgUser
@@ -39,16 +40,20 @@ def create_invite_campaign(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> InviteCampaignDetailResponse:
-    # Verify source_chat_id exists in tg_account_chats for this owner
+    # Verify source_chat_id exists in tg_account_chats owned by this user
     chat = (
         db.query(TgAccountChat)
-        .filter(TgAccountChat.chat_id == payload.source_chat_id)
+        .join(TelegramAccount, TelegramAccount.id == TgAccountChat.account_id)
+        .filter(
+            TgAccountChat.chat_id == payload.source_chat_id,
+            TelegramAccount.owner_user_id == current_user.id,
+        )
         .first()
     )
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="source_chat_id not found in tg_account_chats",
+            detail="source_chat_id not found in your synced chats",
         )
 
     campaign = InviteCampaign(
@@ -82,6 +87,12 @@ def create_invite_campaign(
     )
 
     user_ids = [row[0] for row in members_query.all()]
+
+    if not user_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No members found for this source chat. Run account sync first.",
+        )
 
     tasks_created = 0
     for tg_user_id in user_ids:

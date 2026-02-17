@@ -84,33 +84,48 @@ async def _run_parse_source_members(
             me = await client.get_me()
             own_user_id = me.id
 
-            # Join the source group/channel
-            chat_identifier = source_link
+            # Join the source group/channel and resolve numeric chat_id
             if source_link.startswith("https://t.me/+") or source_link.startswith("https://t.me/joinchat/"):
-                # Invite link — join via link
+                # Invite link — join via link, use returned chat id
                 try:
-                    await client.join_chat(source_link)
-                    logger.info("parse_source_members: joined via invite link source_id=%d", source_id)
-                except Exception as exc:
-                    # May already be a member — log and continue
+                    joined_chat = await client.join_chat(source_link)
+                    chat_identifier = joined_chat.id
                     logger.info(
-                        "parse_source_members: join_chat result for source_id=%d: %s",
+                        "parse_source_members: joined via invite link source_id=%d chat_id=%s",
+                        source_id, chat_identifier,
+                    )
+                except Exception as exc:
+                    logger.info(
+                        "parse_source_members: join_chat result for source_id=%d: %s — retrying",
                         source_id, type(exc).__name__,
                     )
+                    try:
+                        joined_chat = await client.join_chat(source_link)
+                        chat_identifier = joined_chat.id
+                    except Exception:
+                        logger.error(
+                            "parse_source_members: cannot resolve invite link source_id=%d",
+                            source_id,
+                        )
+                        return
             else:
                 # Public username — extract from link or use as-is
                 username = source_link
                 if "t.me/" in username:
                     username = username.rstrip("/").split("t.me/")[-1]
                 try:
-                    await client.join_chat(username)
-                    logger.info("parse_source_members: joined @%s source_id=%d", username, source_id)
+                    joined_chat = await client.join_chat(username)
+                    chat_identifier = joined_chat.id
+                    logger.info(
+                        "parse_source_members: joined @%s source_id=%d chat_id=%s",
+                        username, source_id, chat_identifier,
+                    )
                 except Exception as exc:
                     logger.info(
-                        "parse_source_members: join_chat result for @%s source_id=%d: %s",
+                        "parse_source_members: join_chat result for @%s source_id=%d: %s — using username",
                         username, source_id, type(exc).__name__,
                     )
-                chat_identifier = username
+                    chat_identifier = username
 
             # Parse members
             async for member in client.get_chat_members(chat_identifier):

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import sentry_sdk
 from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import FloodWait, PeerFlood, UserAlreadyParticipant, UserPrivacyRestricted
+from sqlalchemy import update
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.core.database import SessionLocal
@@ -19,6 +20,46 @@ from app.models.tg_user import TgUser
 from app.workers import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def _is_invite_link(link: str) -> bool:
+    """Check if the link is a private/public invite link vs plain username."""
+    return link.startswith("https://t.me/+") or link.startswith("https://t.me/joinchat/")
+
+
+def _atomic_increment(db, campaign_id: int, field_name: str) -> None:
+    """Atomically increment a counter field on InviteCampaign."""
+    field = getattr(InviteCampaign, field_name)
+    db.execute(
+        update(InviteCampaign)
+        .where(InviteCampaign.id == campaign_id)
+        .values({field_name: field + 1})
+    )
+    db.commit()
+
+
+async def _resolve_target_chat_id(client, target_link: str) -> int:
+    """Resolve target_link to a numeric chat_id.
+
+    Handles both invite links (https://t.me/+xxx) and usernames.
+    The calling account joins the target chat first (idempotent).
+    """
+    if _is_invite_link(target_link):
+        chat = await client.join_chat(target_link)
+        return chat.id
+
+    # Public username — strip URL prefix if present
+    username = target_link
+    if "t.me/" in username:
+        username = username.rstrip("/").split("t.me/")[-1]
+    username = username.lstrip("@")
+
+    try:
+        chat = await client.join_chat(username)
+        return chat.id
+    except UserAlreadyParticipant:
+        chat = await client.get_chat(username)
+        return chat.id
 
 
 async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
@@ -87,7 +128,7 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
         available_slots = invites_per_hour - invites_this_hour
 
-        # Fetch pending tasks
+        # Fetch pending tasks atomically with SELECT FOR UPDATE SKIP LOCKED
         with SessionLocal() as db:
             pending_tasks = (
                 db.query(InviteTask)
@@ -97,26 +138,61 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                 )
                 .order_by(InviteTask.id.asc())
                 .limit(available_slots)
+                .with_for_update(skip_locked=True)
                 .all()
             )
-            task_ids = [t.id for t in pending_tasks]
 
-        if not task_ids:
+            # Immediately mark as in_progress to prevent race conditions
+            task_data = []
+            for t in pending_tasks:
+                t.status = InviteTaskStatus.in_progress
+                t.account_id = acct_id
+                t.attempted_at = datetime.now(timezone.utc)
+                task_data.append({"task_id": t.id, "tg_user_id": t.tg_user_id})
+            db.commit()
+
+        if not task_data:
             break  # No more pending tasks
+
+        # Preload telegram_ids for all tasks
+        tg_user_map: dict[int, int] = {}
+        with SessionLocal() as db:
+            tg_user_ids = [td["tg_user_id"] for td in task_data]
+            tg_users = db.query(TgUser).filter(TgUser.id.in_(tg_user_ids)).all()
+            tg_user_map = {u.id: u.telegram_id for u in tg_users}
 
         # Build TG client for this account
         with SessionLocal() as db:
             account = db.get(TelegramAccount, acct_id)
             if not account or account.status != TelegramAccountStatus.active:
+                # Revert tasks to pending
+                for td in task_data:
+                    task = db.get(InviteTask, td["task_id"])
+                    if task:
+                        task.status = InviteTaskStatus.pending
+                        task.account_id = None
+                db.commit()
                 continue
             proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
             try:
                 client = create_tg_account_client(account, proxy)
             except TelegramClientDisabledError:
                 logger.warning("invite_dispatch: TG client disabled account_id=%d", acct_id)
+                for td in task_data:
+                    task = db.get(InviteTask, td["task_id"])
+                    if task:
+                        task.status = InviteTaskStatus.pending
+                        task.account_id = None
+                db.commit()
                 continue
             except Exception as exc:
                 logger.error("invite_dispatch: cannot create TG client account_id=%d: %s", acct_id, exc)
+                for td in task_data:
+                    task = db.get(InviteTask, td["task_id"])
+                    if task:
+                        task.status = InviteTaskStatus.pending
+                        task.account_id = None
+                db.commit()
                 continue
 
         # Process tasks with this client
@@ -125,32 +201,52 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
 
         try:
             async with client:
-                for task_id in task_ids:
-                    if account_broke:
-                        break
-
+                # Resolve target_link to numeric chat_id (handles invite links)
+                try:
+                    target_chat_id = await _resolve_target_chat_id(client, target_link)
+                except Exception as exc:
+                    logger.error(
+                        "invite_dispatch: cannot resolve target_link=%s account_id=%d: %s",
+                        target_link, acct_id, exc,
+                    )
+                    sentry_sdk.capture_exception(exc)
+                    # Revert tasks to pending
                     with SessionLocal() as db:
-                        task = db.get(InviteTask, task_id)
-                        if not task or task.status != InviteTaskStatus.pending:
-                            continue
-
-                        tg_user = db.get(TgUser, task.tg_user_id)
-                        if not tg_user:
-                            task.status = InviteTaskStatus.skipped
-                            task.error_message = "tg_user not found"
-                            db.commit()
-                            continue
-
-                        telegram_id = tg_user.telegram_id
-
-                        task.account_id = acct_id
-                        task.status = InviteTaskStatus.in_progress
-                        task.attempted_at = datetime.now(timezone.utc)
+                        for td in task_data:
+                            task = db.get(InviteTask, td["task_id"])
+                            if task:
+                                task.status = InviteTaskStatus.pending
+                                task.account_id = None
                         db.commit()
+                    continue
+
+                for td in task_data:
+                    if account_broke:
+                        # Revert remaining tasks to pending
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, td["task_id"])
+                            if task and task.status == InviteTaskStatus.in_progress:
+                                task.status = InviteTaskStatus.pending
+                                task.account_id = None
+                            db.commit()
+                        continue
+
+                    task_id = td["task_id"]
+                    telegram_id = tg_user_map.get(td["tg_user_id"])
+
+                    if not telegram_id:
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, task_id)
+                            if task:
+                                task.status = InviteTaskStatus.skipped
+                                task.error_message = "tg_user not found"
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                        continue
 
                     # Perform the invite (no DB session held)
                     try:
-                        await client.add_chat_members(target_link, [telegram_id])
+                        await client.add_chat_members(target_chat_id, [telegram_id])
 
                         # Success
                         with SessionLocal() as db:
@@ -159,10 +255,7 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                                 task.status = InviteTaskStatus.success
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
-                            campaign = db.get(InviteCampaign, campaign_id)
-                            if campaign:
-                                campaign.invites_completed += 1
-                                db.commit()
+                            _atomic_increment(db, campaign_id, "invites_completed")
 
                     except UserAlreadyParticipant:
                         with SessionLocal() as db:
@@ -193,7 +286,6 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                                 account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=exc.value)
                                 db.commit()
                         account_broke = True
-                        break
 
                     except PeerFlood as exc:
                         sentry_sdk.capture_exception(exc)
@@ -205,12 +297,8 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                                 task.error_message = "PeerFlood"
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
-                            campaign = db.get(InviteCampaign, campaign_id)
-                            if campaign:
-                                campaign.invites_failed += 1
-                                db.commit()
+                            _atomic_increment(db, campaign_id, "invites_failed")
                         account_broke = True
-                        break
 
                     except UserPrivacyRestricted as exc:
                         sentry_sdk.capture_exception(exc)
@@ -221,10 +309,7 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                                 task.error_message = "UserPrivacyRestricted"
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
-                            campaign = db.get(InviteCampaign, campaign_id)
-                            if campaign:
-                                campaign.invites_failed += 1
-                                db.commit()
+                            _atomic_increment(db, campaign_id, "invites_failed")
 
                     except Exception as exc:  # noqa: BLE001
                         sentry_sdk.capture_exception(exc)
@@ -239,14 +324,12 @@ async def _run_invite_campaign_dispatch(campaign_id: int) -> None:
                                 task.error_message = str(exc)[:500]
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
-                            campaign = db.get(InviteCampaign, campaign_id)
-                            if campaign:
-                                campaign.invites_failed += 1
-                                db.commit()
+                            _atomic_increment(db, campaign_id, "invites_failed")
 
                     # Sleep between invites with jitter
-                    jitter = random.uniform(0.9, 1.3)
-                    await asyncio.sleep(sleep_interval * jitter)
+                    if not account_broke:
+                        jitter = random.uniform(0.9, 1.3)
+                        await asyncio.sleep(sleep_interval * jitter)
 
         except Exception as exc:  # noqa: BLE001
             sentry_sdk.capture_exception(exc)
