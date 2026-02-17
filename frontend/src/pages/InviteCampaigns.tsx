@@ -35,10 +35,18 @@ function extractError(err: unknown): string {
 
 const statusStyles: Record<string, string> = {
   draft: "bg-slate-700 text-slate-300",
-  active: "bg-emerald-900/60 text-emerald-400",
+  active: "bg-emerald-900/60 text-emerald-400 animate-pulse",
   paused: "bg-orange-900/60 text-orange-400",
   completed: "bg-blue-900/60 text-blue-400",
   error: "bg-rose-900/60 text-rose-400",
+};
+
+const statusLabels: Record<string, string> = {
+  draft: "Черновик",
+  active: "Активна",
+  paused: "На паузе",
+  completed: "Завершена",
+  error: "Ошибка",
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -46,7 +54,7 @@ function StatusBadge({ status }: { status: string }) {
     <span
       className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusStyles[status] || "bg-slate-700 text-slate-300"}`}
     >
-      {status}
+      {statusLabels[status] || status}
     </span>
   );
 }
@@ -56,9 +64,9 @@ function StatusBadge({ status }: { status: string }) {
 function ProgressBar({ value, max, className }: { value: number; max: number; className?: string }) {
   const percent = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
-    <div className="h-2 w-full rounded-full bg-slate-800">
+    <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
       <div
-        className={`h-2 rounded-full ${className || "bg-indigo-500/80"}`}
+        className={`h-2 rounded-full transition-all duration-500 ${className || "bg-indigo-500/80"}`}
         style={{ width: `${percent}%` }}
       />
     </div>
@@ -261,7 +269,7 @@ const InviteCampaigns = (): JSX.Element => {
       setError(null);
       const updated = await startInviteCampaign(token, id);
       setCampaigns((prev) => prev.map((c) => (c.id === id ? updated : c)));
-      setActionMessage("Campaign started.");
+      setActionMessage("Кампания запущена.");
     } catch (err) {
       setError(extractError(err));
     }
@@ -273,7 +281,7 @@ const InviteCampaigns = (): JSX.Element => {
       setError(null);
       const updated = await pauseInviteCampaign(token, id);
       setCampaigns((prev) => prev.map((c) => (c.id === id ? updated : c)));
-      setActionMessage("Campaign paused.");
+      setActionMessage("Кампания приостановлена.");
     } catch (err) {
       setError(extractError(err));
     }
@@ -285,7 +293,7 @@ const InviteCampaigns = (): JSX.Element => {
       setError(null);
       const updated = await resumeInviteCampaign(token, id);
       setCampaigns((prev) => prev.map((c) => (c.id === id ? updated : c)));
-      setActionMessage("Campaign resumed.");
+      setActionMessage("Кампания продолжена.");
     } catch (err) {
       setError(extractError(err));
     }
@@ -322,16 +330,16 @@ const InviteCampaigns = (): JSX.Element => {
     <section className="page">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="page__title">Invite Campaigns</h2>
+          <h2 className="page__title">Инвайтер</h2>
           <p className="page__subtitle">
-            Manage invite campaigns to grow your groups.
+            Управление кампаниями приглашений
           </p>
         </div>
         <button
           onClick={handleOpenForm}
           className="btn btn--primary text-xs"
         >
-          Create Campaign
+          Создать кампанию
         </button>
       </div>
 
@@ -482,8 +490,8 @@ const InviteCampaigns = (): JSX.Element => {
         <SkeletonList rows={4} />
       ) : campaigns.length === 0 ? (
         <EmptyState
-          title="No campaigns yet"
-          description="Create an invite campaign to start inviting users."
+          title="Кампаний пока нет"
+          description="Создайте кампанию для начала инвайтинга."
         />
       ) : (
         <div className="space-y-3">
@@ -510,15 +518,17 @@ const InviteCampaigns = (): JSX.Element => {
 
                 {/* ── Info ──── */}
                 <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                  {campaign.source_title && <span>Source: {campaign.source_title}</span>}
-                  {campaign.target_title && <span>Target: {campaign.target_title}</span>}
-                  <span>{formatDate(campaign.created_at)}</span>
+                  {campaign.source_title && <span>Источник: {campaign.source_title}</span>}
+                  {campaign.target_title && <span>Цель: {campaign.target_title}</span>}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Создана: {formatDate(campaign.created_at)}
                 </div>
 
                 {/* ── Progress bar ──── */}
                 <div className="mt-3 space-y-1">
                   <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span>Progress</span>
+                    <span>Прогресс</span>
                     <span>
                       {campaign.invites_completed} / {campaign.max_invites_total} ({percent}%)
                     </span>
@@ -538,7 +548,7 @@ const InviteCampaigns = (): JSX.Element => {
                   />
                   {campaign.invites_failed > 0 && (
                     <p className="text-xs text-rose-400">
-                      Failed: {campaign.invites_failed}
+                      Ошибки: {campaign.invites_failed}
                     </p>
                   )}
                 </div>
@@ -552,9 +562,9 @@ const InviteCampaigns = (): JSX.Element => {
                         e.stopPropagation();
                         handleStart(campaign.id);
                       }}
-                      className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white"
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors"
                     >
-                      Start
+                      Запустить
                     </button>
                   )}
                   {campaign.status === "active" && (
@@ -564,9 +574,9 @@ const InviteCampaigns = (): JSX.Element => {
                         e.stopPropagation();
                         handlePause(campaign.id);
                       }}
-                      className="rounded-lg bg-orange-500/80 px-3 py-1 text-xs font-semibold text-white"
+                      className="rounded-lg bg-orange-500/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-400/80 transition-colors"
                     >
-                      Pause
+                      Пауза
                     </button>
                   )}
                   {campaign.status === "paused" && (
@@ -576,9 +586,9 @@ const InviteCampaigns = (): JSX.Element => {
                         e.stopPropagation();
                         handleResume(campaign.id);
                       }}
-                      className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white"
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors"
                     >
-                      Resume
+                      Продолжить
                     </button>
                   )}
                 </div>
@@ -586,12 +596,12 @@ const InviteCampaigns = (): JSX.Element => {
                 {/* ── Detail view (inline, toggled) ──── */}
                 {isDetailOpen && detail && (
                   <div className="mt-4 space-y-3 border-t border-slate-800 pt-3">
-                    <h4 className="text-sm font-semibold text-slate-200">Task Breakdown</h4>
+                    <h4 className="text-sm font-semibold text-slate-200">Статистика задач</h4>
                     <div className="space-y-2">
                       {/* Pending */}
                       <div>
                         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                          <span>Pending</span>
+                          <span>Ожидание</span>
                           <span>{detail.pending}</span>
                         </div>
                         <ProgressBar value={detail.pending} max={detail.total_tasks} className="bg-slate-500/80" />
@@ -599,7 +609,7 @@ const InviteCampaigns = (): JSX.Element => {
                       {/* In Progress */}
                       <div>
                         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                          <span>In Progress</span>
+                          <span>В работе</span>
                           <span>{detail.in_progress}</span>
                         </div>
                         <ProgressBar value={detail.in_progress} max={detail.total_tasks} className="bg-indigo-500/80" />
@@ -607,7 +617,7 @@ const InviteCampaigns = (): JSX.Element => {
                       {/* Success */}
                       <div>
                         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                          <span>Success</span>
+                          <span>Успешно</span>
                           <span>{detail.success}</span>
                         </div>
                         <ProgressBar value={detail.success} max={detail.total_tasks} className="bg-emerald-500/80" />
@@ -615,7 +625,7 @@ const InviteCampaigns = (): JSX.Element => {
                       {/* Failed */}
                       <div>
                         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                          <span>Failed</span>
+                          <span>Ошибки</span>
                           <span>{detail.failed}</span>
                         </div>
                         <ProgressBar value={detail.failed} max={detail.total_tasks} className="bg-rose-500/80" />
@@ -623,19 +633,19 @@ const InviteCampaigns = (): JSX.Element => {
                       {/* Skipped */}
                       <div>
                         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                          <span>Skipped</span>
+                          <span>Пропущено</span>
                           <span>{detail.skipped}</span>
                         </div>
                         <ProgressBar value={detail.skipped} max={detail.total_tasks} className="bg-amber-500/80" />
                       </div>
                     </div>
                     <p className="text-xs text-slate-500">
-                      Total tasks: {detail.total_tasks}
+                      Всего задач: {detail.total_tasks}
                     </p>
                   </div>
                 )}
                 {isDetailOpen && detailLoading && (
-                  <div className="mt-4 text-xs text-slate-500">Loading details...</div>
+                  <div className="mt-4 text-xs text-slate-500">Загрузка...</div>
                 )}
               </div>
             );

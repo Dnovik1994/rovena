@@ -40,6 +40,7 @@ const AccountChats = (): JSX.Element => {
   const [parsingTimeoutChats, setParsingTimeoutChats] = useState<Set<number>>(new Set());
   const pollingTimers = useRef<Map<number, ReturnType<typeof setInterval>>>(new Map());
   const pollingStartTimes = useRef<Map<number, number>>(new Map());
+  const pollingErrorCounts = useRef<Map<number, number>>(new Map());
 
   /* ── Load chats ─── */
   const load = useCallback(async () => {
@@ -66,6 +67,7 @@ const AccountChats = (): JSX.Element => {
       pollingTimers.current.forEach((timer) => clearInterval(timer));
       pollingTimers.current.clear();
       pollingStartTimes.current.clear();
+      pollingErrorCounts.current.clear();
     };
   }, []);
 
@@ -76,7 +78,7 @@ const AccountChats = (): JSX.Element => {
       setSyncing(true);
       setError(null);
       await syncAccount(token, numericAccountId);
-      setActionMessage("Sync started. Refreshing chat list...");
+      setActionMessage("Синхронизация начата. Обновляем список чатов...");
       setTimeout(() => {
         load();
         setActionMessage(null);
@@ -127,6 +129,7 @@ const AccountChats = (): JSX.Element => {
 
         try {
           const data = await fetchAccountChats(token, numericAccountId);
+          pollingErrorCounts.current.set(chat.id, 0);
           setChats(data);
           const updated = data.find((c) => c.id === chat.id);
           // Check if last_parsed_at changed (became non-null or newer)
@@ -137,6 +140,7 @@ const AccountChats = (): JSX.Element => {
             clearInterval(timer);
             pollingTimers.current.delete(chat.id);
             pollingStartTimes.current.delete(chat.id);
+            pollingErrorCounts.current.delete(chat.id);
             setParsingChats((prev) => {
               const next = new Set(prev);
               next.delete(chat.id);
@@ -145,7 +149,20 @@ const AccountChats = (): JSX.Element => {
             setActionMessage(`"${chat.title}" — парсинг завершён.`);
           }
         } catch {
-          // ignore polling error
+          const errCount = (pollingErrorCounts.current.get(chat.id) ?? 0) + 1;
+          pollingErrorCounts.current.set(chat.id, errCount);
+          if (errCount >= 3) {
+            clearInterval(timer);
+            pollingTimers.current.delete(chat.id);
+            pollingStartTimes.current.delete(chat.id);
+            pollingErrorCounts.current.delete(chat.id);
+            setParsingChats((prev) => {
+              const next = new Set(prev);
+              next.delete(chat.id);
+              return next;
+            });
+            setError("Не удалось проверить статус парсинга. Попробуйте обновить страницу.");
+          }
         }
       }, 5000);
 
@@ -174,15 +191,15 @@ const AccountChats = (): JSX.Element => {
     <section className="page">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="page__title">Account Chats</h2>
+          <h2 className="page__title">Чаты аккаунта</h2>
           <p className="page__subtitle">
-            Chats for account #{accountId}
+            Чаты аккаунта #{accountId}
           </p>
         </div>
         <div className="flex gap-2">
           <Link to="/accounts">
             <button className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-200">
-              Back
+              ← Назад к аккаунтам
             </button>
           </Link>
           <button
@@ -190,7 +207,7 @@ const AccountChats = (): JSX.Element => {
             disabled={syncing}
             className="rounded-lg bg-indigo-500/80 px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
           >
-            {syncing ? "Syncing..." : "Sync"}
+            {syncing ? "Обновление..." : "Обновить чаты"}
           </button>
         </div>
       </div>
@@ -210,8 +227,8 @@ const AccountChats = (): JSX.Element => {
         <SkeletonList rows={4} />
       ) : chats.length === 0 ? (
         <EmptyState
-          title="No chats found"
-          description="Try syncing the account to load chats from Telegram."
+          title="Чаты не найдены"
+          description="Попробуйте обновить чаты аккаунта из Telegram."
         />
       ) : (
         <div className="space-y-3">
@@ -240,7 +257,7 @@ const AccountChats = (): JSX.Element => {
 
                 <div className="mt-1 flex items-center gap-3">
                   <span className="text-xs text-slate-400">
-                    Members: {chat.members_count}
+                    Участников: {chat.members_count}
                   </span>
                   {chat.is_creator && (
                     <span className="text-xs text-emerald-400">Creator</span>
@@ -274,7 +291,7 @@ const AccountChats = (): JSX.Element => {
                       disabled={isParsing}
                       className="rounded-lg bg-indigo-500/80 px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
                     >
-                      {isParsing ? "Parsing..." : "Спарсить"}
+                      {isParsing ? "Парсинг..." : "Спарсить"}
                     </button>
                     {parsingTimeoutChats.has(chat.id) && (
                       <p className="mt-1 text-xs text-amber-400">
