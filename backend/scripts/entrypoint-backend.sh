@@ -17,7 +17,15 @@ fi
 # Auto-apply database migrations
 if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
   log "Running alembic migrations..."
-  alembic upgrade head || {
+
+  # Check for multiple heads and auto-merge if needed
+  HEAD_COUNT=$(alembic heads 2>/dev/null | wc -l)
+  if [[ "$HEAD_COUNT" -gt 1 ]]; then
+    log "WARNING: Multiple Alembic heads detected ($HEAD_COUNT). Running merge..."
+    alembic merge heads -m "auto-merge heads on deploy" || true
+  fi
+
+  alembic upgrade heads || {
     log "WARNING: alembic upgrade failed (exit $?), continuing anyway"
   }
 fi
