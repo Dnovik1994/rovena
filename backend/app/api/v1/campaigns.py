@@ -193,10 +193,21 @@ def start_campaign(
             "Campaign dispatch enqueue failed, rolling back status",
             extra={"campaign_id": campaign.id, "error": str(exc)},
         )
-        campaign.status = previous_status
-        campaign.progress = None
-        db.commit()
-        db.refresh(campaign)
+        try:
+            campaign.status = previous_status
+            campaign.progress = None
+            db.commit()
+            db.refresh(campaign)
+        except Exception as rollback_exc:  # noqa: BLE001
+            logger.critical(
+                "Campaign status rollback FAILED — campaign %d stuck in 'active' without worker",
+                campaign.id,
+                extra={
+                    "campaign_id": campaign.id,
+                    "original_error": str(exc),
+                    "rollback_error": str(rollback_exc),
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Task queue unavailable. Campaign was not started.",
