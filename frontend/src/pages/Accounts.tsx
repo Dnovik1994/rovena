@@ -22,6 +22,7 @@ import {
 import { connectStatusSocket, StatusMessage } from "../services/websocket";
 import { useAuth } from "../stores/auth";
 import type { TgAccount, TgAccountStatus } from "../types/telegram_account";
+import { extractError } from "../utils/extractError";
 
 /* ── Form schemas ────────────────────────────────────────────────── */
 
@@ -86,15 +87,6 @@ const TERMINAL_FLOW_STATES = new Set([
   "expired",
   "failed",
 ]);
-
-/* ── Helper: extract error message ──────────────────────────────── */
-
-function extractError(err: unknown): string {
-  if (err && typeof err === "object" && "message" in err) {
-    return (err as { message: string }).message;
-  }
-  return "Unexpected error";
-}
 
 /* ── Component ──────────────────────────────────────────────────── */
 

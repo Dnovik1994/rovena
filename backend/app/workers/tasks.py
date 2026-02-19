@@ -574,15 +574,6 @@ def start_warming(self, account_id: int) -> None:
                 db.commit()
 
 
-# LEGACY — TODO: заменить на TelegramAccount
-@celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
-def perform_warming_action(self, account_id: int) -> None:
-    _log_task_started(account_id=account_id)
-    try:
-        logger.info("Perform warming action", extra={"account_id": account_id})
-    except SoftTimeLimitExceeded:
-        logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
-
 
 # LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=60, time_limit=90)

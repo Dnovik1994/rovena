@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import uuid
@@ -50,9 +51,62 @@ if settings.sentry_dsn:
         integrations=[FastApiIntegration(), CeleryIntegration()],
     )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup ---
+    commit = _get_git_commit()
+    resolved_host = os.getenv("UVICORN_HOST") or os.getenv("HOST") or "0.0.0.0"
+    resolved_port = os.getenv("UVICORN_PORT") or os.getenv("PORT") or "8000"
+    logger.info(
+        "App starting | version=%s | commit=%s | env=PRODUCTION=%s",
+        APP_VERSION,
+        commit,
+        settings.production,
+    )
+    logger.info(
+        "Resolved API settings | host=%s | port=%s | api_v1_prefix=%s",
+        resolved_host,
+        resolved_port,
+        settings.api_v1_prefix,
+    )
+    logger.info(
+        "CORS config | origins=%s | credentials=%s",
+        settings.cors_origins,
+        settings.cors_allow_credentials,
+    )
+    logger.info("Config preflight passed (validated in get_settings)")
+    try:
+        redis_client = get_sync_redis()
+        if redis_client is not None:
+            await asyncio.to_thread(redis_client.ping)
+            logger.info("Redis connected")
+        else:
+            logger.warning("Redis connection failed: no redis_url configured")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Redis connection failed", extra={"error": str(exc)})
+    await asyncio.to_thread(_bootstrap_admin)
+    logger.info(
+        "Admin config | admin_user_id_configured=%s | admin_telegram_id_configured=%s",
+        settings.admin_user_id is not None,
+        settings.admin_telegram_id is not None,
+    )
+    if settings.redis_url:
+        app.state.ws_subscriber_task = asyncio.create_task(
+            _redis_ws_subscriber(), name="redis-ws-subscriber"
+        )
+    logger.info("Application startup complete")
+
+    yield
+
+    # --- shutdown ---
+    await asyncio.to_thread(close_sync_redis)
+    logger.info("Sync Redis clients closed")
+
+
 app = FastAPI(
     title=settings.app_name,
     openapi_url=f"{settings.api_v1_prefix}/openapi.json",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 
@@ -105,59 +159,6 @@ class ExceptionGroupMiddleware:
             response = await _internal_error_response(request, exc)
             await response(scope, receive, send)
 
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    commit = _get_git_commit()
-    resolved_host = os.getenv("UVICORN_HOST") or os.getenv("HOST") or "0.0.0.0"
-    resolved_port = os.getenv("UVICORN_PORT") or os.getenv("PORT") or "8000"
-    logger.info(
-        "App starting | version=%s | commit=%s | env=PRODUCTION=%s",
-        APP_VERSION,
-        commit,
-        settings.production,
-    )
-    logger.info(
-        "Resolved API settings | host=%s | port=%s | api_v1_prefix=%s",
-        resolved_host,
-        resolved_port,
-        settings.api_v1_prefix,
-    )
-    logger.info(
-        "CORS config | origins=%s | credentials=%s",
-        settings.cors_origins,
-        settings.cors_allow_credentials,
-    )
-    logger.info("Config preflight passed (validated in get_settings)")
-    try:
-        redis_client = get_sync_redis()
-        if redis_client is not None:
-            await asyncio.to_thread(redis_client.ping)
-            logger.info("Redis connected")
-        else:
-            logger.warning("Redis connection failed: no redis_url configured")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Redis connection failed", extra={"error": str(exc)})
-    await asyncio.to_thread(_bootstrap_admin)
-    logger.info(
-        "Admin config | admin_user_id_configured=%s | admin_telegram_id_configured=%s",
-        settings.admin_user_id is not None,
-        settings.admin_telegram_id is not None,
-    )
-    # Start background Redis subscriber for WS broadcasts from workers.
-    # Store the task reference to prevent GC from destroying it
-    # ("Task was destroyed but it is pending!" warning).
-    if settings.redis_url:
-        app.state.ws_subscriber_task = asyncio.create_task(
-            _redis_ws_subscriber(), name="redis-ws-subscriber"
-        )
-    logger.info("Application startup complete")
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    await asyncio.to_thread(close_sync_redis)
-    logger.info("Sync Redis clients closed")
 
 
 
