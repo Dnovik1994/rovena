@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 import stripe
 from pydantic import BaseModel
@@ -19,6 +21,7 @@ from app.schemas.user import UserResponse
 
 router = APIRouter(tags=["admin"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 TARIFFS_CACHE_KEY = "tariffs:all"
 
@@ -394,9 +397,14 @@ def admin_create_checkout(
             metadata={"user_id": str(user.id), "tariff_id": str(tariff.id)},
         )
     except stripe.error.StripeError as e:
+        logger.error(
+            "Stripe error during checkout: %s",
+            str(e),
+            extra={"user_id": user.id, "action": "create_checkout_session"},
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Stripe error: {str(e)}",
+            detail="Payment provider error. Please try again or contact support.",
         ) from e
     return {"checkout_url": session.url}
 

@@ -17,7 +17,6 @@ from pyrogram.errors import FloodWait
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.workers.tg_timeout_helpers import collect_async_gen, safe_call
 from app.core.database import SessionLocal
-from app.core.settings import get_settings
 from app.core.tz import is_expired
 from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
@@ -26,10 +25,6 @@ from app.services.websocket_manager import manager
 from app.workers import celery_app
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
-
-if settings.redis_url:
-    manager.configure_redis(settings.redis_url)
 
 
 def _serialize_status(status: TelegramAccountStatus) -> str:

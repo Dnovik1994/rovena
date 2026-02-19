@@ -32,14 +32,14 @@ async def get_json(key: str) -> dict[str, Any] | None:
         logger.exception("Cache read failed for key %s", key)
         return None
     if not cached:
-        logger.info("Cache miss for key %s", key)
+        logger.debug("Cache miss for key %s", key)
         return None
     try:
         payload = json.loads(cached)
     except json.JSONDecodeError:
-        logger.info("Cache miss for key %s", key)
+        logger.debug("Cache miss for key %s", key)
         return None
-    logger.info("Cache hit for key %s", key)
+    logger.debug("Cache hit for key %s", key)
     return payload
 
 
