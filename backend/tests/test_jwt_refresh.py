@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from jose import jwt
+import jwt
 
 from app.core.database import get_db
 from app.core.security import create_refresh_token, hash_token
