@@ -57,15 +57,20 @@ def get_db() -> Session:
 async def get_cached_user(db: Session, user_id: int):
     from app.models.user import User
 
-    def _load_user(uid: int):
-        with SessionLocal() as s:
-            return s.get(User, uid)
+    cache_key = f"user:{user_id}"
+    cached = await get_json(cache_key)
+    if cached:
+        # Cache hit — load ORM object from the passed session so callers
+        # always receive a consistent User instance.
+        user = db.get(User, user_id)
+        if user:
+            return user
+        # User disappeared from DB since caching — fall through to return None
 
-    user = await asyncio.to_thread(_load_user, user_id)
+    user = db.get(User, user_id)
     if not user:
         return None
 
-    cache_key = f"user:{user_id}"
     payload = {
         "id": user.id,
         "telegram_id": user.telegram_id,
