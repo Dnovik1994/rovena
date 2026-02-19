@@ -509,9 +509,29 @@ def _check_user_active(user_id: int) -> bool:
 
 @app.websocket("/ws/status")
 async def websocket_status(websocket: WebSocket) -> None:
-    await websocket.accept()
     token = websocket.query_params.get("token")
-    if not token:
+
+    # Fast path: token in query params — validate BEFORE accept()
+    if token:
+        try:
+            payload = decode_access_token(token)
+            user_id = int(payload.get("sub", 0))
+        except Exception:  # noqa: BLE001
+            await websocket.close(code=1008)
+            return
+
+        if not await asyncio.to_thread(_check_user_active, user_id):
+            await websocket.close(code=1008)
+            return
+
+        await websocket.accept()
+        await manager.connect(websocket, user_id, accept=False)
+    else:
+        # Fallback for clients that cannot pass token in URL (e.g. browser
+        # WebSocket API without custom-header support).  Accept first, then
+        # wait for a JSON payload containing the token within 10 seconds.
+        await websocket.accept()
+
         try:
             raw_payload = await asyncio.wait_for(websocket.receive_text(), timeout=10)
         except asyncio.TimeoutError:
@@ -529,18 +549,18 @@ async def websocket_status(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
 
-    try:
-        payload = decode_access_token(token)
-        user_id = int(payload.get("sub", 0))
-    except Exception:  # noqa: BLE001
-        await websocket.close(code=1008)
-        return
+        try:
+            payload = decode_access_token(token)
+            user_id = int(payload.get("sub", 0))
+        except Exception:  # noqa: BLE001
+            await websocket.close(code=1008)
+            return
 
-    if not await asyncio.to_thread(_check_user_active, user_id):
-        await websocket.close(code=1008)
-        return
+        if not await asyncio.to_thread(_check_user_active, user_id):
+            await websocket.close(code=1008)
+            return
 
-    await manager.connect(websocket, user_id, accept=False)
+        await manager.connect(websocket, user_id, accept=False)
 
     async def _ping_loop() -> None:
         """Send periodic pings to detect stale connections."""

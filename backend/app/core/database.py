@@ -55,17 +55,24 @@ def get_db() -> Session:
 
 
 async def get_cached_user(db: Session, user_id: int):
+    """Return user data by *user_id*, preferring Redis cache.
+
+    Returns a **dict** on cache hit (no SQL) or a **User ORM object** on
+    cache miss (loaded via the *db* session, then cached for next time).
+    Callers that need ORM-specific behaviour should check the return type
+    or always access values via dict-style keys.
+    """
     from app.models.user import User
 
-    def _load_user(uid: int):
-        with SessionLocal() as s:
-            return s.get(User, uid)
+    cache_key = f"user:{user_id}"
+    cached = await get_json(cache_key)
+    if cached:
+        return cached  # dict — zero SQL on cache hit
 
-    user = await asyncio.to_thread(_load_user, user_id)
+    user = db.get(User, user_id)
     if not user:
         return None
 
-    cache_key = f"user:{user_id}"
     payload = {
         "id": user.id,
         "telegram_id": user.telegram_id,

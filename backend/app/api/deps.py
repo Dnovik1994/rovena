@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, Header, Request
 from jose import JWTError
 from sqlalchemy.orm import Session
@@ -9,15 +11,39 @@ from app.core.security import decode_access_token
 from app.core.settings import get_settings
 from app.models.user import User
 
+logger = logging.getLogger(__name__)
+_csrf_warning_logged = False
+
 
 def _user_cache_key(user_id: int) -> str:
     return f"user:{user_id}"
 
 
 def _enforce_csrf(request: Request) -> None:
+    """CSRF placeholder — compares against a single static token from settings.
+
+    This does NOT provide real CSRF protection because the token is global and
+    never rotated.  It exists only as a middleware/dependency hook so that a
+    proper implementation can be swapped in later.
+
+    TODO: Replace with per-session, double-submit-cookie CSRF tokens:
+      1. Generate a random token per session and store it server-side.
+      2. Set it as a cookie (SameSite=Strict) and require the client to echo
+         it back via X-CSRF-Token header.
+      3. Compare cookie value with header value on every mutating request.
+    """
     settings = get_settings()
     if not settings.csrf_enabled:
         return
+
+    global _csrf_warning_logged  # noqa: PLW0603
+    if not _csrf_warning_logged:
+        logger.warning(
+            "Static CSRF token provides no real protection. "
+            "Implement per-session tokens."
+        )
+        _csrf_warning_logged = True
+
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         csrf_token = request.headers.get("X-CSRF-Token")
         if not csrf_token or csrf_token != settings.csrf_token:
