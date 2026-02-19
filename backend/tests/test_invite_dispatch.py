@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import pytest
 import sentry_sdk
+from pyrogram.errors import FloodWait, PeerFlood, UserPrivacyRestricted
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -271,3 +272,185 @@ def test_smoke_single_task_completed(patch_dispatch):
     assert patch_dispatch.client.get_users_calls == 1
     # No reschedule needed — all tasks done
     assert len(patch_dispatch.reschedule_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Core test cases — group 1 (happy path + basic errors)
+# ---------------------------------------------------------------------------
+
+
+def test_multiple_tasks_all_completed(patch_dispatch):
+    """5 pending tasks → all succeed → campaign completed, invites_completed=5."""
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+        campaign_id = campaign.id
+
+        task_ids = []
+        for i in range(5):
+            tg_user = create_test_tg_user(db, telegram_id=400_001 + i)
+            task = create_test_invite_task(db, campaign.id, tg_user.id)
+            task_ids.append(task.id)
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # All 5 tasks should be success
+        for tid in task_ids:
+            task = db.get(InviteTask, tid)
+            assert task.status == InviteTaskStatus.success, f"task {tid} status={task.status}"
+            assert task.completed_at is not None
+
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.completed
+        assert campaign.invites_completed == 5
+        assert campaign.completed_at is not None
+
+    assert patch_dispatch.client.add_chat_members_calls == 5
+    assert len(patch_dispatch.reschedule_calls) == 0
+
+
+def test_flood_wait_sets_cooldown_and_reschedules(patch_dispatch):
+    """FloodWait(300) on first invite → account cooldown, task reverted, reschedule."""
+    patch_dispatch.client.add_chat_members_side_effect = FloodWait(value=300)
+
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+        tg_user = create_test_tg_user(db, telegram_id=500_001)
+        task = create_test_invite_task(db, campaign.id, tg_user.id)
+        campaign_id = campaign.id
+        task_id = task.id
+        account_id = account.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # Task should be reverted to pending (not failed)
+        task = db.get(InviteTask, task_id)
+        assert task.status == InviteTaskStatus.pending
+
+        # Account should be in cooldown
+        account = db.get(TelegramAccount, account_id)
+        assert account.status == TelegramAccountStatus.cooldown
+        assert account.cooldown_until is not None
+
+        # Campaign should NOT be completed (still active, pending task exists)
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.active
+        assert campaign.completed_at is None
+
+    # Reschedule must have been called
+    assert len(patch_dispatch.reschedule_calls) == 1
+    assert patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"] == 60
+    # Sentry should capture the exception
+    assert len(patch_dispatch.sentry_calls) == 1
+
+
+def test_peer_flood_fails_task_and_stops_account(patch_dispatch):
+    """PeerFlood on first invite → task failed, account stops processing, reschedule.
+
+    NOTE: Current code does NOT set account.status=cooldown for PeerFlood
+    (unlike FloodWait).  It only sets account_broke=True internally.
+    """
+    # 2 tasks: first gets PeerFlood, second should be reverted to pending
+    patch_dispatch.client.add_chat_members_side_effect = PeerFlood()
+
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+
+        tg_user1 = create_test_tg_user(db, telegram_id=600_001)
+        tg_user2 = create_test_tg_user(db, telegram_id=600_002)
+        task1 = create_test_invite_task(db, campaign.id, tg_user1.id)
+        task2 = create_test_invite_task(db, campaign.id, tg_user2.id)
+
+        campaign_id = campaign.id
+        task1_id = task1.id
+        task2_id = task2.id
+        account_id = account.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # First task → failed with PeerFlood
+        t1 = db.get(InviteTask, task1_id)
+        assert t1.status == InviteTaskStatus.failed
+        assert t1.error_message == "PeerFlood"
+
+        # Second task → reverted to pending (account_broke stopped processing)
+        t2 = db.get(InviteTask, task2_id)
+        assert t2.status == InviteTaskStatus.pending
+
+        # Account stays active (PeerFlood does NOT set cooldown in current code)
+        account = db.get(TelegramAccount, account_id)
+        assert account.status == TelegramAccountStatus.active
+
+        # Campaign invites_failed incremented for the first task
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.invites_failed == 1
+        # Campaign NOT completed (pending task remains)
+        assert campaign.status != InviteCampaignStatus.completed
+
+    # Reschedule called because pending tasks remain
+    assert len(patch_dispatch.reschedule_calls) == 1
+    assert len(patch_dispatch.sentry_calls) == 1
+
+
+def test_user_privacy_restricted_fails_task_others_continue(patch_dispatch):
+    """UserPrivacyRestricted on first invite → task failed, remaining succeed.
+
+    3 tasks: first raises UserPrivacyRestricted, others succeed.
+    campaign.invites_completed=2, invites_failed=1, status=completed.
+    """
+    patch_dispatch.client.add_chat_members_side_effect = [
+        UserPrivacyRestricted(),  # first call fails
+        None,                     # second call succeeds
+        None,                     # third call succeeds
+    ]
+
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+
+        tg_user1 = create_test_tg_user(db, telegram_id=700_001)
+        tg_user2 = create_test_tg_user(db, telegram_id=700_002)
+        tg_user3 = create_test_tg_user(db, telegram_id=700_003)
+        task1 = create_test_invite_task(db, campaign.id, tg_user1.id)
+        task2 = create_test_invite_task(db, campaign.id, tg_user2.id)
+        task3 = create_test_invite_task(db, campaign.id, tg_user3.id)
+
+        campaign_id = campaign.id
+        task1_id = task1.id
+        task2_id = task2.id
+        task3_id = task3.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # First task → failed
+        t1 = db.get(InviteTask, task1_id)
+        assert t1.status == InviteTaskStatus.failed
+        assert t1.error_message == "UserPrivacyRestricted"
+
+        # Remaining tasks → success
+        t2 = db.get(InviteTask, task2_id)
+        assert t2.status == InviteTaskStatus.success
+        t3 = db.get(InviteTask, task3_id)
+        assert t3.status == InviteTaskStatus.success
+
+        # Campaign counters
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.invites_completed == 2
+        assert campaign.invites_failed == 1
+        # All tasks resolved → completed
+        assert campaign.status == InviteCampaignStatus.completed
+
+    # No reschedule — all tasks done
+    assert len(patch_dispatch.reschedule_calls) == 0
+    # Sentry captured the privacy error
+    assert len(patch_dispatch.sentry_calls) == 1
