@@ -45,7 +45,8 @@ configure_logging(production=settings.production)
 if settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
-        traces_sample_rate=1.0,
+        # 10% sampling — increase for debugging, never 1.0 in prod
+        traces_sample_rate=0.1,
         integrations=[FastApiIntegration(), CeleryIntegration()],
     )
 
@@ -128,9 +129,6 @@ async def on_startup() -> None:
         settings.cors_allow_credentials,
     )
     logger.info("Config preflight passed (validated in get_settings)")
-    # Configure WS manager with Redis for cross-process pub/sub
-    if settings.redis_url:
-        manager.configure_redis(settings.redis_url)
     try:
         redis_client = get_sync_redis()
         if redis_client is not None:

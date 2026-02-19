@@ -155,7 +155,10 @@ async def _run_campaign_dispatch(campaign_id: int) -> None:
         )
         if campaign.source_id:
             contacts_query = contacts_query.filter(Contact.source_id == campaign.source_id)
-        contact_ids = [c.id for c in contacts_query.order_by(Contact.id.asc()).all()]
+        contact_ids = [
+            row[0]
+            for row in contacts_query.with_entities(Contact.id).order_by(Contact.id.asc()).all()
+        ]
 
         account_ids = [
             a.id

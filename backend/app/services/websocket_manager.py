@@ -4,7 +4,8 @@ import logging
 from typing import Any
 
 from fastapi import WebSocket
-from redis import Redis
+
+from app.core.redis_client import get_sync_redis
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,6 @@ _DEFAULT_BROADCAST_CONCURRENCY = 100
 class WebSocketManager:
     def __init__(self) -> None:
         self._connections: dict[WebSocket, int] = {}
-        self._redis_url: str | None = None
         self._lock = asyncio.Lock()
         self._semaphore: asyncio.Semaphore | None = None
 
@@ -32,10 +32,6 @@ class WebSocketManager:
                 limit = _DEFAULT_BROADCAST_CONCURRENCY
             self._semaphore = asyncio.Semaphore(limit)
         return self._semaphore
-
-    def configure_redis(self, redis_url: str) -> None:
-        """Set the Redis URL used for cross-process pub/sub."""
-        self._redis_url = redis_url
 
     async def connect(self, websocket: WebSocket, user_id: int, *, accept: bool = True) -> None:
         if accept:
@@ -120,13 +116,12 @@ class WebSocketManager:
         self._publish_to_redis(payload)
 
     def _publish_to_redis(self, payload: dict[str, Any]) -> None:
-        if not self._redis_url:
-            logger.debug("broadcast_sync: no Redis URL configured, message dropped")
+        client = get_sync_redis()
+        if client is None:
+            logger.debug("broadcast_sync: no Redis client available, message dropped")
             return
         try:
-            client = Redis.from_url(self._redis_url)
             client.publish(REDIS_WS_CHANNEL, json.dumps(payload))
-            client.close()
         except Exception:  # noqa: BLE001
             logger.exception("Failed to publish WS event to Redis")
 

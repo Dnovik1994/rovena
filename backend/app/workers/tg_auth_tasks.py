@@ -61,11 +61,6 @@ from app.workers import celery_app
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Configure Redis on the manager so broadcast_sync publishes via Redis
-# (Celery workers are separate processes with no WS clients)
-if settings.redis_url:
-    manager.configure_redis(settings.redis_url)
-
 def _mask_phone(phone: str) -> str:
     """Mask phone number for logging (no PII in logs).
     '+380501234567' -> '+380*****4567'
