@@ -41,6 +41,7 @@ from app.core.database import Base, get_db  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app import models  # noqa: F401, E402
 from app.models.tariff import Tariff  # noqa: E402
+from app.models.telegram_api_app import TelegramApiApp  # noqa: E402
 
 get_settings.cache_clear()
 
@@ -67,6 +68,13 @@ def reset_db(db_engine):
             [
                 Tariff(name="Free", max_accounts=1, max_invites_day=50, price=0.0),
                 Tariff(name="Pro", max_accounts=5, max_invites_day=200, price=19.0),
+                TelegramApiApp(
+                    api_id=12345,
+                    api_hash="0" * 32,
+                    app_title="Test App",
+                    max_accounts=100,
+                    is_active=True,
+                ),
             ]
         )
         session.commit()
@@ -98,13 +106,17 @@ def mock_redis(monkeypatch):
 
     dummy = DummyRedis()
 
-    def fake_from_url(_url):
-        return dummy
+    import app.core.redis_client as _rc
 
-    from app import main as main_module
+    monkeypatch.setattr(_rc, "_client", dummy)
+    monkeypatch.setattr(_rc, "_client_decoded", dummy)
+    # Ensure redis_url is set so get_sync_redis() doesn't bail early
+    monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
+    get_settings.cache_clear()
 
-    monkeypatch.setattr(main_module.Redis, "from_url", staticmethod(fake_from_url))
-    return dummy
+    yield dummy
+
+    get_settings.cache_clear()
 
 
 @pytest.fixture()

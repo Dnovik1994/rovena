@@ -27,16 +27,16 @@ class TestVerifyAccountAsyncBroadcast:
     """
 
     def test_verify_account_dispatches_to_celery_not_blocking(self):
-        """Static check: verify_account is non-blocking — dispatches to Celery worker."""
+        """Static check: verify_tg_account is non-blocking — dispatches to Celery worker."""
         from pathlib import Path
 
         # Read source directly to avoid heavy import chain (pyrogram/cryptography)
-        src = Path(__file__).resolve().parent.parent / "app" / "api" / "v1" / "accounts.py"
+        src = Path(__file__).resolve().parent.parent / "app" / "api" / "v1" / "tg_accounts.py"
         source = src.read_text()
 
-        # Find the verify_account function body (now sync def, not async)
-        start = source.find("def verify_account")
-        assert start != -1, "verify_account function not found"
+        # Find the verify_tg_account function body (sync def)
+        start = source.find("def verify_tg_account")
+        assert start != -1, "verify_tg_account function not found"
         # Find the next top-level function/class definition to bound the search
         next_def = source.find("\n@router.", start + 1)
         if next_def == -1:
@@ -44,11 +44,11 @@ class TestVerifyAccountAsyncBroadcast:
         func_body = source[start:next_def]
 
         # Should dispatch to Celery, NOT call Pyrogram directly
-        assert "legacy_verify_account" in func_body, (
-            "verify_account should dispatch to legacy_verify_account Celery task"
+        assert "verify_account_task" in func_body, (
+            "verify_tg_account should dispatch to verify_account_task Celery task"
         )
         assert "async with client" not in func_body, (
-            "verify_account should NOT run blocking Pyrogram calls in HTTP handler"
+            "verify_tg_account should NOT run blocking Pyrogram calls in HTTP handler"
         )
 
 
@@ -143,7 +143,7 @@ class TestCORSErrorClarity:
         monkeypatch.setenv("TELEGRAM_AUTH_TTL_SECONDS", "300")
         get_settings.cache_clear()
 
-        with pytest.raises(ValueError, match="CORS_ORIGINS must include") as exc_info:
+        with pytest.raises(ValueError, match="CORS_ORIGINS is empty") as exc_info:
             get_settings()
         # Error message should reference the configured WEB_BASE_URL
         assert "https://myapp.example.com" in str(exc_info.value)

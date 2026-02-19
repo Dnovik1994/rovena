@@ -114,8 +114,7 @@ class TelegramAccount(Base):
         is not currently leased (or the existing lease has expired).
         Returns True if this worker acquired the lease, False otherwise.
         """
-        from app.core.tz import ensure_utc
-        now = ensure_utc(datetime.utcnow())
+        now = datetime.now(timezone.utc)
         lease_ttl = timedelta(seconds=VERIFY_LEASE_TTL_SECONDS)
 
         # Atomic: UPDATE only if not currently leased (or lease expired)
@@ -136,6 +135,7 @@ class TelegramAccount(Base):
                 verify_status=VerifyStatus.running.value,
                 verify_reason=None,
             )
+            .execution_options(synchronize_session=False)
         )
         db.commit()
 
@@ -166,8 +166,7 @@ class TelegramAccount(Base):
         has no active warming lease (or the existing lease has expired).
         Returns True if this worker acquired the lease, False otherwise.
         """
-        from app.core.tz import ensure_utc
-        now = ensure_utc(datetime.utcnow())
+        now = datetime.now(timezone.utc)
         lease_ttl = timedelta(seconds=WARMING_LEASE_TTL_SECONDS)
 
         result = db.execute(
@@ -184,6 +183,7 @@ class TelegramAccount(Base):
                 warming_task_id=task_id,
                 warming_task_started_at=now,
             )
+            .execution_options(synchronize_session=False)
         )
         db.commit()
 
