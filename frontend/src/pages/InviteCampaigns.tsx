@@ -21,15 +21,7 @@ import type {
   AdminChat,
 } from "../types/invite";
 import type { TgAccount } from "../types/telegram_account";
-
-/* ── Helper: extract error message ──────────────────────────────── */
-
-function extractError(err: unknown): string {
-  if (err && typeof err === "object" && "message" in err) {
-    return (err as { message: string }).message;
-  }
-  return "Unexpected error";
-}
+import { extractError } from "../utils/extractError";
 
 /* ── Status badge ───────────────────────────────────────────────── */
 
@@ -131,31 +123,55 @@ const InviteCampaigns = (): JSX.Element => {
   /* ── Polling: refetch campaigns every 5s while any is active ─── */
   const listPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const hasActive = campaigns.some((c) => c.status === "active");
+  const startListPolling = useCallback(() => {
+    if (listPollingRef.current) return;
+    listPollingRef.current = setInterval(async () => {
+      if (!token) return;
+      try {
+        const data = await fetchInviteCampaigns(token);
+        setCampaigns(data);
+      } catch {
+        // ignore polling errors
+      }
+    }, 5000);
+  }, [token]);
 
-    if (hasActive && !listPollingRef.current) {
-      listPollingRef.current = setInterval(async () => {
-        if (!token) return;
-        try {
-          const data = await fetchInviteCampaigns(token);
-          setCampaigns(data);
-        } catch {
-          // ignore polling errors
-        }
-      }, 5000);
-    } else if (!hasActive && listPollingRef.current) {
+  const stopListPolling = useCallback(() => {
+    if (listPollingRef.current) {
       clearInterval(listPollingRef.current);
       listPollingRef.current = null;
     }
+  }, []);
 
-    return () => {
-      if (listPollingRef.current) {
-        clearInterval(listPollingRef.current);
-        listPollingRef.current = null;
+  useEffect(() => {
+    const hasActive = campaigns.some((c) => c.status === "active");
+
+    if (hasActive && !document.hidden) {
+      startListPolling();
+    } else {
+      stopListPolling();
+    }
+
+    return stopListPolling;
+  }, [campaigns, startListPolling, stopListPolling]);
+
+  /* ── Pause polling when tab is hidden ─── */
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopListPolling();
+      } else {
+        const hasActive = campaigns.some((c) => c.status === "active");
+        if (hasActive) {
+          startListPolling();
+        }
       }
     };
-  }, [campaigns, token]);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [campaigns, startListPolling, stopListPolling]);
 
   /* ── Polling: refetch detail every 5s when detail view is open ─── */
   const detailPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);

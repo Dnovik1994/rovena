@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 import stripe
 from pydantic import BaseModel
-from sqlalchemy import or_, cast, String
+from sqlalchemy import func, or_, cast, String
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
@@ -49,24 +49,25 @@ def admin_stats(
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
     users = db.query(User).count()
-    accounts = db.query(Account).count()
-    accounts_active = db.query(Account).filter(Account.status == AccountStatus.active).count()
-    accounts_warming = db.query(Account).filter(Account.status == AccountStatus.warming).count()
-    proxies = db.query(Proxy).count()
-    proxies_online = db.query(Proxy).filter(Proxy.status == ProxyStatus.active).count()
-    campaigns = db.query(Campaign).count()
-    campaigns_active = (
-        db.query(Campaign).filter(Campaign.status == CampaignStatus.active).count()
-    )
+
+    account_rows = db.query(Account.status, func.count(Account.id)).group_by(Account.status).all()
+    account_counts = {s: c for s, c in account_rows}
+
+    proxy_rows = db.query(Proxy.status, func.count(Proxy.id)).group_by(Proxy.status).all()
+    proxy_counts = {s: c for s, c in proxy_rows}
+
+    campaign_rows = db.query(Campaign.status, func.count(Campaign.id)).group_by(Campaign.status).all()
+    campaign_counts = {s: c for s, c in campaign_rows}
+
     return {
         "users": users,
-        "accounts": accounts,
-        "accounts_active": accounts_active,
-        "accounts_warming": accounts_warming,
-        "proxies": proxies,
-        "proxies_online": proxies_online,
-        "campaigns": campaigns,
-        "campaigns_active": campaigns_active,
+        "accounts": sum(account_counts.values()),
+        "accounts_active": account_counts.get(AccountStatus.active, 0),
+        "accounts_warming": account_counts.get(AccountStatus.warming, 0),
+        "proxies": sum(proxy_counts.values()),
+        "proxies_online": proxy_counts.get(ProxyStatus.active, 0),
+        "campaigns": sum(campaign_counts.values()),
+        "campaigns_active": campaign_counts.get(CampaignStatus.active, 0),
     }
 
 
@@ -156,7 +157,7 @@ async def admin_user_update(
     payload: AdminUserUpdate,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-) -> dict[str, object]:
+) -> UserResponse:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -185,27 +186,7 @@ async def admin_user_update(
     db.commit()
     db.refresh(user)
     await delete(f"user:{user.id}")
-    return {
-        "id": user.id,
-        "telegram_id": user.telegram_id,
-        "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_admin": user.has_admin_access,
-        "is_active": user.is_active,
-        "role": user.role.value if user.role else None,
-        "tariff": (
-            {
-                "id": user.tariff.id,
-                "name": user.tariff.name,
-                "max_accounts": user.tariff.max_accounts,
-                "max_invites_day": user.tariff.max_invites_day,
-                "price": user.tariff.price,
-            }
-            if user.tariff
-            else None
-        ),
-    }
+    return UserResponse.model_validate(user)
 
 
 @router.patch("/users/{user_id}/tariff", response_model=UserResponse)
@@ -227,28 +208,7 @@ async def admin_user_tariff_update(
     db.commit()
     db.refresh(user)
     await delete(f"user:{user.id}")
-    return {
-        "id": user.id,
-        "telegram_id": user.telegram_id,
-        "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_admin": user.has_admin_access,
-        "is_active": user.is_active,
-        "role": user.role.value if user.role else None,
-        "onboarding_completed": user.onboarding_completed,
-        "tariff": (
-            {
-                "id": tariff.id,
-                "name": tariff.name,
-                "max_accounts": tariff.max_accounts,
-                "max_invites_day": tariff.max_invites_day,
-                "price": tariff.price,
-            }
-            if tariff
-            else None
-        ),
-    }
+    return UserResponse.model_validate(user)
 
 
 @router.get("/tariffs", response_model=list[TariffResponse])

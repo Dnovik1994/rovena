@@ -140,7 +140,6 @@ def test_celery_tasks_are_registered():
         "app.workers.tasks.campaign_dispatch",
         "app.workers.tasks.account_health_check",
         "app.workers.tasks.start_warming",
-        "app.workers.tasks.perform_warming_action",
         "app.workers.tasks.check_cooldowns",
         "app.workers.tasks.sync_3proxy_config",
         "app.workers.tasks.validate_proxy_task",

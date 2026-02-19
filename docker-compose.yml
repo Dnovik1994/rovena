@@ -20,7 +20,7 @@ services:
     ports:
       - "13306:3306"
     volumes:
-      - postgres-data:/var/lib/mysql
+      - mysql-data:/var/lib/mysql
       - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
@@ -233,7 +233,8 @@ services:
       start_period: 10s
 
 volumes:
-  postgres-data:
+  # NOTE: if upgrading from older setup, rename existing volume: docker volume rename postgres-data mysql-data
+  mysql-data:
   redis-data:
   3proxy-cfg:
   pre-auth-sessions:
