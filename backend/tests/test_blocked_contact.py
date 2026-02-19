@@ -3,7 +3,7 @@ import asyncio
 from pyrogram.errors import UserBlocked
 
 from app.core.database import SessionLocal
-from app.models.account import Account, AccountStatus
+from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.contact import Contact
 from app.models.project import Project
@@ -40,11 +40,11 @@ def _setup_campaign() -> Campaign:
         db.commit()
         db.refresh(project)
 
-        account = Account(
-            user_id=user.id,
-            owner_id=user.id,
-            telegram_id=9002,
-            status=AccountStatus.active,
+        account = TelegramAccount(
+            owner_user_id=user.id,
+            tg_user_id=9002,
+            phone_e164="+10000009002",
+            status=TelegramAccountStatus.active,
         )
         db.add(account)
 
@@ -87,7 +87,7 @@ def test_contact_blocked_event(monkeypatch, client):
     campaign = _setup_campaign()
     events = []
 
-    monkeypatch.setattr(tasks, "get_client", lambda *_args, **_kwargs: DummyClient(UserBlocked()))
+    monkeypatch.setattr(tasks, "create_tg_account_client", lambda *_args, **_kwargs: DummyClient(UserBlocked()))
     monkeypatch.setattr(tasks.manager, "broadcast_sync", lambda payload: events.append(payload))
 
     async def _sleep(_value):

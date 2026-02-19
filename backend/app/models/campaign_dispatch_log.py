@@ -20,7 +20,7 @@ class CampaignDispatchLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
-    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_accounts.id"), index=True)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"), index=True)
     error: Mapped[str] = mapped_column(String(255))
     error_type: Mapped[DispatchErrorType] = mapped_column(

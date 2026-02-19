@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.core.database import get_db
-from app.models.account import Account
+from app.models.telegram_account import TelegramAccount
 from app.models.campaign import Campaign
 from app.models.user import User
 from app.schemas.analytics import DashboardAnalyticsResponse, AnalyticsPoint
@@ -35,9 +35,9 @@ def dashboard_analytics(
     start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
 
     account_rows = (
-        db.query(func.date(Account.created_at), func.count(Account.id))
-        .filter(Account.owner_id == current_user.id, Account.created_at >= start_dt)
-        .group_by(func.date(Account.created_at))
+        db.query(func.date(TelegramAccount.created_at), func.count(TelegramAccount.id))
+        .filter(TelegramAccount.owner_user_id == current_user.id, TelegramAccount.created_at >= start_dt)
+        .group_by(func.date(TelegramAccount.created_at))
         .all()
     )
     campaign_rows = (
@@ -51,7 +51,7 @@ def dashboard_analytics(
     campaigns_created = _build_series(campaign_rows, start_date, window_days)
 
     totals = {
-        "accounts": db.query(Account).filter(Account.owner_id == current_user.id).count(),
+        "accounts": db.query(TelegramAccount).filter(TelegramAccount.owner_user_id == current_user.id).count(),
         "campaigns": db.query(Campaign).filter(Campaign.owner_id == current_user.id).count(),
     }
 

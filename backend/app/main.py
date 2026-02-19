@@ -34,7 +34,7 @@ from app.core.settings import get_settings
 from app.services.websocket_manager import REDIS_WS_CHANNEL, manager
 from app.core.database import SessionLocal, get_db
 from app.core.redis_client import close_sync_redis, get_sync_redis
-from app.models.account import Account, AccountStatus
+from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.user import User
 from app.core.metrics import accounts_by_status, accounts_total, celery_queue_length
 from app.core.version import APP_VERSION
@@ -415,14 +415,14 @@ def version() -> dict[str, str]:
 def metrics() -> Response:
     with SessionLocal() as db:
         rows = (
-            db.query(Account.status, func.count(Account.id))
-            .group_by(Account.status)
+            db.query(TelegramAccount.status, func.count(TelegramAccount.id))
+            .group_by(TelegramAccount.status)
             .all()
         )
         status_counts = {s: c for s, c in rows}
         total = sum(status_counts.values())
         accounts_total.set(total)
-        for status in AccountStatus:
+        for status in TelegramAccountStatus:
             accounts_by_status.labels(status=status.value).set(
                 status_counts.get(status, 0)
             )
