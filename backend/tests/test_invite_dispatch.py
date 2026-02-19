@@ -350,11 +350,7 @@ def test_flood_wait_sets_cooldown_and_reschedules(patch_dispatch):
 
 
 def test_peer_flood_fails_task_and_stops_account(patch_dispatch):
-    """PeerFlood on first invite → task failed, account stops processing, reschedule.
-
-    NOTE: Current code does NOT set account.status=cooldown for PeerFlood
-    (unlike FloodWait).  It only sets account_broke=True internally.
-    """
+    """PeerFlood on first invite → task reverted to pending, account cooldown, reschedule."""
     # 2 tasks: first gets PeerFlood, second should be reverted to pending
     patch_dispatch.client.add_chat_members_side_effect = PeerFlood()
 
@@ -376,23 +372,21 @@ def test_peer_flood_fails_task_and_stops_account(patch_dispatch):
     asyncio.run(_run_invite_campaign_dispatch(campaign_id))
 
     with SessionLocal() as db:
-        # First task → failed with PeerFlood
+        # First task → reverted to pending (not failed) for retry
         t1 = db.get(InviteTask, task1_id)
-        assert t1.status == InviteTaskStatus.failed
-        assert t1.error_message == "PeerFlood"
+        assert t1.status == InviteTaskStatus.pending
 
         # Second task → reverted to pending (account_broke stopped processing)
         t2 = db.get(InviteTask, task2_id)
         assert t2.status == InviteTaskStatus.pending
 
-        # Account stays active (PeerFlood does NOT set cooldown in current code)
+        # Account set to cooldown (like FloodWait)
         account = db.get(TelegramAccount, account_id)
-        assert account.status == TelegramAccountStatus.active
+        assert account.status == TelegramAccountStatus.cooldown
+        assert account.cooldown_until is not None
 
-        # Campaign invites_failed incremented for the first task
+        # Campaign NOT completed (pending tasks remain)
         campaign = db.get(InviteCampaign, campaign_id)
-        assert campaign.invites_failed == 1
-        # Campaign NOT completed (pending task remains)
         assert campaign.status != InviteCampaignStatus.completed
 
     # Reschedule called because pending tasks remain

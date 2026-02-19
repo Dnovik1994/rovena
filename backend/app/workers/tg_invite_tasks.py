@@ -362,11 +362,15 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                         with SessionLocal() as db:
                             task = db.get(InviteTask, task_id)
                             if task:
-                                task.status = InviteTaskStatus.failed
-                                task.error_message = "PeerFlood"
-                                task.completed_at = datetime.now(timezone.utc)
+                                task.status = InviteTaskStatus.pending
+                                task.account_id = None
                                 db.commit()
-                            _atomic_increment(db, campaign_id, "invites_failed")
+                            # Set account cooldown (same pattern as FloodWait)
+                            account = db.get(TelegramAccount, acct_id)
+                            if account:
+                                account.status = TelegramAccountStatus.cooldown
+                                account.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+                                db.commit()
                         account_broke = True
 
                     except UserPrivacyRestricted as exc:
