@@ -454,3 +454,126 @@ def test_user_privacy_restricted_fails_task_others_continue(patch_dispatch):
     assert len(patch_dispatch.reschedule_calls) == 0
     # Sentry captured the privacy error
     assert len(patch_dispatch.sentry_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Core test cases — group 2 (lease conflict, non-active campaign, cooldown)
+# ---------------------------------------------------------------------------
+
+
+def test_lease_conflict_skips_dispatch(patch_dispatch, monkeypatch):
+    """Campaign locked by another worker → dispatch exits immediately, nothing changes."""
+
+    # SQLite drops timezone info from stored datetimes, so the lease-TTL
+    # comparison ``now - campaign.dispatch_started_at`` blows up with
+    # "can't subtract offset-naive and offset-aware datetimes".
+    # Patch datetime.now() inside the dispatch module to return naive UTC
+    # datetimes (matches what SQLite gives back).
+    _real_dt = datetime
+
+    class _NaiveNow(_real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _real_dt.utcnow()
+
+    monkeypatch.setattr(tg_invite_tasks, "datetime", _NaiveNow)
+
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+        tg_user = create_test_tg_user(db, telegram_id=800_001)
+        task = create_test_invite_task(db, campaign.id, tg_user.id)
+
+        # Simulate another worker holding the dispatch lease
+        campaign.dispatch_task_id = "other-worker-123"
+        campaign.dispatch_started_at = datetime.now(timezone.utc)
+        db.commit()
+
+        campaign_id = campaign.id
+        task_id = task.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # Task must remain pending — dispatch didn't run
+        task = db.get(InviteTask, task_id)
+        assert task.status == InviteTaskStatus.pending
+        assert task.completed_at is None
+
+        # Campaign unchanged
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.active
+        assert campaign.dispatch_task_id == "other-worker-123"  # lease untouched
+
+    # No TG API calls at all
+    assert patch_dispatch.client.add_chat_members_calls == 0
+    assert patch_dispatch.client.get_users_calls == 0
+    # No reschedule
+    assert len(patch_dispatch.reschedule_calls) == 0
+
+
+def test_non_active_campaign_skips_dispatch(patch_dispatch):
+    """Campaign with status=completed → dispatch does nothing."""
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(
+            db, user.id, status=InviteCampaignStatus.completed,
+        )
+        tg_user = create_test_tg_user(db, telegram_id=900_001)
+        task = create_test_invite_task(db, campaign.id, tg_user.id)
+        campaign_id = campaign.id
+        task_id = task.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # Task untouched
+        task = db.get(InviteTask, task_id)
+        assert task.status == InviteTaskStatus.pending
+
+        # Campaign still completed
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.completed
+
+    # Zero TG API calls
+    assert patch_dispatch.client.add_chat_members_calls == 0
+    assert len(patch_dispatch.reschedule_calls) == 0
+
+
+def test_all_accounts_in_cooldown_tasks_stay_pending(patch_dispatch):
+    """Only account is in cooldown → no active accounts → tasks stay pending.
+
+    NOTE: Current implementation returns early when no active accounts are
+    found (Phase 2) and does NOT reach Phase 4 reschedule logic.  Tasks
+    remain pending but no reschedule is triggered.
+    """
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        # Account in cooldown — won't be picked by the dispatch query
+        account = create_test_tg_account(
+            db, user.id, status=TelegramAccountStatus.cooldown,
+        )
+        campaign = create_test_invite_campaign(db, user.id)
+        tg_user = create_test_tg_user(db, telegram_id=1_000_001)
+        task = create_test_invite_task(db, campaign.id, tg_user.id)
+        campaign_id = campaign.id
+        task_id = task.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # Task must remain pending — no account could process it
+        task = db.get(InviteTask, task_id)
+        assert task.status == InviteTaskStatus.pending
+        assert task.completed_at is None
+
+        # Campaign stays active
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.active
+
+    # No TG API calls
+    assert patch_dispatch.client.add_chat_members_calls == 0
+    # No reschedule — early return before Phase 4
+    assert len(patch_dispatch.reschedule_calls) == 0
