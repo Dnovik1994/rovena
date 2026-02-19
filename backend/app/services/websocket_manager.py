@@ -44,8 +44,9 @@ class WebSocketManager:
             self._connections[websocket] = user_id
         logger.info("WS connected | user_id=%s | total=%s", user_id, len(self._connections))
 
-    def disconnect(self, websocket: WebSocket) -> None:
-        user_id = self._connections.pop(websocket, None)
+    async def disconnect(self, websocket: WebSocket) -> None:
+        async with self._lock:
+            user_id = self._connections.pop(websocket, None)
         logger.info("WS disconnected | user_id=%s | total=%s", user_id, len(self._connections))
 
     async def send_to_user(self, user_id: int, payload: dict[str, Any]) -> None:

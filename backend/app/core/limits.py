@@ -31,6 +31,13 @@ def get_daily_invites(user_id: int, client: Redis | None = None) -> int:
     return int(value or 0)
 
 
+_INCR_WITH_EXPIRE_SCRIPT = """
+local val = redis.call('INCRBY', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return val
+"""
+
+
 def increment_daily_invites(user_id: int, amount: int = 1, client: Redis | None = None) -> None:
     now = datetime.now(timezone.utc)
     client = client or get_redis_client()
@@ -38,7 +45,6 @@ def increment_daily_invites(user_id: int, amount: int = 1, client: Redis | None 
         return
     key = _invite_key(user_id, now)
     try:
-        client.incrby(key, amount)
-        client.expire(key, 86400)
+        client.eval(_INCR_WITH_EXPIRE_SCRIPT, 1, key, amount, 86400)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to update daily invite counter")

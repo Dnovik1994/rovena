@@ -21,6 +21,7 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 import stripe
 
+from sqlalchemy import func
 from sqlalchemy.exc import DataError, IntegrityError
 
 from app.api.v1 import router as api_router
@@ -414,11 +415,18 @@ def version() -> dict[str, str]:
 @app.get("/metrics")
 def metrics() -> Response:
     with SessionLocal() as db:
-        total = db.query(Account).count()
+        rows = (
+            db.query(Account.status, func.count(Account.id))
+            .group_by(Account.status)
+            .all()
+        )
+        status_counts = {s: c for s, c in rows}
+        total = sum(status_counts.values())
         accounts_total.set(total)
         for status in AccountStatus:
-            count = db.query(Account).filter(Account.status == status).count()
-            accounts_by_status.labels(status=status.value).set(count)
+            accounts_by_status.labels(status=status.value).set(
+                status_counts.get(status, 0)
+            )
 
     try:
         redis_client = get_sync_redis()
@@ -557,4 +565,4 @@ async def websocket_status(websocket: WebSocket) -> None:
         pass
     finally:
         ping_task.cancel()
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket)
