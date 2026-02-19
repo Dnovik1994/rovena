@@ -14,7 +14,17 @@ from fastapi.testclient import TestClient
 def _build_client(monkeypatch, production: bool, origins: str):
     monkeypatch.setenv("PRODUCTION", "true" if production else "false")
     monkeypatch.setenv("CORS_ORIGINS", origins)
-    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-long-enough-for-prod")
+    if production:
+        monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@host:3306/db")
+        # WEB_BASE_URL must be in CORS_ORIGINS for production preflight
+        import json as _json
+        try:
+            origin_list = _json.loads(origins)
+        except Exception:
+            origin_list = [o.strip() for o in origins.split(",") if o.strip()]
+        if origin_list:
+            monkeypatch.setenv("WEB_BASE_URL", origin_list[0])
     from app.core.settings import get_settings
 
     get_settings.cache_clear()

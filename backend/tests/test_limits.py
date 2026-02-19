@@ -29,6 +29,13 @@ class FakeRedis:
     def execute(self):
         return True
 
+    def eval(self, script, num_keys, *args):
+        """Minimal Lua script emulation for INCRBY + EXPIRE pattern."""
+        key = args[0]
+        amount = int(args[1])
+        self.store[key] = int(self.store.get(key, 0)) + amount
+        return self.store[key]
+
 
 def test_daily_limit_blocks_campaign_start(client, monkeypatch):
     fake_redis = FakeRedis()

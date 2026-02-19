@@ -213,6 +213,7 @@ class TestTTLSettingsValidation:
         monkeypatch.setenv("JWT_SECRET", "prod-secret-value-long-enough")
         monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@host:3306/db")
         monkeypatch.setenv("CORS_ORIGINS", '["https://example.com"]')
+        monkeypatch.setenv("WEB_BASE_URL", "https://example.com")
         monkeypatch.setenv("TELEGRAM_AUTH_TTL_SECONDS", "300")
         get_settings.cache_clear()
         settings = get_settings()

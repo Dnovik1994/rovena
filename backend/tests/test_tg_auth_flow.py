@@ -212,10 +212,16 @@ class TestCreateTgAccountClientKwargs:
 
 
 class TestSendCodeTaskSuccess:
-    def test_send_code_happy_path(self, db_session, monkeypatch):
+    def test_send_code_happy_path(self, db_session, monkeypatch, tmp_path):
         user = _create_user(db_session)
         account = _create_account(db_session, user)
         flow = _create_flow(db_session, account)
+
+        # Redirect pre-auth dir to tmp_path and create dummy session file
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        from app.workers.tg_auth_tasks import _pre_auth_session_name
+        session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
+        session_file.write_bytes(b"fake-session-data")
 
         mock_client = AsyncMock()
         mock_sent_code = MagicMock()
@@ -394,7 +400,7 @@ class TestSendCodeEndpoint:
 
     def test_creates_flow_and_dispatches(self, client, db_session, monkeypatch):
         task, calls = _fake_task("send_code_task")
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", task)
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", task)
 
         user = _create_user(db_session)
         headers = _auth_headers(user)
@@ -430,7 +436,7 @@ class TestSendCodeEndpoint:
     def test_expires_old_flows(self, client, db_session, monkeypatch):
         """Sending a new code should expire any active flows."""
         task, _ = _fake_task("send_code_task")
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", task)
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", task)
 
         user = _create_user(db_session, telegram_id=9010)
         headers = _auth_headers(user)
@@ -467,7 +473,7 @@ class TestSendCodeEndpoint:
             def delay(self, *a, **kw):
                 raise ConnectionError("Redis connection refused")
 
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", FailTask())
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", FailTask())
 
         user = _create_user(db_session, telegram_id=9020)
         headers = _auth_headers(user)
@@ -498,7 +504,7 @@ class TestAuthFlowPollingEndpoint:
 
     def test_poll_returns_updated_state(self, client, db_session, monkeypatch):
         task, _ = _fake_task("send_code_task")
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", task)
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", task)
 
         user = _create_user(db_session, telegram_id=8001)
         headers = _auth_headers(user)
@@ -534,7 +540,7 @@ class TestAuthFlowPollingEndpoint:
 
     def test_poll_returns_failed_with_error(self, client, db_session, monkeypatch):
         task, _ = _fake_task("send_code_task")
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", task)
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", task)
 
         user = _create_user(db_session, telegram_id=8002)
         headers = _auth_headers(user)
@@ -571,7 +577,7 @@ class TestAuthFlowPollingEndpoint:
 
     def test_poll_acl_denies_other_user(self, client, db_session, monkeypatch):
         task, _ = _fake_task("send_code_task")
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", task)
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", task)
 
         user1 = _create_user(db_session, telegram_id=8003)
         user2 = _create_user(db_session, telegram_id=8004)
@@ -596,7 +602,7 @@ class TestAuthFlowPollingEndpoint:
     def test_poll_auto_fails_stale_init_flow(self, client, db_session, monkeypatch):
         """If a flow has been in 'init' state for > 60s, polling should auto-fail it."""
         task, _ = _fake_task("send_code_task")
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", task)
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", task)
 
         user = _create_user(db_session, telegram_id=8020)
         headers = _auth_headers(user)
@@ -648,7 +654,7 @@ class TestE2ESendCode:
                     account.last_error = None
                     wdb.commit()
 
-        monkeypatch.setattr("app.api.v1.tg_accounts.send_code_task", FakeTask())
+        monkeypatch.setattr("app.api.v1.tg_accounts.unified_auth_task", FakeTask())
 
         user = _create_user(db_session, telegram_id=8010)
         headers = _auth_headers(user)
@@ -710,13 +716,17 @@ class TestSanitizationUtils:
 
 
 class TestConfirmCodeSessionPersistence:
-    def test_confirm_code_exports_and_saves_session(self, db_session, monkeypatch):
+    def test_confirm_code_exports_and_saves_session(self, db_session, monkeypatch, tmp_path):
+        import base64
+
         user = _create_user(db_session)
         account = _create_account(db_session, user)
         flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        flow.meta_json = {"phone_code_hash": "hash_xyz", "dc_id": "4"}
+        session_b64 = base64.b64encode(b"fake-session-data").decode()
+        flow.meta_json = {"phone_code_hash": "hash_xyz", "dc_id": "4", "pre_auth_session": session_b64}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
 
         mock_client = AsyncMock()
@@ -872,10 +882,13 @@ class TestPreAuthSessionPersistence:
 
     def test_confirm_code_reuses_pre_auth_session(self, db_session, monkeypatch, tmp_path):
         """confirm_code must pass the same workdir/session_name as send_code."""
+        import base64
+
         user = _create_user(db_session)
         account = _create_account(db_session, user)
         flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        flow.meta_json = {"phone_code_hash": "hash_reuse", "dc_id": "2"}
+        session_b64 = base64.b64encode(b"fake-session-data").decode()
+        flow.meta_json = {"phone_code_hash": "hash_reuse", "dc_id": "2", "pre_auth_session": session_b64}
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
@@ -938,10 +951,13 @@ class TestPreAuthSessionPersistence:
 
     def test_pre_auth_session_cleaned_after_success(self, db_session, monkeypatch, tmp_path):
         """After successful sign_in, the pre-auth session file must be deleted."""
+        import base64
+
         user = _create_user(db_session)
         account = _create_account(db_session, user)
         flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        flow.meta_json = {"phone_code_hash": "hash_clean", "dc_id": "1"}
+        session_b64 = base64.b64encode(b"pre-auth-data").decode()
+        flow.meta_json = {"phone_code_hash": "hash_clean", "dc_id": "1", "pre_auth_session": session_b64}
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
@@ -982,12 +998,14 @@ class TestPreAuthSessionPersistence:
 
     def test_pre_auth_session_cleaned_on_phone_code_expired(self, db_session, monkeypatch, tmp_path):
         """PhoneCodeExpired must also clean up the pre-auth session file."""
+        import base64
         from pyrogram.errors import PhoneCodeExpired
 
         user = _create_user(db_session)
         account = _create_account(db_session, user)
         flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        flow.meta_json = {"phone_code_hash": "hash_exp", "dc_id": "3"}
+        session_b64 = base64.b64encode(b"pre-auth-data").decode()
+        flow.meta_json = {"phone_code_hash": "hash_exp", "dc_id": "3", "pre_auth_session": session_b64}
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
@@ -1065,12 +1083,14 @@ class TestPreAuthSessionPersistence:
     ):
         """PhoneCodeExpired error must clearly indicate Telegram rejection,
         not be confused with our TTL-based expiry."""
+        import base64
         from pyrogram.errors import PhoneCodeExpired
 
         user = _create_user(db_session)
         account = _create_account(db_session, user)
         flow = _create_flow(db_session, account, state=AuthFlowState.wait_code)
-        flow.meta_json = {"phone_code_hash": "hash_msg", "dc_id": "1"}
+        session_b64 = base64.b64encode(b"fake-session-data").decode()
+        flow.meta_json = {"phone_code_hash": "hash_msg", "dc_id": "1", "pre_auth_session": session_b64}
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)

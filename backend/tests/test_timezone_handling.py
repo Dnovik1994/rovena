@@ -221,9 +221,8 @@ class TestConfirmCodeTimezoneRegression:
             headers=headers,
         )
 
-        # Must NOT be 500.  Should be 200 (task dispatched).
+        # Must NOT be 500.  Should be 200 (code accepted).
         assert resp.status_code == 200, f"Expected 200 but got {resp.status_code}: {resp.text}"
-        assert len(calls) == 1
 
     def test_confirm_code_with_naive_expires_expired(
         self, client, db_session, monkeypatch,
@@ -411,5 +410,5 @@ class TestConfirmCodeResponseFormat:
         assert resp.status_code == 200
         data = resp.json()
         assert data["flow_id"] == flow.id
-        assert data["state"] == "processing"
+        assert data["state"] == "code_submitted"
         assert data["next_step"] == "poll"

@@ -160,7 +160,8 @@ class TestStatusTransitions:
     def test_all_reason_codes_exist(self):
         expected = {
             "floodwait", "bad_proxy", "invalid_code", "password_required",
-            "network", "client_disabled", "phone_invalid", "code_expired", "unknown",
+            "network", "client_disabled", "phone_invalid", "code_expired",
+            "phone_banned", "session_revoked", "unknown",
         }
         actual = {r.value for r in VerifyReasonCode}
         assert expected == actual

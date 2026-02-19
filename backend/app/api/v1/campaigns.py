@@ -195,7 +195,7 @@ def start_campaign(
         )
         try:
             campaign.status = previous_status
-            campaign.progress = None
+            campaign.progress = 0.0
             db.commit()
             db.refresh(campaign)
         except Exception as rollback_exc:  # noqa: BLE001

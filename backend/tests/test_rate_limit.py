@@ -7,7 +7,13 @@ from app.models.project import Project
 from app.models.user import User
 
 
-def test_rate_limit_start_campaign(client):
+def test_rate_limit_start_campaign(client, monkeypatch):
+    # Mock celery dispatch to prevent connection errors
+    monkeypatch.setattr(
+        "app.api.v1.campaigns.campaign_dispatch",
+        type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None)})(),
+    )
+
     with SessionLocal() as db:
         user = User(telegram_id=3333, username="owner")
         db.add(user)
