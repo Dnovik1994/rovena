@@ -8,13 +8,11 @@ describe("extractError", () => {
     );
   });
 
-  it("returns message value as-is when message is not a string", () => {
-    // The function casts to { message: string } without validating the type,
-    // so a non-string value passes through unchanged.
-    expect(extractError({ message: 42 })).toBe(42);
-    expect(extractError({ message: null })).toBeNull();
-    expect(extractError({ message: undefined })).toBeUndefined();
-    expect(extractError({ message: true })).toBe(true);
+  it('returns "Unexpected error" when message is not a string', () => {
+    expect(extractError({ message: 42 })).toBe("Unexpected error");
+    expect(extractError({ message: null })).toBe("Unexpected error");
+    expect(extractError({ message: undefined })).toBe("Unexpected error");
+    expect(extractError({ message: true })).toBe("Unexpected error");
   });
 
   it('returns "Unexpected error" for empty object', () => {

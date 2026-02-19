@@ -7,7 +7,7 @@ vi.mock("../../../utils/authStorage", () => ({
   parseJwtExpiry: vi.fn(),
 }));
 
-import { apiFetch, API_BASE_URL } from "../client";
+import { apiFetch, API_BASE_URL, _resetRefreshPromise } from "../client";
 import {
   clearStoredTokens,
   getStoredTokens,
@@ -37,6 +37,7 @@ const mockedFetch = vi.fn<typeof fetch>();
 beforeEach(() => {
   mockedFetch.mockReset();
   global.fetch = mockedFetch;
+  _resetRefreshPromise();
 
   vi.mocked(getStoredTokens).mockReturnValue({
     accessToken: "old-access",
@@ -130,9 +131,7 @@ describe("apiFetch", () => {
     expect(clearStoredTokens).toHaveBeenCalled();
   });
 
-  it("two parallel 401s trigger independent refreshes (no dedup)", async () => {
-    // NOTE: current implementation does NOT deduplicate concurrent refreshes.
-    // Each 401 independently triggers refreshAccessToken() + retry.
+  it("two parallel 401s deduplicate into a single refresh call", async () => {
     const hitCount: Record<string, number> = {};
 
     mockedFetch.mockImplementation(async (input) => {
@@ -162,11 +161,11 @@ describe("apiFetch", () => {
     expect(r1).toEqual({ data: "one" });
     expect(r2).toEqual({ data: "two" });
 
-    // Two separate refresh calls — no deduplication
+    // Only one refresh call — deduplication works
     const refreshCount = mockedFetch.mock.calls.filter(([u]) =>
       String(u).includes("/auth/refresh"),
     ).length;
-    expect(refreshCount).toBe(2);
+    expect(refreshCount).toBe(1);
   });
 
   it("throws NETWORK error when fetch rejects", async () => {

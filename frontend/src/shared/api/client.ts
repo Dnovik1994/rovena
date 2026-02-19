@@ -132,7 +132,27 @@ export const apiFetch = async <T>(
   return (await response.json()) as T;
 };
 
+let refreshPromise: Promise<string | null> | null = null;
+
 export const refreshAccessToken = async (): Promise<string | null> => {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = _doRefresh();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+};
+
+/** @internal Exported only for testing — allows resetting dedup state between tests. */
+export function _resetRefreshPromise(): void {
+  refreshPromise = null;
+}
+
+const _doRefresh = async (): Promise<string | null> => {
   const { refreshToken } = getStoredTokens();
   if (!refreshToken) {
     return null;
