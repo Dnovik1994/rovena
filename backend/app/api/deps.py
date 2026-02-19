@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import Depends, Header, Request
-from jose import JWTError
+from jwt.exceptions import PyJWTError
 from sqlalchemy.orm import Session
 
 from app.core.cache import get_json, set_json
@@ -61,7 +61,7 @@ async def get_current_user_id(
     token = authorization.replace("Bearer ", "", 1).strip()
     try:
         payload = decode_access_token(token)
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise unauthorized("Invalid token") from exc
 
     user_id = payload.get("sub")

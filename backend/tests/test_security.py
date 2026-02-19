@@ -5,7 +5,7 @@ import time
 from urllib.parse import urlencode
 
 import pytest
-from jose import jwt
+import jwt
 from starlette.requests import Request
 
 from app.api.deps import get_current_user_id
