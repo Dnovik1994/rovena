@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import sentry_sdk
@@ -576,3 +576,63 @@ def test_empty_campaign_all_tasks_done_completes(patch_dispatch):
     assert patch_dispatch.client.get_users_calls == 0
     # No reschedule
     assert len(patch_dispatch.reschedule_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Finding B — reschedule when no active accounts
+# ---------------------------------------------------------------------------
+
+
+def test_no_active_accounts_cooldown_reschedules(patch_dispatch):
+    """1 account in cooldown (cooldown_until = now + 10min) → reschedule with countdown ~660s."""
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        now = datetime.now(timezone.utc)
+        account = create_test_tg_account(
+            db, user.id, status=TelegramAccountStatus.cooldown,
+        )
+        account.cooldown_until = now + timedelta(minutes=10)
+        db.commit()
+
+        campaign = create_test_invite_campaign(db, user.id)
+        tg_user = create_test_tg_user(db, telegram_id=1_100_001)
+        create_test_invite_task(db, campaign.id, tg_user.id)
+        campaign_id = campaign.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    # Reschedule must have been called
+    assert len(patch_dispatch.reschedule_calls) == 1
+    countdown = patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"]
+    # Expected: ~600s (10 min) + 60s = ~660s; allow some tolerance for time drift
+    assert 650 <= countdown <= 670, f"Expected countdown ~660s, got {countdown}"
+
+    # Campaign should still be active (not error, not completed)
+    with SessionLocal() as db:
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.active
+
+    # DummyClient should NOT have been called
+    assert patch_dispatch.client.add_chat_members_calls == 0
+
+
+def test_no_accounts_at_all_marks_campaign_error(patch_dispatch):
+    """0 accounts (neither active nor cooldown) → campaign.status = error."""
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        # No accounts created for this owner
+        campaign = create_test_invite_campaign(db, user.id)
+        tg_user = create_test_tg_user(db, telegram_id=1_200_001)
+        create_test_invite_task(db, campaign.id, tg_user.id)
+        campaign_id = campaign.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.error
+
+    # No reschedule — no accounts to wait for
+    assert len(patch_dispatch.reschedule_calls) == 0
+    # DummyClient should NOT have been called
+    assert patch_dispatch.client.add_chat_members_calls == 0

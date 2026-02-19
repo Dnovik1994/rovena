@@ -298,21 +298,50 @@ describe("connectStatusSocket", () => {
     expect(wsInstances).toHaveLength(4);
   });
 
-  /* ── Max retries: current implementation retries indefinitely ── */
+  /* ── Max retries: stops after 20 reconnect attempts ── */
 
-  it("retries indefinitely — no max-retries cap (documents current behaviour)", () => {
+  it("stops reconnecting after 20 attempts (max-retries cap)", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.5);
 
     handle = connectStatusSocket("tok", onMessage, onStateChange);
 
-    for (let i = 0; i < 15; i++) {
+    // 20 closes → 20 reconnects (attempts 0–19), then the 21st close hits the cap
+    for (let i = 0; i < 20; i++) {
       latestWs().simulateClose(1006);
-      // MAX_DELAY_MS = 30s is always enough
       vi.advanceTimersByTime(31_000);
     }
 
-    // 1 initial + 15 reconnects = 16
-    expect(wsInstances).toHaveLength(16);
+    // 1 initial + 20 reconnects = 21
+    expect(wsInstances).toHaveLength(21);
+
+    // 21st close → attempt=20 >= MAX_RECONNECT_ATTEMPTS → no more reconnect
+    latestWs().simulateClose(1006);
+    vi.advanceTimersByTime(31_000);
+
+    // Still 21 — no new connection created
+    expect(wsInstances).toHaveLength(21);
+    expect(handle.state).toBe("failed");
+  });
+
+  /* ── 21 unclean closes: reconnect stops after 20th ── */
+
+  it("21 unclean closes in a row — reconnect stops after 20th, state is 'failed'", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    handle = connectStatusSocket("tok", onMessage, onStateChange);
+
+    for (let i = 0; i < 21; i++) {
+      latestWs().simulateClose(1006);
+      vi.advanceTimersByTime(31_000);
+    }
+
+    // 1 initial + 20 reconnects = 21 (21st close did NOT create instance #22)
+    expect(wsInstances).toHaveLength(21);
+    expect(handle.state).toBe("failed");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "WebSocket: max reconnect attempts reached",
+    );
   });
 
   /* ── Singleton guard ── */

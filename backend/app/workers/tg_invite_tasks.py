@@ -140,7 +140,42 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
         account_ids = [a.id for a in accounts]
 
     if not account_ids:
-        logger.warning("invite_dispatch: no active accounts for owner_id=%d campaign=%d", owner_id, campaign_id)
+        now = datetime.now(timezone.utc)
+        with SessionLocal() as db:
+            cooldown_accounts = (
+                db.query(TelegramAccount)
+                .filter(
+                    TelegramAccount.owner_user_id == owner_id,
+                    TelegramAccount.status == TelegramAccountStatus.cooldown,
+                    TelegramAccount.cooldown_until > now,
+                )
+                .all()
+            )
+            if cooldown_accounts:
+                min_cooldown = min(a.cooldown_until for a in cooldown_accounts)
+                # Ensure timezone-aware comparison (SQLite returns naive datetimes)
+                if min_cooldown.tzinfo is None:
+                    min_cooldown = min_cooldown.replace(tzinfo=timezone.utc)
+                delay_seconds = int((min_cooldown - now).total_seconds()) + 60
+                logger.warning(
+                    "invite_dispatch: no active accounts for campaign=%d, "
+                    "%d account(s) in cooldown; rescheduling in %ds",
+                    campaign_id, len(cooldown_accounts), delay_seconds,
+                )
+                invite_campaign_dispatch.apply_async(
+                    args=[campaign_id],
+                    countdown=delay_seconds,
+                )
+            else:
+                logger.warning(
+                    "invite_dispatch: no accounts available (active or cooldown) "
+                    "for owner_id=%d campaign=%d — marking as error",
+                    owner_id, campaign_id,
+                )
+                campaign = db.get(InviteCampaign, campaign_id)
+                if campaign:
+                    campaign.status = InviteCampaignStatus.error
+                    db.commit()
         return
 
     # --- Phase 3: process each account ---------------------------------------

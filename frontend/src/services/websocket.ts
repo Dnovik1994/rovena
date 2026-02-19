@@ -39,7 +39,7 @@ export type StatusMessage =
 
 /* ── Connection state exposed to UI ── */
 
-export type WsConnectionState = "connecting" | "connected" | "disconnected" | "auth_failed";
+export type WsConnectionState = "connecting" | "connected" | "disconnected" | "auth_failed" | "failed";
 
 /* ── Backoff helpers (pure, testable) ── */
 
@@ -64,6 +64,10 @@ const AUTH_FAILURE_CODE = 1008;
 /* ── Ping/pong timeout: if nothing arrives within this window, reconnect ── */
 
 const PING_TIMEOUT_MS = 45_000;
+
+/* ── Max reconnect attempts before giving up ── */
+
+const MAX_RECONNECT_ATTEMPTS = 20;
 
 /* ── Types ── */
 
@@ -145,6 +149,11 @@ export const connectStatusSocket = (
 
   const scheduleReconnect = () => {
     if (disposed) return;
+    if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn("WebSocket: max reconnect attempts reached");
+      setState("failed");
+      return;
+    }
     const delay = computeBackoff(attempt);
     attempt += 1;
     reconnectTimer = setTimeout(connect, delay);
