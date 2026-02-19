@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import pytest
 import sentry_sdk
-from pyrogram.errors import FloodWait, PeerFlood, UserPrivacyRestricted
+from pyrogram.errors import FloodWait, PeerFlood, UserAlreadyParticipant, UserPrivacyRestricted
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -454,3 +454,131 @@ def test_user_privacy_restricted_fails_task_others_continue(patch_dispatch):
     assert len(patch_dispatch.reschedule_calls) == 0
     # Sentry captured the privacy error
     assert len(patch_dispatch.sentry_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Last group — edge-case / boundary tests
+# ---------------------------------------------------------------------------
+
+
+def test_user_already_participant_skipped_not_failed(patch_dispatch):
+    """UserAlreadyParticipant → task=skipped, NOT counted in invites_failed."""
+    patch_dispatch.client.add_chat_members_side_effect = UserAlreadyParticipant()
+
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+        tg_user = create_test_tg_user(db, telegram_id=800_001)
+        task = create_test_invite_task(db, campaign.id, tg_user.id)
+        campaign_id = campaign.id
+        task_id = task.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        task = db.get(InviteTask, task_id)
+        assert task.status == InviteTaskStatus.skipped
+        assert task.error_message == "UserAlreadyParticipant"
+        assert task.completed_at is not None
+
+        campaign = db.get(InviteCampaign, campaign_id)
+        # skipped tasks do NOT increment invites_failed
+        assert campaign.invites_failed == 0
+        # skipped tasks do NOT increment invites_completed either
+        assert campaign.invites_completed == 0
+        # No pending/in_progress left → campaign completed
+        assert campaign.status == InviteCampaignStatus.completed
+        assert campaign.completed_at is not None
+
+    assert patch_dispatch.client.add_chat_members_calls == 1
+    assert len(patch_dispatch.reschedule_calls) == 0
+    # No sentry capture for UserAlreadyParticipant
+    assert len(patch_dispatch.sentry_calls) == 0
+
+
+def test_partial_progress_reschedule(patch_dispatch):
+    """2 of 4 tasks succeed, 3rd hits FloodWait → 2 completed, 2 pending, reschedule."""
+    patch_dispatch.client.add_chat_members_side_effect = [
+        None,             # 1st call succeeds
+        None,             # 2nd call succeeds
+        FloodWait(value=120),  # 3rd call triggers FloodWait
+        # 4th call never reached (account_broke stops processing)
+    ]
+
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id)
+        campaign_id = campaign.id
+
+        task_ids = []
+        for i in range(4):
+            tg_user = create_test_tg_user(db, telegram_id=900_001 + i)
+            task = create_test_invite_task(db, campaign.id, tg_user.id)
+            task_ids.append(task.id)
+        account_id = account.id
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        # First 2 tasks → success
+        t0 = db.get(InviteTask, task_ids[0])
+        assert t0.status == InviteTaskStatus.success
+        t1 = db.get(InviteTask, task_ids[1])
+        assert t1.status == InviteTaskStatus.success
+
+        # 3rd task → reverted to pending (FloodWait)
+        t2 = db.get(InviteTask, task_ids[2])
+        assert t2.status == InviteTaskStatus.pending
+
+        # 4th task → still pending (never reached)
+        t3 = db.get(InviteTask, task_ids[3])
+        assert t3.status == InviteTaskStatus.pending
+
+        # Campaign counters
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.invites_completed == 2
+        assert campaign.invites_failed == 0
+        # Campaign still active (pending tasks remain)
+        assert campaign.status == InviteCampaignStatus.active
+
+        # Account in cooldown
+        account = db.get(TelegramAccount, account_id)
+        assert account.status == TelegramAccountStatus.cooldown
+
+    # Reschedule called
+    assert len(patch_dispatch.reschedule_calls) == 1
+    assert patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"] == 60
+    # Sentry captured FloodWait
+    assert len(patch_dispatch.sentry_calls) == 1
+
+
+def test_empty_campaign_all_tasks_done_completes(patch_dispatch):
+    """Campaign active but 0 pending tasks (all already success) → completed immediately."""
+    with SessionLocal() as db:
+        user = create_test_user(db)
+        # Account exists but should never be used
+        _account = create_test_tg_account(db, user.id)
+        campaign = create_test_invite_campaign(db, user.id, status=InviteCampaignStatus.active)
+        campaign_id = campaign.id
+
+        # All tasks already completed (status=success)
+        for i in range(3):
+            tg_user = create_test_tg_user(db, telegram_id=1_000_001 + i)
+            create_test_invite_task(
+                db, campaign.id, tg_user.id, status=InviteTaskStatus.success,
+            )
+
+    asyncio.run(_run_invite_campaign_dispatch(campaign_id))
+
+    with SessionLocal() as db:
+        campaign = db.get(InviteCampaign, campaign_id)
+        assert campaign.status == InviteCampaignStatus.completed
+        assert campaign.completed_at is not None
+
+    # DummyClient was never called — no pending tasks to process
+    assert patch_dispatch.client.add_chat_members_calls == 0
+    assert patch_dispatch.client.get_users_calls == 0
+    # No reschedule
+    assert len(patch_dispatch.reschedule_calls) == 0
