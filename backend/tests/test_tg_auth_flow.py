@@ -218,6 +218,7 @@ class TestSendCodeTaskSuccess:
         flow = _create_flow(db_session, account)
 
         # Redirect pre-auth dir to tmp_path and create dummy session file
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _pre_auth_session_name
         session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
@@ -236,7 +237,7 @@ class TestSendCodeTaskSuccess:
             lambda *a, **kw: mock_client,
         )
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.manager",
+            "app.workers.tg_auth_helpers.manager",
             MagicMock(),
         )
 
@@ -279,7 +280,7 @@ class TestSendCodeTaskFailure:
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.create_tg_account_client", _raise,
         )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _run_send_code
 
@@ -311,7 +312,7 @@ class TestSendCodeTaskFailure:
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.create_tg_account_client", _raise,
         )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _run_send_code
 
@@ -340,7 +341,7 @@ class TestSendCodeTaskFailure:
         monkeypatch.setattr(
             "app.workers.tg_auth_tasks.create_tg_account_client", _raise,
         )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _run_send_code
 
@@ -373,7 +374,7 @@ class TestSendCodeTaskFailure:
             "app.workers.tg_auth_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _run_send_code
 
@@ -726,8 +727,9 @@ class TestConfirmCodeSessionPersistence:
         flow.meta_json = {"phone_code_hash": "hash_xyz", "dc_id": "4", "pre_auth_session": session_b64}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         mock_client = AsyncMock()
         mock_client.connect = AsyncMock()
@@ -844,8 +846,9 @@ class TestPreAuthSessionPersistence:
         flow = _create_flow(db_session, account)
 
         # Redirect pre-auth dir to tmp_path
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         captured_kwargs = {}
 
@@ -891,8 +894,9 @@ class TestPreAuthSessionPersistence:
         flow.meta_json = {"phone_code_hash": "hash_reuse", "dc_id": "2", "pre_auth_session": session_b64}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         # Create a fake pre-auth session file to verify existence check
         from app.workers.tg_auth_tasks import _pre_auth_session_name
@@ -960,8 +964,9 @@ class TestPreAuthSessionPersistence:
         flow.meta_json = {"phone_code_hash": "hash_clean", "dc_id": "1", "pre_auth_session": session_b64}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _pre_auth_session_name
         session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
@@ -1008,8 +1013,9 @@ class TestPreAuthSessionPersistence:
         flow.meta_json = {"phone_code_hash": "hash_exp", "dc_id": "3", "pre_auth_session": session_b64}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _pre_auth_session_name
         session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
@@ -1050,8 +1056,9 @@ class TestPreAuthSessionPersistence:
         flow.meta_json = {"phone_code_hash": "hash_inv", "dc_id": "2"}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _pre_auth_session_name
         session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
@@ -1093,8 +1100,9 @@ class TestPreAuthSessionPersistence:
         flow.meta_json = {"phone_code_hash": "hash_msg", "dc_id": "1", "pre_auth_session": session_b64}
         db_session.commit()
 
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks.manager", MagicMock())
+        monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         mock_client = AsyncMock()
         mock_client.connect = AsyncMock()
@@ -1201,6 +1209,7 @@ class TestPreAuthSessionHelpers:
         assert _pre_auth_session_name(fid) == _pre_auth_session_name(fid)
 
     def test_session_path_under_pre_auth_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _pre_auth_session_path
 
@@ -1210,6 +1219,7 @@ class TestPreAuthSessionHelpers:
         assert path.suffix == ".session"
 
     def test_cleanup_removes_session_and_sidefiles(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _cleanup_pre_auth_session, _pre_auth_session_path
 
@@ -1225,6 +1235,7 @@ class TestPreAuthSessionHelpers:
 
     def test_cleanup_noop_if_no_file(self, monkeypatch, tmp_path):
         """Cleanup must not raise if session file doesn't exist."""
+        monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _cleanup_pre_auth_session
 
