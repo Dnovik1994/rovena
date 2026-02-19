@@ -4,7 +4,7 @@ from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
-from app.models.account import Account, AccountStatus
+from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.project import Project
 from app.models.user import User
@@ -32,11 +32,11 @@ def test_dashboard_analytics_series(client):
         today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         two_days_ago = today - timedelta(days=2)
 
-        account = Account(
-            user_id=user.id,
-            owner_id=user.id,
-            telegram_id=999001,
-            status=AccountStatus.active,
+        account = TelegramAccount(
+            owner_user_id=user.id,
+            tg_user_id=999001,
+            phone_e164="+10000999001",
+            status=TelegramAccountStatus.active,
             created_at=two_days_ago,
         )
         campaign = Campaign(

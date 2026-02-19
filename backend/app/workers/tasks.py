@@ -1,9 +1,3 @@
-# ============================================================
-# LEGACY TASKS — используют старую модель Account
-# TODO: мигрировать на TelegramAccount или удалить
-# Новый код использует tg_invite_tasks.py, tg_sync_tasks.py
-# ============================================================
-
 import asyncio
 import logging
 import random
@@ -15,11 +9,9 @@ from celery import current_task
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.exc import IntegrityError
 
-from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client, get_client
+from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.workers.tg_timeout_helpers import collect_async_gen, safe_call
 from app.core.database import SessionLocal
-# Legacy Account model — kept for tasks that have not been migrated yet
-from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.core.limits import increment_daily_invites
 from app.core.metrics import campaign_invites_errors_total, campaign_invites_success_total
@@ -94,24 +86,6 @@ def _log_dispatch_error(
             "account_id": account_id,
             "contact_id": contact_id,
             "error": error_type.value,
-        }
-    )
-
-
-# LEGACY — TODO: заменить на TelegramAccount
-def _set_account_cooldown(db, account: Account, seconds: int) -> None:
-    account.status = AccountStatus.cooldown
-    account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-    db.commit()
-    manager.broadcast_sync(
-        {
-            "type": "account_update",
-            "user_id": account.owner_id,
-            "account_id": account.id,
-            "status": _serialize_status(account.status),
-            "actions_completed": account.warming_actions_completed,
-            "target_actions": account.target_warming_actions,
-            "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
         }
     )
 
@@ -355,7 +329,6 @@ def campaign_dispatch(self, campaign_id: int) -> None:
                 db.commit()
 
 
-# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def account_health_check(self, account_id: int) -> None:
     _log_task_started(account_id=account_id)
@@ -365,23 +338,22 @@ def account_health_check(self, account_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
-# LEGACY — TODO: заменить на TelegramAccount
 async def _run_account_health_check(account_id: int) -> None:
     with SessionLocal() as db:
-        account = db.get(Account, account_id)
+        account = db.get(TelegramAccount, account_id)
         if not account:
             logger.info("Account not found", extra={"account_id": account_id})
             return
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         try:
-            client = get_client(account, proxy)
+            client = create_tg_account_client(account, proxy)
         except TelegramClientDisabledError:
-            _set_account_cooldown(db, account, 300)
+            _set_tg_account_cooldown(db, account, 300)
             return
         except RuntimeError as e:
-            logger.error(f"Cannot create Telegram client: {e}")
-            account.status = AccountStatus.error
+            logger.error("Cannot create Telegram client: %s", e)
+            account.status = TelegramAccountStatus.error
             account.last_error = str(e)
             db.commit()
             return
@@ -390,14 +362,14 @@ async def _run_account_health_check(account_id: int) -> None:
             async with client:
                 await asyncio.wait_for(client.get_me(), timeout=15)
             account.last_activity_at = datetime.now(timezone.utc)
-            if account.status == AccountStatus.cooldown and account.cooldown_until:
+            if account.status == TelegramAccountStatus.cooldown and account.cooldown_until:
                 if is_expired(account.cooldown_until):
-                    account.status = AccountStatus.active
+                    account.status = TelegramAccountStatus.active
             db.commit()
             manager.broadcast_sync(
                 {
                     "type": "account_update",
-                    "user_id": account.owner_id,
+                    "user_id": account.owner_user_id,
                     "account_id": account.id,
                     "status": _serialize_status(account.status),
                     "actions_completed": account.warming_actions_completed,
@@ -406,7 +378,7 @@ async def _run_account_health_check(account_id: int) -> None:
                 }
             )
         except FloodWait as exc:
-            _set_account_cooldown(db, account, int(exc.value))
+            _set_tg_account_cooldown(db, account, int(exc.value))
         except Exception as exc:  # noqa: BLE001
             logger.info("Account health check failed", extra={"account_id": account_id, "error": str(exc)})
 
@@ -435,16 +407,15 @@ async def perform_low_risk_action(client) -> int:
     return performed
 
 
-# LEGACY — TODO: заменить на TelegramAccount
 async def _run_warming_cycle(account_id: int) -> None:
     # --- Phase 1: load data & build client in a short-lived session -------
     with SessionLocal() as db:
-        account = db.get(Account, account_id)
+        account = db.get(TelegramAccount, account_id)
         if not account:
             logger.info("Account not found", extra={"account_id": account_id})
             return
 
-        if account.status != AccountStatus.warming:
+        if account.status != TelegramAccountStatus.warming:
             logger.info(
                 "Account not in warming status", extra={"account_id": account_id, "status": account.status}
             )
@@ -456,18 +427,18 @@ async def _run_warming_cycle(account_id: int) -> None:
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         try:
-            client = get_client(account, proxy)
+            client = create_tg_account_client(account, proxy)
         except TelegramClientDisabledError:
-            _set_account_cooldown(db, account, 300)
+            _set_tg_account_cooldown(db, account, 300)
             return
         except RuntimeError as e:
-            logger.error(f"Cannot create Telegram client: {e}")
-            account.status = AccountStatus.error
+            logger.error("Cannot create Telegram client: %s", e)
+            account.status = TelegramAccountStatus.error
             account.last_error = str(e)
             db.commit()
             return
 
-        owner_id = account.owner_id
+        owner_id = account.owner_user_id
         actions_done = account.warming_actions_completed
         target_actions = account.target_warming_actions or 10
         cooldown_until_iso = account.cooldown_until.isoformat() if account.cooldown_until else None
@@ -478,7 +449,7 @@ async def _run_warming_cycle(account_id: int) -> None:
             "type": "account_update",
             "user_id": owner_id,
             "account_id": account_id,
-            "status": _serialize_status(AccountStatus.warming),
+            "status": _serialize_status(TelegramAccountStatus.warming),
             "actions_completed": actions_done,
             "target_actions": target_actions,
             "cooldown_until": cooldown_until_iso,
@@ -492,7 +463,7 @@ async def _run_warming_cycle(account_id: int) -> None:
                 actions_done += await perform_low_risk_action(client)
 
                 with SessionLocal() as db:
-                    account = db.get(Account, account_id)
+                    account = db.get(TelegramAccount, account_id)
                     if account:
                         account.warming_actions_completed = actions_done
                         account.last_activity_at = datetime.now(timezone.utc)
@@ -503,7 +474,7 @@ async def _run_warming_cycle(account_id: int) -> None:
                         "type": "account_update",
                         "user_id": owner_id,
                         "account_id": account_id,
-                        "status": _serialize_status(AccountStatus.warming),
+                        "status": _serialize_status(TelegramAccountStatus.warming),
                         "actions_completed": actions_done,
                         "target_actions": target_actions,
                         "cooldown_until": None,
@@ -511,9 +482,9 @@ async def _run_warming_cycle(account_id: int) -> None:
                 )
 
             with SessionLocal() as db:
-                account = db.get(Account, account_id)
+                account = db.get(TelegramAccount, account_id)
                 if account:
-                    account.status = AccountStatus.active
+                    account.status = TelegramAccountStatus.active
                     db.commit()
     except FloodWait as exc:
         sentry_sdk.capture_exception(exc)
@@ -522,24 +493,24 @@ async def _run_warming_cycle(account_id: int) -> None:
             extra={"account_id": account_id, "wait_seconds": exc.value},
         )
         with SessionLocal() as db:
-            account = db.get(Account, account_id)
+            account = db.get(TelegramAccount, account_id)
             if account:
-                account.status = AccountStatus.cooldown
+                account.status = TelegramAccountStatus.cooldown
                 account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=exc.value)
                 db.commit()
     except Exception as exc:  # noqa: BLE001
         sentry_sdk.capture_exception(exc)
         logger.error("Warming error", extra={"error": str(exc), "account_id": account_id})
         with SessionLocal() as db:
-            account = db.get(Account, account_id)
+            account = db.get(TelegramAccount, account_id)
             if account:
-                account.status = AccountStatus.cooldown
+                account.status = TelegramAccountStatus.cooldown
                 account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
                 db.commit()
 
     # --- Phase 3: final broadcast with fresh data -------------------------
     with SessionLocal() as db:
-        account = db.get(Account, account_id)
+        account = db.get(TelegramAccount, account_id)
         if account:
             manager.broadcast_sync(
                 {
@@ -554,7 +525,6 @@ async def _run_warming_cycle(account_id: int) -> None:
             )
 
 
-# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(
     bind=True,
     soft_time_limit=3600,
@@ -567,34 +537,31 @@ def start_warming(self, account_id: int) -> None:
     except SoftTimeLimitExceeded:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
         with SessionLocal() as db:
-            account = db.get(Account, account_id)
+            account = db.get(TelegramAccount, account_id)
             if account:
-                account.status = AccountStatus.cooldown
+                account.status = TelegramAccountStatus.cooldown
                 account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
                 db.commit()
 
 
-
-# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
 def check_cooldowns(self) -> None:
     _log_task_started()
     try:
         with SessionLocal() as db:
-            # LEGACY — TODO: заменить на TelegramAccount
             accounts = (
-                db.query(Account)
-                .filter(Account.status == AccountStatus.cooldown)
-                .filter(Account.cooldown_until.isnot(None))
+                db.query(TelegramAccount)
+                .filter(TelegramAccount.status == TelegramAccountStatus.cooldown)
+                .filter(TelegramAccount.cooldown_until.isnot(None))
                 .all()
             )
             for account in accounts:
                 if account.cooldown_until and is_expired(account.cooldown_until):
-                    account.status = AccountStatus.active
+                    account.status = TelegramAccountStatus.active
                     manager.broadcast_sync(
                         {
                             "type": "account_update",
-                            "user_id": account.owner_id,
+                            "user_id": account.owner_user_id,
                             "account_id": account.id,
                             "status": _serialize_status(account.status),
                             "actions_completed": account.warming_actions_completed,
@@ -628,14 +595,9 @@ def validate_proxy_task(self, proxy_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (proxy_id=%s)", self.request.id, proxy_id)
 
 
-# LEGACY — TODO: заменить на TelegramAccount
 @celery_app.task(bind=True, soft_time_limit=300, time_limit=360)
 def legacy_verify_account(self, account_id: int) -> None:
-    """Async-safe verify for legacy Account model.
-
-    Replaces the old blocking verify_account endpoint by offloading
-    the Pyrogram get_me() call to a Celery worker.
-    """
+    """Verify a TelegramAccount by calling get_me() via Celery worker."""
     _log_task_started(account_id=account_id)
     try:
         asyncio.run(_run_legacy_verify(account_id))
@@ -643,29 +605,28 @@ def legacy_verify_account(self, account_id: int) -> None:
         logger.warning("Task %s hit soft time limit, graceful shutdown (account_id=%s)", self.request.id, account_id)
 
 
-# LEGACY — TODO: заменить на TelegramAccount
 async def _run_legacy_verify(account_id: int) -> None:
     from app.core.metrics import verify_account_duration_seconds, verify_fail_total
     import time as _time
 
     t0 = _time.monotonic()
     with SessionLocal() as db:
-        account = db.get(Account, account_id)
+        account = db.get(TelegramAccount, account_id)
         if not account:
             logger.info("event=legacy_verify_not_found account_id=%d", account_id)
             return
 
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         try:
-            client = get_client(account, proxy)
+            client = create_tg_account_client(account, proxy)
         except TelegramClientDisabledError:
             logger.warning("event=legacy_verify_failed reason=client_disabled account_id=%d", account_id)
             verify_fail_total.labels(reason="client_disabled").inc()
             return
         except RuntimeError as e:
-            logger.error(f"Cannot create Telegram client: {e}")
+            logger.error("Cannot create Telegram client: %s", e)
             verify_fail_total.labels(reason="runtime_error").inc()
-            account.status = AccountStatus.error
+            account.status = TelegramAccountStatus.error
             account.last_error = str(e)
             db.commit()
             return
@@ -677,7 +638,7 @@ async def _run_legacy_verify(account_id: int) -> None:
             elapsed = _time.monotonic() - t0
             verify_account_duration_seconds.observe(elapsed)
             verify_fail_total.labels(reason="floodwait").inc()
-            _set_account_cooldown(db, account, int(exc.value))
+            _set_tg_account_cooldown(db, account, int(exc.value))
             logger.warning(
                 "event=legacy_verify_failed reason=floodwait wait_s=%d account_id=%d elapsed_s=%.3f",
                 exc.value, account_id, elapsed,
@@ -700,16 +661,16 @@ async def _run_legacy_verify(account_id: int) -> None:
             account_id, elapsed,
         )
 
-        account.telegram_id = me.id
-        account.username = me.username
+        account.tg_user_id = me.id
+        account.tg_username = me.username
         account.first_name = me.first_name
-        account.status = AccountStatus.verified
+        account.status = TelegramAccountStatus.verified
         account.last_activity_at = datetime.now(timezone.utc)
         db.commit()
 
         manager.broadcast_sync({
             "type": "account_update",
-            "user_id": account.owner_id,
+            "user_id": account.owner_user_id,
             "account_id": account.id,
             "status": _serialize_status(account.status),
         })

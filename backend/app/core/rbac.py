@@ -14,14 +14,6 @@ POLICY: dict[str, dict[str, list[str]]] = {
         "delete": ["admin", "superadmin"],
         "validate": ["admin", "superadmin"],
     },
-    "accounts": {
-        "list": ["user", "admin", "superadmin"],
-        "create": ["user", "admin", "superadmin"],
-        "update": ["user", "admin", "superadmin"],
-        "delete": ["user", "admin", "superadmin"],
-        "start_warming": ["user", "admin", "superadmin"],
-        "verify": ["user", "admin", "superadmin"],
-    },
     "tg_accounts": {
         "list": ["user", "admin", "superadmin"],
         "create": ["user", "admin", "superadmin"],

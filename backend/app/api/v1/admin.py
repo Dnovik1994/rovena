@@ -10,8 +10,7 @@ from app.api.deps import get_current_admin
 from app.core.cache import delete, get_json, set_json
 from app.core.database import get_db
 from app.core.settings import get_settings
-from app.models.account import Account, AccountStatus
-from app.models.telegram_account import TelegramAccount
+from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.proxy import Proxy, ProxyStatus
 from app.models.tariff import Tariff
@@ -50,7 +49,7 @@ def admin_stats(
 ) -> dict[str, int]:
     users = db.query(User).count()
 
-    account_rows = db.query(Account.status, func.count(Account.id)).group_by(Account.status).all()
+    account_rows = db.query(TelegramAccount.status, func.count(TelegramAccount.id)).group_by(TelegramAccount.status).all()
     account_counts = {s: c for s, c in account_rows}
 
     proxy_rows = db.query(Proxy.status, func.count(Proxy.id)).group_by(Proxy.status).all()
@@ -62,8 +61,8 @@ def admin_stats(
     return {
         "users": users,
         "accounts": sum(account_counts.values()),
-        "accounts_active": account_counts.get(AccountStatus.active, 0),
-        "accounts_warming": account_counts.get(AccountStatus.warming, 0),
+        "accounts_active": account_counts.get(TelegramAccountStatus.active, 0),
+        "accounts_warming": account_counts.get(TelegramAccountStatus.warming, 0),
         "proxies": sum(proxy_counts.values()),
         "proxies_online": proxy_counts.get(ProxyStatus.active, 0),
         "campaigns": sum(campaign_counts.values()),

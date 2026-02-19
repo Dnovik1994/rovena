@@ -3,7 +3,7 @@ import asyncio
 from pyrogram.errors import FloodWait
 
 from app.core.database import SessionLocal
-from app.models.account import Account, AccountStatus
+from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.contact import Contact
 from app.models.project import Project
@@ -28,7 +28,7 @@ class DummyClient:
         return True
 
 
-def _setup_campaign(status: CampaignStatus = CampaignStatus.active) -> Campaign:
+def _setup_campaign(campaign_status: CampaignStatus = CampaignStatus.active) -> Campaign:
     with SessionLocal() as db:
         user = User(telegram_id=5001, username="owner", first_name="Owner")
         db.add(user)
@@ -40,11 +40,11 @@ def _setup_campaign(status: CampaignStatus = CampaignStatus.active) -> Campaign:
         db.commit()
         db.refresh(project)
 
-        account = Account(
-            user_id=user.id,
-            owner_id=user.id,
-            telegram_id=6001,
-            status=AccountStatus.active,
+        account = TelegramAccount(
+            owner_user_id=user.id,
+            tg_user_id=6001,
+            phone_e164="+10000006001",
+            status=TelegramAccountStatus.active,
         )
         db.add(account)
 
@@ -75,7 +75,7 @@ def _setup_campaign(status: CampaignStatus = CampaignStatus.active) -> Campaign:
             source_id=None,
             target_id=target.id,
             name="Invite",
-            status=status,
+            status=campaign_status,
         )
         db.add(campaign)
         db.commit()
@@ -86,7 +86,7 @@ def _setup_campaign(status: CampaignStatus = CampaignStatus.active) -> Campaign:
 def test_campaign_dispatch_success(monkeypatch, client):
     campaign = _setup_campaign()
 
-    monkeypatch.setattr(tasks, "get_client", lambda *_args, **_kwargs: DummyClient())
+    monkeypatch.setattr(tasks, "create_tg_account_client", lambda *_args, **_kwargs: DummyClient())
 
     async def _sleep(_value):
         return None
@@ -103,7 +103,7 @@ def test_campaign_dispatch_success(monkeypatch, client):
 def test_campaign_dispatch_floodwait(monkeypatch, client):
     campaign = _setup_campaign()
 
-    monkeypatch.setattr(tasks, "get_client", lambda *_args, **_kwargs: DummyClient(True))
+    monkeypatch.setattr(tasks, "create_tg_account_client", lambda *_args, **_kwargs: DummyClient(True))
 
     async def _sleep(_value):
         return None
@@ -113,5 +113,5 @@ def test_campaign_dispatch_floodwait(monkeypatch, client):
     asyncio.run(tasks._run_campaign_dispatch(campaign.id))
 
     with SessionLocal() as db:
-        account = db.query(Account).filter(Account.owner_id == campaign.owner_id).first()
-        assert account.status == AccountStatus.cooldown
+        account = db.query(TelegramAccount).filter(TelegramAccount.owner_user_id == campaign.owner_id).first()
+        assert account.status == TelegramAccountStatus.cooldown

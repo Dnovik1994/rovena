@@ -1,4 +1,3 @@
-from app.models.account import Account, AccountStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.campaign_contact import CampaignContact, InviteStatus
 from app.models.campaign_dispatch_log import CampaignDispatchLog, DispatchErrorType
@@ -20,8 +19,6 @@ from app.models.user import User
 from app.models.warming_channel import WarmingChannel
 
 __all__ = [
-    "Account",
-    "AccountStatus",
     "AuthFlowState",
     "Campaign",
     "CampaignContact",
