@@ -141,7 +141,10 @@ class TestCeleryTasksRegistered:
     def test_celery_app_includes_tg_auth_tasks(self):
         from app.workers import celery_app
         include = celery_app.conf.get("include", [])
-        assert "app.workers.tg_auth_tasks" in include
+        assert "app.workers.tg_auth_legacy_tasks" in include
+        assert "app.workers.tg_auth_unified_tasks" in include
+        assert "app.workers.tg_auth_password_tasks" in include
+        assert "app.workers.tg_auth_verify_tasks" in include
 
     def test_broker_transport_options_has_socket_timeouts(self):
         from app.workers import celery_app
@@ -219,7 +222,7 @@ class TestSendCodeTaskSuccess:
 
         # Redirect pre-auth dir to tmp_path and create dummy session file
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _pre_auth_session_name
         session_file = tmp_path / f"{_pre_auth_session_name(flow.id)}.session"
         session_file.write_bytes(b"fake-session-data")
@@ -233,7 +236,7 @@ class TestSendCodeTaskSuccess:
         mock_client.disconnect = AsyncMock()
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
         monkeypatch.setattr(
@@ -278,7 +281,7 @@ class TestSendCodeTaskFailure:
             )
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client", _raise,
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client", _raise,
         )
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
@@ -310,7 +313,7 @@ class TestSendCodeTaskFailure:
             raise TelegramClientDisabledError()
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client", _raise,
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client", _raise,
         )
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
@@ -339,7 +342,7 @@ class TestSendCodeTaskFailure:
             raise RuntimeError("Failed for +380509876543: network error")
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client", _raise,
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client", _raise,
         )
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
@@ -371,7 +374,7 @@ class TestSendCodeTaskFailure:
         mock_client.disconnect = AsyncMock()
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
@@ -728,7 +731,7 @@ class TestConfirmCodeSessionPersistence:
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         mock_client = AsyncMock()
@@ -743,11 +746,11 @@ class TestConfirmCodeSessionPersistence:
         mock_client.export_session_string = AsyncMock(return_value="raw_session")
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.encrypt_session",
+            "app.workers.tg_auth_legacy_tasks.encrypt_session",
             lambda s: "encrypted_" + s,
         )
 
@@ -847,7 +850,7 @@ class TestPreAuthSessionPersistence:
 
         # Redirect pre-auth dir to tmp_path
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         captured_kwargs = {}
@@ -865,7 +868,7 @@ class TestPreAuthSessionPersistence:
             return mock_client
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             capture_create,
         )
 
@@ -895,7 +898,7 @@ class TestPreAuthSessionPersistence:
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         # Create a fake pre-auth session file to verify existence check
@@ -918,11 +921,11 @@ class TestPreAuthSessionPersistence:
             return mock_client
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             capture_create,
         )
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.encrypt_session",
+            "app.workers.tg_auth_legacy_tasks.encrypt_session",
             lambda s: "enc_" + s,
         )
 
@@ -965,7 +968,7 @@ class TestPreAuthSessionPersistence:
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _pre_auth_session_name
@@ -982,11 +985,11 @@ class TestPreAuthSessionPersistence:
         mock_client.export_session_string = AsyncMock(return_value="sess")
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.encrypt_session",
+            "app.workers.tg_auth_legacy_tasks.encrypt_session",
             lambda s: "enc_" + s,
         )
 
@@ -1014,7 +1017,7 @@ class TestPreAuthSessionPersistence:
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _pre_auth_session_name
@@ -1027,7 +1030,7 @@ class TestPreAuthSessionPersistence:
         mock_client.sign_in = AsyncMock(side_effect=PhoneCodeExpired())
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
 
@@ -1057,7 +1060,7 @@ class TestPreAuthSessionPersistence:
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         from app.workers.tg_auth_tasks import _pre_auth_session_name
@@ -1070,7 +1073,7 @@ class TestPreAuthSessionPersistence:
         mock_client.sign_in = AsyncMock(side_effect=PhoneCodeInvalid())
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
 
@@ -1101,7 +1104,7 @@ class TestPreAuthSessionPersistence:
         db_session.commit()
 
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         monkeypatch.setattr("app.workers.tg_auth_helpers.manager", MagicMock())
 
         mock_client = AsyncMock()
@@ -1110,7 +1113,7 @@ class TestPreAuthSessionPersistence:
         mock_client.sign_in = AsyncMock(side_effect=PhoneCodeExpired())
 
         monkeypatch.setattr(
-            "app.workers.tg_auth_tasks.create_tg_account_client",
+            "app.workers.tg_auth_legacy_tasks.create_tg_account_client",
             lambda *a, **kw: mock_client,
         )
 
@@ -1210,7 +1213,7 @@ class TestPreAuthSessionHelpers:
 
     def test_session_path_under_pre_auth_dir(self, monkeypatch, tmp_path):
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _pre_auth_session_path
 
         path = _pre_auth_session_path("flow-42")
@@ -1220,7 +1223,7 @@ class TestPreAuthSessionHelpers:
 
     def test_cleanup_removes_session_and_sidefiles(self, monkeypatch, tmp_path):
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _cleanup_pre_auth_session, _pre_auth_session_path
 
         base = _pre_auth_session_path("flow-clean")
@@ -1236,7 +1239,7 @@ class TestPreAuthSessionHelpers:
     def test_cleanup_noop_if_no_file(self, monkeypatch, tmp_path):
         """Cleanup must not raise if session file doesn't exist."""
         monkeypatch.setattr("app.workers.tg_auth_helpers._PRE_AUTH_DIR", tmp_path)
-        monkeypatch.setattr("app.workers.tg_auth_tasks._PRE_AUTH_DIR", tmp_path)
+        monkeypatch.setattr("app.workers.tg_auth_legacy_tasks._PRE_AUTH_DIR", tmp_path)
         from app.workers.tg_auth_tasks import _cleanup_pre_auth_session
 
         # Should not raise

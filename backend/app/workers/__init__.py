@@ -74,7 +74,10 @@ celery_app = Celery(
     # so non-standard names like tg_auth_tasks.py were silently skipped.
     include=[
         "app.workers.tasks",
-        "app.workers.tg_auth_tasks",
+        "app.workers.tg_auth_legacy_tasks",
+        "app.workers.tg_auth_unified_tasks",
+        "app.workers.tg_auth_password_tasks",
+        "app.workers.tg_auth_verify_tasks",
         "app.workers.tg_warming_tasks",
         "app.workers.tg_campaign_tasks",
         "app.workers.tg_sync_tasks",
