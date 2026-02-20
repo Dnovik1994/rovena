@@ -17,9 +17,7 @@ from __future__ import annotations
 
 from typing import List
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import text
 
 revision = "0032_migrate_dispatch_log_fk_to_telegram_accounts"
@@ -33,31 +31,29 @@ _NEW_FK = "fk_dispatch_logs_telegram_account_id"
 _OLD_FK = "fk_dispatch_logs_account_id"
 
 
-def _get_fk_names_for_referred_table(
-    inspector: sa.engine.reflection.Inspector,
-    referred_table: str,
-) -> List[str]:
+def _get_fk_names_for_referred_table(referred_table: str) -> List[str]:
     """Return names of all FKs on _TABLE._COLUMN that point to *referred_table*."""
-    names: List[str] = []
-    for fk in inspector.get_foreign_keys(_TABLE):
-        if (
-            fk.get("referred_table") == referred_table
-            and _COLUMN in fk.get("constrained_columns", [])
-            and fk.get("name")
-        ):
-            names.append(fk["name"])
-    return names
+    conn = op.get_bind()
+    rows = conn.execute(
+        text(
+            "SELECT CONSTRAINT_NAME "
+            "FROM information_schema.KEY_COLUMN_USAGE "
+            "WHERE TABLE_SCHEMA = DATABASE() "
+            f"AND TABLE_NAME = '{_TABLE}' "
+            f"AND COLUMN_NAME = '{_COLUMN}' "
+            f"AND REFERENCED_TABLE_NAME = '{referred_table}'"
+        )
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
-def _has_fk_to(inspector: sa.engine.reflection.Inspector, referred_table: str) -> bool:
-    return bool(_get_fk_names_for_referred_table(inspector, referred_table))
+def _has_fk_to(referred_table: str) -> bool:
+    return bool(_get_fk_names_for_referred_table(referred_table))
 
 
-def _drop_all_fks_to(
-    inspector: sa.engine.reflection.Inspector, referred_table: str
-) -> None:
+def _drop_all_fks_to(referred_table: str) -> None:
     """Drop every FK on _TABLE._COLUMN pointing to *referred_table*."""
-    for name in _get_fk_names_for_referred_table(inspector, referred_table):
+    for name in _get_fk_names_for_referred_table(referred_table):
         op.drop_constraint(name, _TABLE, type_="foreignkey")
 
 
@@ -67,15 +63,11 @@ def upgrade() -> None:
     if bind.dialect.name == "sqlite":
         return
 
-    inspector = sa_inspect(bind)
-
     # 1. Drop ALL old FKs pointing to accounts (regardless of name).
-    _drop_all_fks_to(inspector, "accounts")
+    _drop_all_fks_to("accounts")
 
     # 2. Create new FK to telegram_accounts — only if none exists yet.
-    #    Re-inspect after the drop above so the inspector sees current state.
-    inspector = sa_inspect(bind)
-    if not _has_fk_to(inspector, "telegram_accounts"):
+    if not _has_fk_to("telegram_accounts"):
         op.create_foreign_key(
             _NEW_FK,
             _TABLE,
@@ -91,14 +83,11 @@ def downgrade() -> None:
     if bind.dialect.name == "sqlite":
         return
 
-    inspector = sa_inspect(bind)
-
     # 1. Drop ALL FKs pointing to telegram_accounts.
-    _drop_all_fks_to(inspector, "telegram_accounts")
+    _drop_all_fks_to("telegram_accounts")
 
     # 2. Restore FK to accounts — only if none exists yet.
-    inspector = sa_inspect(bind)
-    if not _has_fk_to(inspector, "accounts"):
+    if not _has_fk_to("accounts"):
         op.create_foreign_key(
             _OLD_FK,
             _TABLE,
