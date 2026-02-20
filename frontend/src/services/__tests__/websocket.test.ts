@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   computeBackoff,
   connectStatusSocket,
   type StatusMessage,
   type StatusSocketHandle,
+  type WsConnectionState,
 } from "../websocket";
 
 /* ══════════════════════════════════════════════════════════════
@@ -128,12 +129,12 @@ describe("computeBackoff", () => {
  * ══════════════════════════════════════════════════════════════ */
 
 describe("connectStatusSocket", () => {
-  let onMessage: ReturnType<typeof vi.fn>;
-  let onStateChange: ReturnType<typeof vi.fn>;
+  let onMessage: Mock<(msg: StatusMessage) => void>;
+  let onStateChange: Mock<(state: WsConnectionState) => void>;
 
   beforeEach(() => {
-    onMessage = vi.fn();
-    onStateChange = vi.fn();
+    onMessage = vi.fn<(msg: StatusMessage) => void>();
+    onStateChange = vi.fn<(state: WsConnectionState) => void>();
   });
 
   /* ── Connection + onopen ── */
