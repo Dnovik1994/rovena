@@ -25,9 +25,24 @@ if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
     alembic merge heads -m "auto-merge heads on deploy" || true
   fi
 
-  alembic upgrade heads || {
-    log "WARNING: alembic upgrade failed (exit $?), continuing anyway"
-  }
+  migration_ok=0
+  for attempt in 1 2 3; do
+    log "Migration attempt ${attempt}/3..."
+    if alembic upgrade heads; then
+      migration_ok=1
+      break
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      backoff=$((attempt * 5))
+      log "Migration failed, retrying in ${backoff}s..."
+      sleep "$backoff"
+    fi
+  done
+
+  if [[ "$migration_ok" -ne 1 ]]; then
+    log "CRITICAL: alembic upgrade failed after 3 attempts. Refusing to start backend."
+    exit 1
+  fi
 fi
 
 if [[ $# -eq 0 ]]; then
