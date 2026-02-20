@@ -94,13 +94,11 @@ services:
     networks:
       - infra
     environment:
+      # Traefik standalone Docker provider needs: CONTAINERS, EVENTS, NETWORKS
+      # SERVICES/TASKS are Swarm-only — removed.
       CONTAINERS: "1"
       EVENTS: "1"
-      INFO: "1"
       NETWORKS: "1"
-      SERVICES: "1"
-      TASKS: "1"
-      VERSION: "1"
       POST: "0"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -132,10 +130,11 @@ services:
     logging: *default-logging
     networks:
       - data
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -212,7 +211,7 @@ services:
       CELERY_APP: ${CELERY_APP:-app.workers:celery_app}
       CELERY_POOL: ${CELERY_POOL:-solo}
       CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: ${REDIS_URL}
       APP_ROLE: worker
     volumes:
       - 3proxy-cfg:/app/3proxy-cfg
@@ -253,7 +252,7 @@ services:
       DB_PORT: ${DB_PORT:-3306}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: ${REDIS_URL}
       APP_ROLE: beat
       PRODUCTION: "true"
       ENVIRONMENT: production
@@ -394,7 +393,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: ${REDIS_URL}
     volumes:
       - ./crontab.txt:/etc/crontabs/root:ro
       - backups:/backups

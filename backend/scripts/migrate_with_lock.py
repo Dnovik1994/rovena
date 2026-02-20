@@ -89,12 +89,12 @@ def main() -> int:
                 error_msg = str(exc)
 
                 if re.search(r"duplicate key name|1061", error_msg, re.IGNORECASE):
-                    log("Detected duplicate index, downgrading to 0014...")
-                    try:
-                        command.downgrade(cfg, "0014")
-                    except Exception:
-                        log("Alembic downgrade to 0014 failed.")
-                        return 1
+                    log(
+                        "CRITICAL: Duplicate key detected. "
+                        "Manual intervention required — do NOT auto-downgrade."
+                    )
+                    log(f"Error: {error_msg}")
+                    return 1
 
                 elif re.search(
                     r"Data too long for column.*version_num|1406.*version_num",
