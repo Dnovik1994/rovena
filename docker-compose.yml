@@ -4,6 +4,48 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+x-common-env: &common-env
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-}
+  PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+  PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
+  PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
+  PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
+  DB_HOST: ${DB_HOST:-db}
+  DB_PORT: ${DB_PORT:-3306}
+  DB_USER: ${DB_USER:-rovena}
+  DB_PASSWORD: ${DB_PASSWORD:-rovena}
+  DB_NAME: ${DB_NAME:-rovena}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_DB: ${REDIS_DB:-0}
+  WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
+  WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
+  WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
+  WAIT_FOR_DB_TABLES: ${WAIT_FOR_DB_TABLES:-1}
+  WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
+  WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
+  WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
+  MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
+  MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
+  MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+
+x-backend-base: &backend-base
+  build:
+    context: ./backend
+    args:
+      COMMIT_SHA: ${COMMIT_SHA:-unknown}
+  restart: unless-stopped
+  deploy:
+    restart_policy:
+      delay: 5s
+  logging: *default-logging
+  init: true
+  stop_grace_period: 30s
+  env_file:
+    - .env
+
 services:
   db:
     image: mysql:8.4
@@ -56,45 +98,9 @@ services:
       start_period: 10s
 
   backend:
-    build:
-      context: ./backend
-      args:
-        COMMIT_SHA: ${COMMIT_SHA:-unknown}
-    restart: unless-stopped
-    deploy:
-      restart_policy:
-        delay: 5s
-    logging: *default-logging
-    init: true
-    stop_grace_period: 30s
-    env_file:
-      - .env
+    <<: *backend-base
     environment:
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
-      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
-      PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
-      PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
-      DB_HOST: ${DB_HOST:-db}
-      DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER:-rovena}
-      DB_PASSWORD: ${DB_PASSWORD:-rovena}
-      DB_NAME: ${DB_NAME:-rovena}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_DB: ${REDIS_DB:-0}
-      WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
-      WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
-      WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
-      WAIT_FOR_DB_TABLES: ${WAIT_FOR_DB_TABLES:-1}
-      WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
-      WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
-      WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
-      MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
-      MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
-      MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+      <<: *common-env
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       APP_ROLE: backend
       BACKEND_HEALTH_URL: ${BACKEND_HEALTH_URL:-http://localhost:8020/api/v1/health}
@@ -115,49 +121,13 @@ services:
       start_period: 10s
 
   worker:
-    build:
-      context: ./backend
-      args:
-        COMMIT_SHA: ${COMMIT_SHA:-unknown}
-    restart: unless-stopped
-    deploy:
-      restart_policy:
-        delay: 5s
-    logging: *default-logging
-    init: true
-    stop_grace_period: 30s
-    env_file:
-      - .env
+    <<: *backend-base
     volumes:
       - 3proxy-cfg:/app/3proxy-cfg
       - pre-auth-sessions:/data/pyrogram_pre_auth
       - pyrogram-sessions:/data/pyrogram_sessions
     environment:
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
-      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
-      PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
-      PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
-      DB_HOST: ${DB_HOST:-db}
-      DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER:-rovena}
-      DB_PASSWORD: ${DB_PASSWORD:-rovena}
-      DB_NAME: ${DB_NAME:-rovena}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_DB: ${REDIS_DB:-0}
-      WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
-      WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
-      WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
-      WAIT_FOR_DB_TABLES: ${WAIT_FOR_DB_TABLES:-1}
-      WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
-      WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
-      WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
-      MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
-      MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
-      MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+      <<: *common-env
       RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
       CELERY_APP: ${CELERY_APP:-app.workers:celery_app}
       CELERY_POOL: ${CELERY_POOL:-solo}
