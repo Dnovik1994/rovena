@@ -31,12 +31,12 @@ function mockResponse(body: unknown, status = 200): Response {
 
 /* ── Setup / Teardown ─────────────────────────────────────── */
 
-const originalFetch = global.fetch;
+const originalFetch = globalThis.fetch;
 const mockedFetch = vi.fn<typeof fetch>();
 
 beforeEach(() => {
   mockedFetch.mockReset();
-  global.fetch = mockedFetch;
+  globalThis.fetch = mockedFetch;
   _resetRefreshPromise();
 
   vi.mocked(getStoredTokens).mockReturnValue({
@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  global.fetch = originalFetch;
+  globalThis.fetch = originalFetch;
 });
 
 /* ── Tests ────────────────────────────────────────────────── */

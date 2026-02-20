@@ -13,8 +13,9 @@ jobs:
       - name: Validate compose files
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.yml config
-          docker compose -f docker-compose.override.yml config
+          cp .env.example .env
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.override.yml config --quiet
           docker compose -f docker-compose.prod.yml config > /tmp/compose-prod.yml
           python - <<'PY'
           import subprocess
@@ -77,8 +78,13 @@ jobs:
           python-version: "3.12"
       - name: Install backend dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt || {
+            echo "::warning::pyaes build failed; installing pyrogram without transitive deps"
+            grep -v '^pyrogram' backend/requirements.txt > /tmp/requirements-nopyro.txt
+            pip install -r /tmp/requirements-nopyro.txt -r backend/requirements-dev.txt
+            pip install --no-deps pyrogram==2.0.106
+          }
       - name: Compile backend
         run: python -m compileall backend/app
       - name: Run tests

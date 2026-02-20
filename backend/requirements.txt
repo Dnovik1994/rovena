@@ -13,6 +13,7 @@ cryptography==43.0.3
 celery[redis]==5.4.0
 redis==5.0.8
 pyrogram==2.0.106
+pysocks==1.7.1
 tgcrypto==1.2.5
 faker==29.0.0
 prometheus-client==0.20.0
