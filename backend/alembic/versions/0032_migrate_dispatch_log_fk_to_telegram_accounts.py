@@ -2,10 +2,20 @@
 
 Part of Account → TelegramAccount migration (#11).
 
+Fully idempotent: handles all four possible states:
+  a) FK on accounts       → drop old, create new
+  b) FK on telegram_accounts → already done, skip
+  c) No FK at all         → create new
+  d) Both FKs exist       → drop old, keep new
+
 Revision ID: 0032_migrate_dispatch_log_fk_to_telegram_accounts
 Revises: 0031_add_invite_campaign_dispatch_lease
 Create Date: 2026-02-19 00:00:00.000000
 """
+
+from __future__ import annotations
+
+from typing import List
 
 import sqlalchemy as sa
 from alembic import op
@@ -17,73 +27,82 @@ down_revision = "0031_add_invite_campaign_dispatch_lease"
 branch_labels = None
 depends_on = None
 
+_TABLE = "campaign_dispatch_logs"
+_COLUMN = "account_id"
 _NEW_FK = "fk_dispatch_logs_telegram_account_id"
 _OLD_FK = "fk_dispatch_logs_account_id"
 
 
-def _fk_exists(bind: sa.engine.Connection, constraint_name: str) -> bool:
-    """Check if a foreign key constraint exists (MySQL / information_schema)."""
-    result = bind.execute(
-        text(
-            "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS "
-            "WHERE CONSTRAINT_SCHEMA = DATABASE() "
-            "  AND TABLE_NAME = 'campaign_dispatch_logs' "
-            "  AND CONSTRAINT_NAME = :name "
-            "  AND CONSTRAINT_TYPE = 'FOREIGN KEY' "
-            "LIMIT 1"
-        ),
-        {"name": constraint_name},
-    )
-    return result.scalar() is not None
+def _get_fk_names_for_referred_table(
+    inspector: sa.engine.reflection.Inspector,
+    referred_table: str,
+) -> List[str]:
+    """Return names of all FKs on _TABLE._COLUMN that point to *referred_table*."""
+    names: List[str] = []
+    for fk in inspector.get_foreign_keys(_TABLE):
+        if (
+            fk.get("referred_table") == referred_table
+            and _COLUMN in fk.get("constrained_columns", [])
+            and fk.get("name")
+        ):
+            names.append(fk["name"])
+    return names
+
+
+def _has_fk_to(inspector: sa.engine.reflection.Inspector, referred_table: str) -> bool:
+    return bool(_get_fk_names_for_referred_table(inspector, referred_table))
+
+
+def _drop_all_fks_to(
+    inspector: sa.engine.reflection.Inspector, referred_table: str
+) -> None:
+    """Drop every FK on _TABLE._COLUMN pointing to *referred_table*."""
+    for name in _get_fk_names_for_referred_table(inspector, referred_table):
+        op.drop_constraint(name, _TABLE, type_="foreignkey")
 
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = sa_inspect(bind)
-    dialect = bind.dialect.name
 
-    if dialect == "sqlite":
-        # SQLite doesn't support ALTER TABLE DROP/ADD CONSTRAINT.
-        # The FK is enforced at ORM level; skip DDL changes for SQLite.
+    if bind.dialect.name == "sqlite":
         return
 
-    # Drop the old FK pointing to accounts.id
-    fks = inspector.get_foreign_keys("campaign_dispatch_logs")
-    for fk in fks:
-        if fk["referred_table"] == "accounts" and "account_id" in fk["constrained_columns"]:
-            fk_name = fk["name"]
-            if fk_name:
-                op.drop_constraint(fk_name, "campaign_dispatch_logs", type_="foreignkey")
-                break
+    inspector = sa_inspect(bind)
 
-    # Add new FK pointing to telegram_accounts.id (idempotent)
-    if not _fk_exists(bind, _NEW_FK):
+    # 1. Drop ALL old FKs pointing to accounts (regardless of name).
+    _drop_all_fks_to(inspector, "accounts")
+
+    # 2. Create new FK to telegram_accounts — only if none exists yet.
+    #    Re-inspect after the drop above so the inspector sees current state.
+    inspector = sa_inspect(bind)
+    if not _has_fk_to(inspector, "telegram_accounts"):
         op.create_foreign_key(
             _NEW_FK,
-            "campaign_dispatch_logs",
+            _TABLE,
             "telegram_accounts",
-            ["account_id"],
+            [_COLUMN],
             ["id"],
         )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    dialect = bind.dialect.name
 
-    if dialect == "sqlite":
+    if bind.dialect.name == "sqlite":
         return
 
-    # Drop new FK only if it exists (idempotent)
-    if _fk_exists(bind, _NEW_FK):
-        op.drop_constraint(_NEW_FK, "campaign_dispatch_logs", type_="foreignkey")
+    inspector = sa_inspect(bind)
 
-    # Restore old FK only if it doesn't already exist (idempotent)
-    if not _fk_exists(bind, _OLD_FK):
+    # 1. Drop ALL FKs pointing to telegram_accounts.
+    _drop_all_fks_to(inspector, "telegram_accounts")
+
+    # 2. Restore FK to accounts — only if none exists yet.
+    inspector = sa_inspect(bind)
+    if not _has_fk_to(inspector, "accounts"):
         op.create_foreign_key(
             _OLD_FK,
-            "campaign_dispatch_logs",
+            _TABLE,
             "accounts",
-            ["account_id"],
+            [_COLUMN],
             ["id"],
         )
