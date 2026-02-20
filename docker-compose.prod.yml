@@ -8,6 +8,42 @@ x-logging: &default-logging
 x-3proxy-command: &proxy-command ["/usr/local/bin/3proxy", "/etc/3proxy/3proxy.cfg"]
 x-3proxy-healthcheck: &proxy-healthcheck ["CMD", "sh", "-lc", "test -s /etc/3proxy/3proxy.cfg && pgrep 3proxy >/dev/null"]
 
+x-common-env: &common-env
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-}
+  PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+  PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
+  PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
+  PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
+  DB_HOST: ${DB_HOST:-db}
+  DB_PORT: ${DB_PORT:-3306}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
+  WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
+  WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
+  WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
+  WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
+  WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
+  MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
+  MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
+  MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+  PRODUCTION: "true"
+  ENVIRONMENT: production
+
+x-backend-base: &backend-base
+  build:
+    context: ./backend
+    args:
+      COMMIT_SHA: ${COMMIT_SHA:-unknown}
+  restart: unless-stopped
+  logging: *default-logging
+  init: true
+  stop_grace_period: 30s
+  env_file:
+    - .env
+
 services:
   traefik:
     image: traefik:v3.6.1
@@ -106,44 +142,14 @@ services:
       start_period: 5s
 
   backend:
-    build:
-      context: ./backend
-      args:
-        COMMIT_SHA: ${COMMIT_SHA:-unknown}
-    restart: unless-stopped
-    logging: *default-logging
+    <<: *backend-base
     networks:
       - app
       - data
       - egress
-    init: true
-    stop_grace_period: 30s
-    env_file:
-      - .env
     environment:
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
-      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
-      PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
-      PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
-      DB_HOST: ${DB_HOST:-db}
-      DB_PORT: ${DB_PORT:-3306}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
-      WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
-      WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
-      WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
-      WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
-      WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
-      MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
-      MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
-      MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+      <<: *common-env
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
-      PRODUCTION: "true"
-      ENVIRONMENT: production
       WEB_BASE_URL: "https://${DOMAIN:-kass.freestorms.top}"
       CORS_ORIGINS: '["https://${DOMAIN:-kass.freestorms.top}"]'
       DEV_ALLOW_LOCALHOST: "false"
@@ -196,48 +202,18 @@ services:
       start_period: 10s
 
   worker:
-    build:
-      context: ./backend
-      args:
-        COMMIT_SHA: ${COMMIT_SHA:-unknown}
-    restart: unless-stopped
-    logging: *default-logging
+    <<: *backend-base
     networks:
       - data
       - egress
-    init: true
-    stop_grace_period: 30s
-    env_file:
-      - .env
     environment:
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
-      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-      PROXY_CONFIG_PATH: ${PROXY_CONFIG_PATH:-/app/3proxy-cfg/3proxy.cfg}
-      PROXY_BASE_PORT: ${PROXY_BASE_PORT:-10000}
-      PROXY_RELOAD_CMD: ${PROXY_RELOAD_CMD:-}
-      DB_HOST: ${DB_HOST:-db}
-      DB_PORT: ${DB_PORT:-3306}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      WAIT_FOR_DEPS: ${WAIT_FOR_DEPS:-1}
-      WAIT_FOR_DB: ${WAIT_FOR_DB:-1}
-      WAIT_FOR_REDIS: ${WAIT_FOR_REDIS:-1}
-      WAIT_MAX_RETRIES: ${WAIT_MAX_RETRIES:-30}
-      WAIT_BACKOFF_BASE: ${WAIT_BACKOFF_BASE:-2}
-      WAIT_BACKOFF_MAX: ${WAIT_BACKOFF_MAX:-20}
-      MIGRATION_MAX_RETRIES: ${MIGRATION_MAX_RETRIES:-10}
-      MIGRATION_BACKOFF_BASE: ${MIGRATION_BACKOFF_BASE:-2}
-      MIGRATION_BACKOFF_MAX: ${MIGRATION_BACKOFF_MAX:-30}
+      <<: *common-env
       RUN_MIGRATIONS: ${RUN_MIGRATIONS_WORKER:-0}
       CELERY_APP: ${CELERY_APP:-app.workers:celery_app}
       CELERY_POOL: ${CELERY_POOL:-solo}
       CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       APP_ROLE: worker
-      PRODUCTION: "true"
-      ENVIRONMENT: production
     volumes:
       - 3proxy-cfg:/app/3proxy-cfg
       - pre-auth-sessions:/data/pyrogram_pre_auth
@@ -266,20 +242,12 @@ services:
       start_period: 15s
 
   beat:
-    build:
-      context: ./backend
-      args:
-        COMMIT_SHA: ${COMMIT_SHA:-unknown}
-    restart: unless-stopped
-    logging: *default-logging
+    <<: *backend-base
     networks:
       - data
     deploy:
       replicas: 1
-    init: true
     stop_grace_period: 15s
-    env_file:
-      - .env
     environment:
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-3306}
