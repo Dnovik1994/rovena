@@ -14,7 +14,6 @@ def test_broker_connection_retry_on_startup_enabled():
 # that occurs when a module with @celery_app.task is not discovered.
 _EXPECTED_INCLUDE_MODULES = [
     "app.workers.tasks",
-    "app.workers.tg_auth_legacy_tasks",
     "app.workers.tg_auth_unified_tasks",
     "app.workers.tg_auth_password_tasks",
     "app.workers.tg_auth_verify_tasks",
@@ -31,8 +30,6 @@ def test_task_module_in_include(module: str):
 # Verify that individual tasks from tg_auth_tasks are actually registered
 # after the module is imported (i.e. the @celery_app.task decorators ran).
 _EXPECTED_TG_AUTH_TASKS = [
-    "app.workers.tg_auth_tasks.send_code_task",
-    "app.workers.tg_auth_tasks.confirm_code_task",
     "app.workers.tg_auth_tasks.confirm_password_task",
 ]
 

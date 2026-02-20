@@ -27,14 +27,6 @@ from app.workers.tg_auth_helpers import (  # noqa: F401
     _set_dc_id,
 )
 
-# ─── legacy send_code / confirm_code (moved to tg_auth_legacy_tasks.py) ──
-from app.workers.tg_auth_legacy_tasks import (  # noqa: F401
-    _run_send_code,
-    send_code_task,
-    _run_confirm_code,
-    confirm_code_task,
-)
-
 # ─── unified_auth (moved to tg_auth_unified_tasks.py) ────────────────
 from app.workers.tg_auth_unified_tasks import (  # noqa: F401
     _run_unified_auth,

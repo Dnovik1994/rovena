@@ -229,11 +229,6 @@ class TestStateMachine:
         assert resp.status_code == 409
 
     def test_confirm_code_without_flow_404(self, client, db_session, monkeypatch):
-        monkeypatch.setattr(
-            "app.api.v1.tg_accounts.confirm_code_task",
-            type("FakeTask", (), {"delay": staticmethod(lambda *a, **kw: None), "name": "fake_task"})(),
-        )
-
         user = _create_user(db_session)
         headers = _auth_headers(user)
         create_resp = client.post(
@@ -437,8 +432,6 @@ class TestCeleryTaskRegistration:
     def test_auth_tasks_registered(self):
         from app.workers import celery_app
         task_names = list(celery_app.tasks.keys())
-        assert any("send_code_task" in name for name in task_names)
-        assert any("confirm_code_task" in name for name in task_names)
         assert any("confirm_password_task" in name for name in task_names)
 
 
