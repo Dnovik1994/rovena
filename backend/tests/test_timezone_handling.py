@@ -196,18 +196,8 @@ class TestConfirmCodeTimezoneRegression:
     def test_confirm_code_with_naive_expires_not_expired(
         self, client, db_session, monkeypatch,
     ):
-        """A flow with naive expires_at (future) should dispatch the task
+        """A flow with naive expires_at (future) should accept the code
         instead of crashing with TypeError."""
-        # Stub out confirm_code_task so it doesn't hit real Celery/Redis
-        calls = []
-
-        class FakeTask:
-            name = "confirm_code_task"
-            def delay(self, *a, **kw):
-                calls.append((a, kw))
-
-        monkeypatch.setattr("app.api.v1.tg_accounts.confirm_code_task", FakeTask())
-
         user = _create_user(db_session, telegram_id=7010)
         headers = _auth_headers(user)
         account = _create_account(db_session, user, phone="+380507010010")
@@ -228,13 +218,6 @@ class TestConfirmCodeTimezoneRegression:
         self, client, db_session, monkeypatch,
     ):
         """A flow with naive expires_at (past) should return 409, not 500."""
-        class FakeTask:
-            name = "confirm_code_task"
-            def delay(self, *a, **kw):
-                pass
-
-        monkeypatch.setattr("app.api.v1.tg_accounts.confirm_code_task", FakeTask())
-
         user = _create_user(db_session, telegram_id=7011)
         headers = _auth_headers(user)
         account = _create_account(db_session, user, phone="+380507011011")
@@ -387,13 +370,6 @@ class TestConfirmCodeResponseFormat:
     def test_confirm_code_response_has_flow_fields(
         self, client, db_session, monkeypatch,
     ):
-        class FakeTask:
-            name = "confirm_code_task"
-            def delay(self, *a, **kw):
-                pass
-
-        monkeypatch.setattr("app.api.v1.tg_accounts.confirm_code_task", FakeTask())
-
         user = _create_user(db_session, telegram_id=7040)
         headers = _auth_headers(user)
         account = _create_account(db_session, user, phone="+380507040040")

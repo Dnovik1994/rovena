@@ -43,9 +43,7 @@ from app.schemas.telegram_account import (
 from app.services.auto_assign import NoAvailableApiAppError, assign_api_app
 from app.services.websocket_manager import manager
 from app.workers.tg_auth_tasks import (
-    confirm_code_task,
     confirm_password_task,
-    send_code_task,
     unified_auth_task,
     verify_account_task,
 )
@@ -519,18 +517,6 @@ def confirm_code(
         )
 
     meta = flow.meta_json or {}
-
-    if meta.get("pre_auth_session"):
-        # Legacy flow (created before unified_auth_task deployment):
-        # dispatch the old confirm_code_task.
-        _safe_dispatch(confirm_code_task, account.id, flow.id, payload.code)
-        return ConfirmCodeResponse(
-            status=TgAccountResponse.model_validate(account).status,
-            flow_id=payload.flow_id,
-            state="processing",
-            next_step="poll",
-            message="Verifying code...",
-        )
 
     # Unified flow: write code to DB for the polling task to pick up.
     new_meta = dict(meta)
