@@ -1,14 +1,48 @@
 groups:
   - name: rovena-alerts
     rules:
+      # ── Critical ──────────────────────────────────────────────
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} target is down"
+          description: "Target {{ $labels.instance }} (job {{ $labels.job }}) has been unreachable for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum by (job) (rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate on {{ $labels.job }}"
+          description: "More than 5% of HTTP requests are returning 5xx errors for 5 minutes."
+
+      - alert: BackendHealthFailed
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend health endpoint is not responding"
+          description: "Blackbox HTTP probe to backend /api/v1/health has been failing for 2 minutes."
+
+      # ── Warning ───────────────────────────────────────────────
       - alert: HighQueue
-        expr: celery_queue_length > 1000
+        expr: celery_queue_length > 100
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Celery queue length is high"
-          description: "celery_queue_length is above 1000 for 5 minutes."
+          description: "celery_queue_length is above 100 for 5 minutes."
 
       - alert: ManyBlockedAccounts
         expr: accounts_by_status{status="blocked"} / ignoring(status) accounts_total > 0.2
@@ -18,3 +52,21 @@ groups:
         annotations:
           summary: "Many accounts are blocked"
           description: "More than 20% of accounts are in blocked status."
+
+      - alert: HighMemoryUsage
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 90% for 5 minutes."
+
+      - alert: CertExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 14 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "SSL certificate expiring soon for {{ $labels.instance }}"
+          description: "SSL certificate expires in less than 14 days."

@@ -340,6 +340,8 @@ services:
         condition: service_healthy
       proxy:
         condition: service_healthy
+      alertmanager:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://localhost:9090/-/ready >/dev/null 2>&1"]
       interval: 15s
@@ -371,6 +373,8 @@ services:
     logging: *default-logging
     networks:
       - monitor
+      - app
+      - egress
     volumes:
       - ./blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
@@ -381,6 +385,66 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - monitor
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9093/-/ready >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - monitor
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - monitor
+      - data
+    environment:
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.1
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - monitor
+      - app
+    command:
+      - --nginx.scrape-uri=http://frontend:5173/nginx_status
+    depends_on:
+      frontend:
+        condition: service_healthy
 
   cron:
     build:
