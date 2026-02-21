@@ -27,6 +27,12 @@ from app.services.notification_service import NotificationService, send_notifica
 from app.services.websocket_manager import manager
 from app.workers import celery_app
 from app.workers.tg_warming_helpers import is_quiet_hours
+from app.workers.warming_throttle import (
+    THROTTLE_PAUSED,
+    THROTTLE_SLOW,
+    get_throttle_mode,
+    increment_flood_counter,
+)
 from app.workers.tg_warming_actions import (
     _action_add_contacts,
     _action_go_online,
@@ -476,6 +482,15 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
         if not plan:
             return
 
+        # --- Throttle check ---
+        mode = get_throttle_mode()
+        if mode == THROTTLE_PAUSED:
+            logger.info(
+                "Warming paused (flood rate > 15%%), skipping %s",
+                account.id,
+            )
+            return
+
         # --- Create Telegram client ---
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         try:
@@ -525,7 +540,10 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
 
                     # Pause between actions (go_online already has its own sleep)
                     if step["action"] != "go_online":
-                        await asyncio.sleep(random.uniform(15, 45))
+                        base_delay = random.uniform(15, 45)
+                        if mode == THROTTLE_SLOW:
+                            base_delay *= 2
+                        await asyncio.sleep(base_delay)
 
                 # --- Day completed successfully → increment ---
                 account.warming_day += 1
@@ -553,6 +571,7 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
                 "FloodWait during TG warming",
                 extra={"account_id": account_id, "wait_seconds": wait_seconds},
             )
+            increment_flood_counter()
             account.status = TelegramAccountStatus.cooldown
             account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
             account.flood_wait_at = datetime.now(timezone.utc)
