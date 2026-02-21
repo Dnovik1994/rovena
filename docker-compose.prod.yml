@@ -83,6 +83,11 @@ services:
       - "443:443"
     volumes:
       - ./letsencrypt:/letsencrypt
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       docker-socket-proxy:
         condition: service_started
@@ -107,6 +112,10 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     networks:
       - data
     environment:
@@ -128,6 +137,10 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     networks:
       - data
     command: redis-server --requirepass ${REDIS_PASSWORD}
@@ -142,6 +155,10 @@ services:
 
   backend:
     <<: *backend-base
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     networks:
       - app
       - data
@@ -168,7 +185,7 @@ services:
       traefik.enable: "true"
       traefik.docker.network: rovena_app
       # основной API
-      traefik.http.routers.kass-api.rule: "Host(`kass.freestorms.top`) && (PathPrefix(`/api/v1/`) || Path(`/api/v1`))"
+      traefik.http.routers.kass-api.rule: "Host(`${DOMAIN}`) && (PathPrefix(`/api/v1/`) || Path(`/api/v1`))"
       traefik.http.routers.kass-api.entrypoints: websecure
       traefik.http.routers.kass-api.priority: "20"
       traefik.http.routers.kass-api.service: kass-api
@@ -177,7 +194,7 @@ services:
       traefik.http.services.kass-api.loadbalancer.server.port: "8000"
 
       # health (вне /api/v1)
-      traefik.http.routers.kass-health.rule: Host(`kass.freestorms.top`) && Path(`/health`)
+      traefik.http.routers.kass-health.rule: Host(`${DOMAIN}`) && Path(`/health`)
       traefik.http.routers.kass-health.entrypoints: websecure
       traefik.http.routers.kass-health.priority: "110"
       traefik.http.routers.kass-health.service: kass-api
@@ -185,7 +202,7 @@ services:
       traefik.http.routers.kass-health.tls.certresolver: le
 
       # WebSocket /ws/* → backend (must not fall through to frontend catch-all)
-      traefik.http.routers.kass-ws.rule: Host(`kass.freestorms.top`) && PathPrefix(`/ws`)
+      traefik.http.routers.kass-ws.rule: Host(`${DOMAIN}`) && PathPrefix(`/ws`)
       traefik.http.routers.kass-ws.entrypoints: websecure
       traefik.http.routers.kass-ws.priority: "110"
       traefik.http.routers.kass-ws.service: kass-api
@@ -202,6 +219,10 @@ services:
 
   worker:
     <<: *backend-base
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     networks:
       - data
       - egress
@@ -316,7 +337,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: rovena_app
-      traefik.http.routers.kass-web.rule: "Host(`kass.freestorms.top`)"
+      traefik.http.routers.kass-web.rule: "Host(`${DOMAIN}`)"
       traefik.http.routers.kass-web.entrypoints: websecure
       traefik.http.routers.kass-web.priority: "10"
       traefik.http.routers.kass-web.service: kass-web
