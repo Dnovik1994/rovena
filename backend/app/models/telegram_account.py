@@ -76,6 +76,10 @@ class TelegramAccount(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     api_app = relationship("TelegramApiApp", lazy="joined")
+    warming_photo = relationship(
+        "WarmingPhoto", uselist=False,
+        foreign_keys="[TelegramAccount.warming_photo_id]",
+    )
 
     # ── Verify lease/lock fields ──
     verifying: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
@@ -95,6 +99,14 @@ class TelegramAccount(Base):
     warming_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     warming_task_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_device_regenerated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ── Warming profile fields ──
+    is_trusted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    warming_day: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    warming_photo_id: Mapped[int | None] = mapped_column(
+        ForeignKey("warming_photos.id"), nullable=True,
+    )
+    flood_wait_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
