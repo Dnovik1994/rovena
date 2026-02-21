@@ -1,0 +1,33 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      receiver: 'default'
+      repeat_interval: 1h
+
+receivers:
+  - name: 'default'
+    # Alerts are visible in Alertmanager UI (http://alertmanager:9093).
+    # To forward notifications, configure one of the options below:
+    #
+    # Option 1 — Telegram webhook (requires a bridge service such as
+    # metalmatze/alertmanager-bot or equivalent):
+    #   webhook_configs:
+    #     - url: 'http://telegram-alert-bridge:9087/alert'
+    #       send_resolved: true
+    #
+    # Option 2 — Email:
+    #   email_configs:
+    #     - to: 'ops@example.com'
+    #       from: 'alertmanager@example.com'
+    #       smarthost: 'smtp.example.com:587'
+    #       auth_username: 'alertmanager@example.com'
+    #       auth_password: '<password>'
