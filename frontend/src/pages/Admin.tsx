@@ -7,6 +7,7 @@ import AdminProxiesTab from "../components/admin/AdminProxiesTab";
 import AdminStatsTab from "../components/admin/AdminStatsTab";
 import AdminTariffsTab from "../components/admin/AdminTariffsTab";
 import AdminUsersTab from "../components/admin/AdminUsersTab";
+import AdminWarmingTab from "../components/admin/AdminWarmingTab";
 import {
   fetchAdminAccounts,
   fetchAdminProxies,
@@ -16,7 +17,7 @@ import {
 } from "../services/resources";
 import { useAuth } from "../stores/auth";
 
-type TabKey = "stats" | "users" | "tariffs" | "proxies" | "accounts" | "api-apps";
+type TabKey = "stats" | "users" | "tariffs" | "proxies" | "accounts" | "api-apps" | "warming";
 
 const Admin = (): JSX.Element => {
   const { token } = useAuth();
@@ -91,7 +92,7 @@ const Admin = (): JSX.Element => {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(["stats", "users", "tariffs", "proxies", "accounts", "api-apps"] as TabKey[]).map((tab) => (
+        {(["stats", "users", "tariffs", "proxies", "accounts", "api-apps", "warming"] as TabKey[]).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -111,6 +112,7 @@ const Admin = (): JSX.Element => {
       {activeTab === "proxies" && <AdminProxiesTab token={token} />}
       {activeTab === "accounts" && <AdminAccountsTab token={token} />}
       {activeTab === "api-apps" && <AdminApiAppsTab token={token} />}
+      {activeTab === "warming" && <AdminWarmingTab token={token} />}
     </section>
   );
 };
