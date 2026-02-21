@@ -8,17 +8,17 @@ ENV NPM_REGISTRY=${NPM_REGISTRY}
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 COPY package.json package-lock.json ./
-COPY tsconfig.json ./
-COPY vite.config.ts ./
-COPY index.html ./
-COPY src ./src
 
 RUN npm config set registry ${NPM_REGISTRY} \
     && if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi \
     && if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi \
     && if [ -n "$NO_PROXY" ]; then npm config set noproxy "$NO_PROXY"; fi \
-    && npm ci \
-    && npm run build
+    && npm ci
+
+COPY tsconfig.json vite.config.ts index.html ./
+COPY src ./src
+
+RUN npm run build
 
 FROM nginx:alpine
 

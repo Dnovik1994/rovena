@@ -5,12 +5,12 @@ WORKDIR /app
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV NPM_REGISTRY=${NPM_REGISTRY}
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 
 RUN npm config set registry ${NPM_REGISTRY} \
     && if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi \
     && if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi \
     && if [ -n "$NO_PROXY" ]; then npm config set noproxy "$NO_PROXY"; fi \
-    && npm install
+    && npm ci
 
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
