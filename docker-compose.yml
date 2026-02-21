@@ -59,6 +59,7 @@ services:
       MYSQL_USER: rovena
       MYSQL_PASSWORD: rovena
       MYSQL_ROOT_PASSWORD: rovena_root
+    # DEV ONLY: port exposed for local tools (DBeaver, mysql CLI, etc.)
     ports:
       - "13306:3306"
     volumes:
@@ -82,16 +83,13 @@ services:
       restart_policy:
         delay: 5s
     logging: *default-logging
+    # DEV ONLY: port exposed for local tools (redis-cli, RedisInsight, etc.)
     ports:
       - "16379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "value=$$(date +%s); redis-cli ping | grep -q PONG && redis-cli set healthcheck:ready $$value EX 5 >/dev/null && [ \"$(redis-cli get healthcheck:ready)\" = \"$$value\" ]",
-        ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
