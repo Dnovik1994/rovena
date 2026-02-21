@@ -18,6 +18,7 @@ EVENT_TYPE_FIELD_MAP: dict[str, str] = {
     "account_banned": "notify_account_banned",
     "flood_wait": "notify_flood_wait",
     "warming_failed": "notify_warming_failed",
+    "warming_completed": "notify_warming_completed",
     "system_health": "notify_system_health",
     "flood_rate_threshold": "notify_flood_rate_threshold",
 }

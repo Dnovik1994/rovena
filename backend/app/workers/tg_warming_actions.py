@@ -4,7 +4,7 @@ These functions are called via _safe_action() wrapper from the warming
 cycle.  FloodWait exceptions are NOT caught — they propagate to the
 caller so the account enters cooldown.
 
-Each function signature: (client, account, db) -> bool
+Each function signature: (client, account, db, **kwargs) -> bool
 """
 
 import asyncio
@@ -25,12 +25,16 @@ from app.models.warming_username import WarmingUsername
 logger = logging.getLogger(__name__)
 
 
-async def _action_set_photo(client, account, db) -> bool:
+async def _action_set_photo(client, account, db, **kwargs) -> bool:
     """Set profile photo from the warming photo library.
 
     Assigns a free WarmingPhoto to the account and sets it as the profile
     photo.  Rolls back the assignment if the Telegram API call fails.
+    Skips if photo was already set.
     """
+    if account.warming_photo_id is not None:
+        return True
+
     photo = (
         db.query(WarmingPhoto)
         .filter_by(is_active=True, assigned_account_id=None)
@@ -55,8 +59,14 @@ async def _action_set_photo(client, account, db) -> bool:
     return True
 
 
-async def _action_set_bio(client, account, db) -> bool:
-    """Set bio from the warming bio library or a fallback list."""
+async def _action_set_bio(client, account, db, **kwargs) -> bool:
+    """Set bio from the warming bio library or a fallback list.
+
+    Skips if bio was already set (tracked via warming_joined_channels JSON).
+    """
+    if _is_done_once(account, "set_bio"):
+        return True
+
     bios = db.query(WarmingBio).filter_by(is_active=True).all()
     if bios:
         text = random.choice(bios).text
@@ -64,15 +74,19 @@ async def _action_set_bio(client, account, db) -> bool:
         text = random.choice(["", "🇺🇦", "Life is good ✨"])
 
     await client.update_profile(bio=text)
+    _mark_done_once(account, "set_bio")
     return True
 
 
-async def _action_set_username(client, account, db) -> bool:
+async def _action_set_username(client, account, db, **kwargs) -> bool:
     """Set username from the warming username library.
 
     Appends random digits to a template and retries up to 3 times if the
-    username is already taken.
+    username is already taken.  Skips if username was already set.
     """
+    if _is_done_once(account, "set_username"):
+        return True
+
     usernames = db.query(WarmingUsername).filter_by(is_active=True).all()
     if not usernames:
         logger.warning("No warming usernames available for account %s", account.id)
@@ -84,6 +98,7 @@ async def _action_set_username(client, account, db) -> bool:
         username = f"{template}_{random.randint(100, 9999)}"
         try:
             await client.update_username(username=username)
+            _mark_done_once(account, "set_username")
             return True
         except (UsernameOccupied, UsernameNotModified):
             continue
@@ -91,8 +106,14 @@ async def _action_set_username(client, account, db) -> bool:
     return False
 
 
-async def _action_set_name(client, account, db) -> bool:
-    """Set first/last name from the warming name library."""
+async def _action_set_name(client, account, db, **kwargs) -> bool:
+    """Set first/last name from the warming name library.
+
+    Skips if name was already set.
+    """
+    if _is_done_once(account, "set_name"):
+        return True
+
     names = db.query(WarmingName).filter_by(is_active=True).all()
     if not names:
         logger.warning("No warming names available for account %s", account.id)
@@ -100,11 +121,18 @@ async def _action_set_name(client, account, db) -> bool:
 
     name = random.choice(names)
     await client.update_profile(first_name=name.first_name, last_name=name.last_name or "")
+    _mark_done_once(account, "set_name")
     return True
 
 
-async def _action_add_contacts(client, account, db) -> bool:
-    """Import 2-3 trusted accounts as contacts."""
+async def _action_add_contacts(client, account, db, **kwargs) -> bool:
+    """Import 2-3 trusted accounts as contacts.
+
+    Skips if contacts were already added.
+    """
+    if _is_done_once(account, "add_contacts"):
+        return True
+
     trusted_accounts = (
         db.query(TelegramAccount)
         .filter(
@@ -128,10 +156,11 @@ async def _action_add_contacts(client, account, db) -> bool:
         for i, trusted in enumerate(selected)
     ]
     await client.import_contacts(contacts)
+    _mark_done_once(account, "add_contacts")
     return True
 
 
-async def _action_trusted_conversation(client, account, db) -> bool:
+async def _action_trusted_conversation(client, account, db, **kwargs) -> bool:
     """Simulate a conversation between the account and a trusted account.
 
     Creates a separate Pyrogram client for a random trusted account.
@@ -188,8 +217,32 @@ async def _action_trusted_conversation(client, account, db) -> bool:
     return True
 
 
-async def _action_go_online(client, account, db) -> bool:
+async def _action_go_online(client, account, db, **kwargs) -> bool:
     """Appear online for 1-3 minutes."""
     await client.get_me()
     await asyncio.sleep(random.uniform(60, 180))
     return True
+
+
+# ---------------------------------------------------------------------------
+# Helpers for one-time action tracking via warming_joined_channels JSON
+# ---------------------------------------------------------------------------
+
+def _is_done_once(account, action_name: str) -> bool:
+    """Check if a one-time action was already performed."""
+    data = account.warming_joined_channels
+    if not isinstance(data, dict):
+        return False
+    return action_name in data.get("done_once", [])
+
+
+def _mark_done_once(account, action_name: str) -> None:
+    """Mark a one-time action as done in warming_joined_channels JSON."""
+    data = account.warming_joined_channels
+    if not isinstance(data, dict):
+        data = {"channels": [], "done_once": []}
+    done = list(data.get("done_once", []))
+    if action_name not in done:
+        done.append(action_name)
+    data["done_once"] = done
+    account.warming_joined_channels = data
