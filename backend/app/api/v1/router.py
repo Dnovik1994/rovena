@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    admin_warming,
     analytics,
     api_apps,
     auth,
@@ -30,6 +31,7 @@ router.include_router(tg_accounts.router)
 router.include_router(proxies.router)
 router.include_router(api_apps.router)
 router.include_router(admin.router, prefix="/admin")
+router.include_router(admin_warming.router, prefix="/admin/warming")
 router.include_router(invite_campaigns.router)
 router.include_router(analytics.router)
 router.include_router(health.router)
