@@ -3,7 +3,7 @@ FROM alpine:3.20
 RUN set -eux; \
     ok=0; \
     for i in 1 2 3 4 5; do \
-      apk add --no-cache mariadb-client redis && ok=1 && break; \
+      apk add --no-cache mariadb-client redis util-linux && ok=1 && break; \
       echo "Retry $i: apk install failed, waiting..." >&2; \
       sleep $((i * 5)); \
     done; \

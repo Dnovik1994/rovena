@@ -152,7 +152,8 @@ services:
 
   proxy:
     profiles: ["proxy"]
-    image: vimagick/3proxy:latest
+    build:
+      context: ./proxy
     container_name: 3proxy
     restart: unless-stopped
     deploy:
