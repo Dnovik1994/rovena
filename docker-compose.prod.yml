@@ -355,6 +355,8 @@ services:
     logging: *default-logging
     networks:
       - monitor
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -404,7 +406,7 @@ services:
       start_period: 10s
 
   node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.8.2
     restart: unless-stopped
     logging: *default-logging
     networks:

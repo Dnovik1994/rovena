@@ -46,6 +46,9 @@ configure_logging(production=settings.production)
 if settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        release=f"{APP_VERSION}+{os.getenv('COMMIT_SHA', 'unknown')}",
+        send_default_pii=False,
         # 10% sampling — increase for debugging, never 1.0 in prod
         traces_sample_rate=0.1,
         integrations=[FastApiIntegration(), CeleryIntegration()],
