@@ -52,6 +52,8 @@ export interface AdminAccount {
   api_app: ApiAppBrief | null;
   warming_actions_completed: number;
   target_warming_actions: number;
+  is_trusted?: boolean;
+  warming_day?: number | null;
 }
 
 export interface AdminApiApp {
