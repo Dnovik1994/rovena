@@ -28,19 +28,26 @@ def _column_exists(table: str, column: str) -> bool:
     return column in columns
 
 
+def _fk_exists(table: str, fk_name: str) -> bool:
+    bind = op.get_bind()
+    inspector = sa_inspect(bind)
+    return fk_name in {fk["name"] for fk in inspector.get_foreign_keys(table)}
+
+
 def upgrade() -> None:
     if not _column_exists("telegram_accounts", "api_app_id"):
         op.add_column(
             "telegram_accounts",
             sa.Column("api_app_id", sa.Integer(), nullable=True),
         )
-    op.create_foreign_key(
-        _FK_NAME,
-        "telegram_accounts",
-        "telegram_api_apps",
-        ["api_app_id"],
-        ["id"],
-    )
+    if not _fk_exists("telegram_accounts", _FK_NAME):
+        op.create_foreign_key(
+            _FK_NAME,
+            "telegram_accounts",
+            "telegram_api_apps",
+            ["api_app_id"],
+            ["id"],
+        )
 
 
 def downgrade() -> None:

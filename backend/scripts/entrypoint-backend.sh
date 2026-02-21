@@ -18,17 +18,17 @@ fi
 if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
   log "Running alembic migrations..."
 
-  # Check for multiple heads and auto-merge if needed
+  # Refuse to start if multiple migration heads exist — resolve manually.
   HEAD_COUNT=$(alembic heads 2>/dev/null | wc -l)
   if [[ "$HEAD_COUNT" -gt 1 ]]; then
-    log "WARNING: Multiple Alembic heads detected ($HEAD_COUNT). Running merge..."
-    alembic merge heads -m "auto-merge heads on deploy" || true
+    log "CRITICAL: Multiple Alembic heads detected ($HEAD_COUNT). Merge them manually before deploying."
+    exit 1
   fi
 
   migration_ok=0
   for attempt in 1 2 3; do
     log "Migration attempt ${attempt}/3..."
-    if alembic upgrade heads; then
+    if alembic upgrade head; then
       migration_ok=1
       break
     fi
