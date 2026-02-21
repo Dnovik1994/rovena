@@ -43,6 +43,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("accounts", "last_error")
+    conn = op.get_bind()
+    exists = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'accounts' "
+        "AND COLUMN_NAME = 'last_error'"
+    )).scalar()
+    if exists:
+        op.drop_column("accounts", "last_error")
     # Note: PostgreSQL does not support removing individual enum values.
     # A full enum recreation would be needed for a true downgrade.

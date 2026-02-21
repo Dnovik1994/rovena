@@ -31,4 +31,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("users", "refresh_token")
+    conn = op.get_bind()
+    exists = conn.execute(sa.text(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' "
+        "AND COLUMN_NAME = 'refresh_token'"
+    )).scalar()
+    if exists:
+        op.drop_column("users", "refresh_token")

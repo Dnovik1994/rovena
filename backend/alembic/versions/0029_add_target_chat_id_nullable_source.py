@@ -30,39 +30,66 @@ def upgrade() -> None:
             sa.Column("target_chat_id", sa.BigInteger(), nullable=True),
         )
 
-    # Make source_chat_id nullable
-    op.alter_column(
-        "invite_campaigns",
-        "source_chat_id",
-        existing_type=sa.BigInteger(),
-        nullable=True,
-    )
+    # Make source_chat_id nullable (skip if already nullable)
+    conn = op.get_bind()
+    is_nullable = conn.execute(sa.text(
+        "SELECT IS_NULLABLE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'invite_campaigns' "
+        "AND COLUMN_NAME = 'source_chat_id'"
+    )).scalar()
+    if is_nullable == "NO":
+        op.alter_column(
+            "invite_campaigns",
+            "source_chat_id",
+            existing_type=sa.BigInteger(),
+            nullable=True,
+        )
 
-    # Make target_link nullable
-    op.alter_column(
-        "invite_campaigns",
-        "target_link",
-        existing_type=sa.String(500),
-        nullable=True,
-    )
+    # Make target_link nullable (skip if already nullable)
+    is_nullable = conn.execute(sa.text(
+        "SELECT IS_NULLABLE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'invite_campaigns' "
+        "AND COLUMN_NAME = 'target_link'"
+    )).scalar()
+    if is_nullable == "NO":
+        op.alter_column(
+            "invite_campaigns",
+            "target_link",
+            existing_type=sa.String(500),
+            nullable=True,
+        )
 
 
 def downgrade() -> None:
-    # Make target_link non-nullable again
-    op.alter_column(
-        "invite_campaigns",
-        "target_link",
-        existing_type=sa.String(500),
-        nullable=False,
-    )
+    conn = op.get_bind()
 
-    # Make source_chat_id non-nullable again
-    op.alter_column(
-        "invite_campaigns",
-        "source_chat_id",
-        existing_type=sa.BigInteger(),
-        nullable=False,
-    )
+    # Make target_link non-nullable again (skip if already non-nullable)
+    is_nullable = conn.execute(sa.text(
+        "SELECT IS_NULLABLE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'invite_campaigns' "
+        "AND COLUMN_NAME = 'target_link'"
+    )).scalar()
+    if is_nullable == "YES":
+        op.alter_column(
+            "invite_campaigns",
+            "target_link",
+            existing_type=sa.String(500),
+            nullable=False,
+        )
+
+    # Make source_chat_id non-nullable again (skip if already non-nullable)
+    is_nullable = conn.execute(sa.text(
+        "SELECT IS_NULLABLE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'invite_campaigns' "
+        "AND COLUMN_NAME = 'source_chat_id'"
+    )).scalar()
+    if is_nullable == "YES":
+        op.alter_column(
+            "invite_campaigns",
+            "source_chat_id",
+            existing_type=sa.BigInteger(),
+            nullable=False,
+        )
 
     # Drop target_chat_id column
     if _column_exists("invite_campaigns", "target_chat_id"):
