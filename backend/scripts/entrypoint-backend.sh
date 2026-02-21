@@ -45,6 +45,9 @@ if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
   fi
 fi
 
+# Ensure warming photos directory exists
+mkdir -p /app/data/warming_photos
+
 if [[ $# -eq 0 ]]; then
   uvicorn_host="${UVICORN_HOST:-${HOST:-0.0.0.0}}"
   uvicorn_port="${UVICORN_PORT:-${PORT:-8000}}"
