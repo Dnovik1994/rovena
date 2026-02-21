@@ -28,11 +28,12 @@ echo ""
 # 2) Redis connectivity
 echo "--- Redis connectivity ---"
 python3 -c "
-import os, redis
+import os, re, redis
 url = os.environ.get('REDIS_URL', os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0'))
 r = redis.from_url(url, socket_connect_timeout=5, socket_timeout=5)
 r.ping()
-print(f'Connected to Redis at {url}')
+safe_url = re.sub(r'://[^@]*@', '://*****@', url)
+print(f'Connected to Redis at {safe_url}')
 " && pass "Redis reachable" || fail "Redis UNREACHABLE"
 echo ""
 
