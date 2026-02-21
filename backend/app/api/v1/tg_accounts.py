@@ -5,6 +5,7 @@ keeping the async event loop free for WebSocket / background tasks.
 """
 
 import logging
+import random
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -725,11 +726,25 @@ def tg_warmup(
             detail="Account must be verified/active to start warmup",
         )
 
+    now = datetime.now(timezone.utc)
+    rest_hours = random.uniform(
+        settings.warming_rest_hours_min,
+        settings.warming_rest_hours_max,
+    )
+    rest_until = now + timedelta(hours=rest_hours)
+
     account.status = TelegramAccountStatus.warming
-    account.warming_started_at = datetime.now(timezone.utc)
+    account.warming_started_at = now
+    account.warming_day = 0
     account.warming_actions_completed = 0
-    account.warming_joined_channels = None
+    account.warming_joined_channels = {
+        "rest_until": rest_until.isoformat(),
+        "channels": [],
+        "done_once": [],
+    }
     account.cooldown_until = None
+    account.flood_wait_at = None
+    account.last_error = None
     db.commit()
     db.refresh(account)
 
@@ -738,11 +753,13 @@ def tg_warmup(
         "user_id": current_user.id,
         "account_id": account.id,
         "status": account.status.value,
+        "warming_day": account.warming_day,
         "actions_completed": account.warming_actions_completed,
         "target_actions": account.target_warming_actions,
     })
 
-    _safe_dispatch(start_tg_warming, account.id)
+    # Do NOT dispatch start_tg_warming immediately —
+    # resume_tg_warming will pick it up after the rest period.
 
     return TgAccountResponse.model_validate(account)
 
