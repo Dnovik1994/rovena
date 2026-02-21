@@ -14,6 +14,7 @@ class AdminNotificationSetting(Base):
     notify_account_banned: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_flood_wait: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_warming_failed: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_warming_completed: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_system_health: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_flood_rate_threshold: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

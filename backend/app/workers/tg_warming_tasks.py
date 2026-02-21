@@ -1,8 +1,8 @@
 """Celery tasks for TelegramAccount warming cycle.
 
-Replaces the legacy start_warming (tasks.py) which works with the old
-Account model.  This module uses TelegramAccount + create_tg_account_client
-so per-account api_id / encrypted sessions are handled correctly.
+Day-based warming: each invocation runs one day's plan, then increments
+warming_day.  Day 0 is rest (отлёжка), days 1-14 gradually increase
+activity, day 15+ checks for completion.
 """
 
 import asyncio
@@ -12,22 +12,36 @@ from datetime import datetime, timedelta, timezone
 
 import sentry_sdk
 from celery.exceptions import SoftTimeLimitExceeded
-from pyrogram.errors import FloodWait
+from pyrogram.errors import AuthKeyUnregistered, FloodWait, UserDeactivatedBan
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.workers.tg_timeout_helpers import collect_async_gen, safe_call
 from app.core.database import SessionLocal
 from app.core.tz import is_expired
+from app.core.settings import get_settings
 from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.warming_channel import WarmingChannel
+from app.services.notification_service import NotificationService, send_notification_sync
 from app.services.websocket_manager import manager
-from app.core.settings import get_settings
 from app.workers import celery_app
 from app.workers.tg_warming_helpers import is_quiet_hours
+from app.workers.tg_warming_actions import (
+    _action_add_contacts,
+    _action_go_online,
+    _action_set_bio,
+    _action_set_name,
+    _action_set_photo,
+    _action_set_username,
+    _action_trusted_conversation,
+)
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# WebSocket broadcast helpers
+# ---------------------------------------------------------------------------
 
 def _serialize_status(status: TelegramAccountStatus) -> str:
     return status.value if hasattr(status, "value") else str(status)
@@ -54,187 +68,360 @@ def _broadcast_warming_update(
     )
 
 
-# ---------------------------------------------------------------------------
-# Legacy low-risk action (kept for backwards compatibility)
-# ---------------------------------------------------------------------------
-
-async def _perform_low_risk_action(client) -> int:
-    """Execute a few random low-risk Telegram actions.
-
-    Returns the number of actions performed.
-    """
-    performed = 0
-
-    async def _do_get_me():
-        await safe_call(client.get_me(), timeout=15)
-
-    async def _do_read_telegram():
-        _ = await collect_async_gen(client.get_chat_history("telegram", limit=5), timeout=60)
-
-    async def _do_get_dialogs():
-        _ = await collect_async_gen(client.get_dialogs(limit=3), timeout=60)
-
-    actions = [_do_get_me, _do_read_telegram, _do_get_dialogs]
-    random.shuffle(actions)
-    selected = actions[: random.randint(2, len(actions))]
-
-    for action in selected:
-        await action()
-        performed += 1
-        await asyncio.sleep(random.uniform(60, 300))
-
-    return performed
-
-
-# ---------------------------------------------------------------------------
-# Extended warming actions
-# ---------------------------------------------------------------------------
-
-async def _action_read_channel(client, channel_username: str) -> int:
-    """Read recent messages from a channel."""
-    messages = await collect_async_gen(
-        client.get_chat_history(channel_username, limit=random.randint(3, 10)),
-        timeout=60,
+def _broadcast_account_update(account) -> None:
+    """Broadcast a simple account status change."""
+    _broadcast_warming_update(
+        account.owner_user_id,
+        account.id,
+        account.status,
+        account.warming_actions_completed,
+        account.target_warming_actions or 10,
+        account.cooldown_until.isoformat() if account.cooldown_until else None,
     )
-    return len(messages)
 
 
-async def _action_react_to_message(client, channel_username: str) -> bool:
-    """React to a random recent message in a channel."""
-    messages = await collect_async_gen(
-        client.get_chat_history(channel_username, limit=5), timeout=60,
+# ---------------------------------------------------------------------------
+# Notification helpers
+# ---------------------------------------------------------------------------
+
+async def _send_notification(event_type: str, message: str) -> None:
+    """Send notification from async context."""
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        return
+    try:
+        service = NotificationService(settings.telegram_bot_token)
+        await service.send(event_type, message)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to send notification: %s", event_type)
+
+
+def format_flood_message(account, wait_seconds: int) -> str:
+    return (
+        f"⚠️ FloodWait\n"
+        f"📱 {account.phone_e164} (ID: {account.id})\n"
+        f"⏱ Ждать: {wait_seconds}с\n"
+        f"📊 День: {account.warming_day}/15\n"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
-    if messages:
-        msg = random.choice(messages)
-        emoji = random.choice(["👍", "❤️", "🔥", "👏", "😂", "🎉", "💯", "👀"])
-        await safe_call(client.send_reaction(channel_username, msg.id, emoji=emoji), timeout=15)
+
+
+def format_banned_message(account, error: str) -> str:
+    return (
+        f"🚫 Аккаунт забанен\n"
+        f"📱 {account.phone_e164} (ID: {account.id})\n"
+        f"📝 Причина: {error}\n"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+
+
+def format_error_message(account, error: str) -> str:
+    return (
+        f"❌ Ошибка прогрева\n"
+        f"📱 {account.phone_e164} (ID: {account.id})\n"
+        f"📝 {error[:200]}\n"
+        f"📊 День: {account.warming_day}/15\n"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Channel/group action wrappers (new signature: client, account, db, **params)
+# ---------------------------------------------------------------------------
+
+def _get_joined_channels(account) -> list[str]:
+    """Extract joined channel usernames from warming_joined_channels JSON."""
+    data = account.warming_joined_channels
+    if isinstance(data, dict):
+        return list(data.get("channels", []))
+    if isinstance(data, list):
+        return list(data)
+    return []
+
+
+def _save_joined_channels(account, channels: list[str]) -> None:
+    """Persist joined channel list back to warming_joined_channels JSON."""
+    data = account.warming_joined_channels
+    if not isinstance(data, dict):
+        data = {"channels": [], "done_once": []}
+    data["channels"] = channels
+    account.warming_joined_channels = data
+
+
+async def _action_join_channels(client, account, db, **params) -> bool:
+    """Join ``count`` public channels from the WarmingChannel pool."""
+    count = params.get("count", 1)
+    if count <= 0:
         return True
-    return False
+
+    channels = (
+        db.query(WarmingChannel)
+        .filter_by(is_active=True, channel_type="channel")
+        .all()
+    )
+    already = set(_get_joined_channels(account))
+    not_joined = [c for c in channels if c.username not in already]
+    if not not_joined:
+        logger.info("No unjoin channels left for account %s", account.id)
+        return False
+
+    to_join = random.sample(not_joined, min(count, len(not_joined)))
+    joined_any = False
+    for ch in to_join:
+        result = await safe_call(client.join_chat(ch.username), timeout=30)
+        if result is not None:
+            already.add(ch.username)
+            joined_any = True
+        await asyncio.sleep(random.uniform(5, 15))
+
+    _save_joined_channels(account, list(already))
+    db.commit()
+    return joined_any
 
 
-async def _action_join_channel(client, channel_username: str) -> bool:
-    """Join a public channel or group."""
-    result = await safe_call(client.join_chat(channel_username), timeout=30)
-    return result is not None
+async def _action_join_groups(client, account, db, **params) -> bool:
+    """Join ``count`` groups from the WarmingChannel pool (channel_type='group')."""
+    count = params.get("count", 1)
+    if count <= 0:
+        return True
+
+    groups = (
+        db.query(WarmingChannel)
+        .filter_by(is_active=True, channel_type="group")
+        .all()
+    )
+    already = set(_get_joined_channels(account))
+    not_joined = [g for g in groups if g.username not in already]
+    if not not_joined:
+        logger.info("No unjoined groups left for account %s", account.id)
+        return False
+
+    to_join = random.sample(not_joined, min(count, len(not_joined)))
+    joined_any = False
+    for g in to_join:
+        result = await safe_call(client.join_chat(g.username), timeout=30)
+        if result is not None:
+            already.add(g.username)
+            joined_any = True
+        await asyncio.sleep(random.uniform(5, 15))
+
+    _save_joined_channels(account, list(already))
+    db.commit()
+    return joined_any
 
 
-async def _action_view_profile(client) -> bool:
-    """View own profile (get_me)."""
-    result = await safe_call(client.get_me(), timeout=15)
-    return result is not None
+async def _action_read_channels(client, account, db, **params) -> bool:
+    """Read recent messages from ``count`` joined channels."""
+    count = params.get("count", 1)
+    already = _get_joined_channels(account)
+    if not already:
+        return False
+
+    targets = random.sample(already, min(count, len(already)))
+    read_any = False
+    for ch in targets:
+        messages = await collect_async_gen(
+            client.get_chat_history(ch, limit=random.randint(3, 10)),
+            timeout=60,
+        )
+        if messages:
+            read_any = True
+        await asyncio.sleep(random.uniform(3, 10))
+
+    return read_any
 
 
-async def _action_get_dialogs(client) -> bool:
-    """Fetch dialog list."""
-    _ = await collect_async_gen(client.get_dialogs(limit=random.randint(3, 10)), timeout=60)
-    return True
+async def _action_react(client, account, db, **params) -> bool:
+    """React to messages in ``count`` joined channels."""
+    count = params.get("count", 1)
+    already = _get_joined_channels(account)
+    if not already:
+        return False
+
+    targets = random.sample(already, min(count, len(already)))
+    reacted_any = False
+    emojis = ["👍", "❤️", "🔥", "👏", "😂", "🎉", "💯", "👀"]
+
+    for ch in targets:
+        messages = await collect_async_gen(
+            client.get_chat_history(ch, limit=5), timeout=60,
+        )
+        if messages:
+            msg = random.choice(messages)
+            emoji = random.choice(emojis)
+            await safe_call(
+                client.send_reaction(ch, msg.id, emoji=emoji), timeout=15,
+            )
+            reacted_any = True
+        await asyncio.sleep(random.uniform(5, 15))
+
+    return reacted_any
 
 
-async def _action_send_saved_message(client) -> bool:
+async def _action_send_saved(client, account, db, **params) -> bool:
     """Send a short message to Saved Messages."""
     phrases = [
         "📝 заметка", "⭐ запомнить", "🔗 ссылка",
         "📅 дела", "💡 идея", "✅ готово",
         str(random.randint(1000, 9999)),
     ]
-    result = await safe_call(client.send_message("me", random.choice(phrases)), timeout=15)
+    result = await safe_call(
+        client.send_message("me", random.choice(phrases)), timeout=15,
+    )
     return result is not None
 
 
-async def _action_update_profile(client) -> bool:
-    """Update bio (one-time action)."""
-    bios = [
-        "", "🇺🇦", "👋", "📱", "🌍",
-        "Life is good", "Hello world", "🎵🎶",
-    ]
-    result = await safe_call(client.update_profile(bio=random.choice(bios)), timeout=15)
-    return result is not None
+# ---------------------------------------------------------------------------
+# ACTION_MAP — maps plan step names to async functions
+# ---------------------------------------------------------------------------
 
-
-async def _action_set_profile_photo(client) -> bool:
-    """Set profile photo (stub — needs actual photos)."""
-    return False
+ACTION_MAP = {
+    "go_online": _action_go_online,
+    "set_photo": _action_set_photo,
+    "set_bio": _action_set_bio,
+    "set_username": _action_set_username,
+    "set_name": _action_set_name,
+    "add_contacts": _action_add_contacts,
+    "trusted_conversation": _action_trusted_conversation,
+    "join_channels": _action_join_channels,
+    "join_groups": _action_join_groups,
+    "read_channels": _action_read_channels,
+    "react": _action_react,
+    "send_saved_message": _action_send_saved,
+}
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# _safe_action — wraps action execution with error handling
 # ---------------------------------------------------------------------------
 
-async def _safe_action(coro, action_name: str, account_id: int) -> bool:
+async def _safe_action(action_fn, client, account, db, **params) -> bool:
     """Execute an action with per-action error handling.
 
     Returns True if the action succeeded, False otherwise.
-    Raises FloodWait so the caller can enter cooldown.
+    Re-raises FloodWait, UserDeactivatedBan, AuthKeyUnregistered so the
+    caller can handle them at the cycle level.
     """
     try:
-        result = await coro
+        result = await action_fn(client, account, db, **params)
         return bool(result) if result is not None else True
-    except FloodWait:
+    except (FloodWait, UserDeactivatedBan, AuthKeyUnregistered):
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "Warming action failed: %s (account_id=%s): %s",
-            action_name, account_id, exc,
+            "Warming action %s failed (account_id=%s): %s",
+            getattr(action_fn, "__name__", "?"),
+            account.id,
+            exc,
         )
         return False
 
 
-def _parse_warming_data(raw: list | dict | None) -> tuple[list[str], bool]:
-    """Parse warming_joined_channels JSON into (channels, profile_updated).
+# ---------------------------------------------------------------------------
+# Daily plan
+# ---------------------------------------------------------------------------
 
-    Handles both legacy list format and new dict format.
-    """
-    if raw is None:
-        return [], False
-    if isinstance(raw, list):
-        return list(raw), False
-    if isinstance(raw, dict):
-        return list(raw.get("channels", [])), bool(raw.get("profile_updated", False))
-    return [], False
+def _get_daily_plan(warming_day: int, account, db) -> list[dict]:
+    """Return the list of actions for a specific warming day."""
 
+    if warming_day == 0:
+        return []  # rest period
 
-def _serialize_warming_data(channels: list[str], profile_updated: bool) -> dict:
-    """Serialize warming data to dict format for JSON storage."""
-    return {"channels": channels, "profile_updated": profile_updated}
+    if warming_day == 1:
+        return [
+            {"action": "go_online"},
+            {"action": "set_photo"},
+        ]
 
+    if warming_day == 2:
+        return [
+            {"action": "go_online"},
+            {"action": "add_contacts"},
+        ]
 
-def _persist_progress(
-    account_id: int,
-    actions_done: int,
-    joined_channels: list[str] | None = None,
-    profile_updated: bool = False,
-) -> None:
-    """Persist warming progress to DB."""
-    with SessionLocal() as db:
-        account = db.get(TelegramAccount, account_id)
-        if account:
-            account.warming_actions_completed = actions_done
-            account.last_activity_at = datetime.now(timezone.utc)
-            if joined_channels is not None:
-                account.warming_joined_channels = _serialize_warming_data(
-                    joined_channels, profile_updated,
-                )
-            db.commit()
+    if warming_day == 3:
+        return [
+            {"action": "go_online"},
+            {"action": "trusted_conversation"},
+            {"action": "send_saved_message"},
+        ]
+
+    if warming_day == 4:
+        return [
+            {"action": "go_online"},
+            {"action": "join_channels", "params": {"count": random.randint(1, 2)}},
+            {"action": "read_channels", "params": {"count": 2}},
+        ]
+
+    if warming_day == 5:
+        return [
+            {"action": "go_online"},
+            {"action": "set_bio"},
+            {"action": "join_channels", "params": {"count": 1}},
+            {"action": "react", "params": {"count": 1}},
+        ]
+
+    if warming_day in (6, 7):
+        return [
+            {"action": "go_online"},
+            {"action": "join_groups", "params": {"count": 1}},
+            {"action": "react", "params": {"count": random.randint(1, 2)}},
+            {"action": "read_channels", "params": {"count": 2}},
+        ]
+
+    if warming_day in (8, 9):
+        plan = [
+            {"action": "go_online"},
+            {"action": "join_channels", "params": {"count": random.randint(1, 2)}},
+            {"action": "react", "params": {"count": random.randint(2, 3)}},
+        ]
+        if warming_day == 8:
+            plan.insert(1, {"action": "set_username"})
+        return plan
+
+    if warming_day in (10, 11):
+        return [
+            {"action": "go_online"},
+            {"action": "read_channels", "params": {"count": 3}},
+            {"action": "react", "params": {"count": random.randint(2, 3)}},
+            {"action": "send_saved_message"},
+        ]
+
+    if warming_day in (12, 13):
+        plan = [
+            {"action": "go_online"},
+            {"action": "read_channels", "params": {"count": 3}},
+            {"action": "react", "params": {"count": random.randint(2, 4)}},
+            {"action": "join_channels", "params": {"count": 1}},
+            {"action": "send_saved_message"},
+        ]
+        if warming_day == 12:
+            plan.insert(1, {"action": "set_name"})
+        return plan
+
+    # warming_day >= 14
+    return [
+        {"action": "go_online"},
+        {"action": "read_channels", "params": {"count": random.randint(3, 5)}},
+        {"action": "react", "params": {"count": random.randint(3, 5)}},
+        {"action": "join_channels", "params": {"count": random.randint(0, 1)}},
+        {"action": "send_saved_message"},
+    ]
 
 
 # ---------------------------------------------------------------------------
-# Phased warming cycle
+# Main warming cycle (day-based)
 # ---------------------------------------------------------------------------
 
 async def _run_tg_warming_cycle(account_id: int) -> None:
-    """Phased warming cycle for TelegramAccount.
+    """Day-based warming cycle for TelegramAccount.
 
-    Builds a flat action plan across 4 phases and iterates with a
-    target-action break so the task stops as soon as the goal is met.
-
-    Phase 1: Basic activity (get_me, get_dialogs, read 1-2 channels)
-    Phase 2: Join 2-3 channels, read their history
-    Phase 3: React to messages in joined channels
-    Phase 4: Profile update + saved messages
+    Each invocation executes one day's plan, then increments warming_day.
+    Day 0 is rest (отлёжка).  Days 1-14 gradually increase activity.
+    When warming_day reaches 15 without recent FloodWait → status = active.
     """
-
-    # --- Load data & build client --------------------------------------------
-    with SessionLocal() as db:
+    db = SessionLocal()
+    try:
         account = db.get(TelegramAccount, account_id)
         if not account:
             logger.info("TelegramAccount not found", extra={"account_id": account_id})
@@ -251,6 +438,27 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
             account.warming_started_at = datetime.now(timezone.utc)
             db.commit()
 
+        # --- Rest period check (day 0) ---
+        if account.warming_day == 0:
+            settings = get_settings()
+            rest_hours = random.uniform(
+                settings.warming_rest_hours_min,
+                settings.warming_rest_hours_max,
+            )
+            if account.warming_started_at + timedelta(hours=rest_hours) > datetime.now(timezone.utc):
+                logger.info(
+                    "Account %s still in rest period (day 0)", account_id,
+                )
+                return  # still resting
+            account.warming_day = 1
+            db.commit()
+
+        # --- Build daily plan ---
+        plan = _get_daily_plan(account.warming_day, account, db)
+        if not plan:
+            return
+
+        # --- Create Telegram client ---
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
         try:
             client = create_tg_account_client(
@@ -264,189 +472,119 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
             db.commit()
             return
         except RuntimeError as e:
-            logger.error("Cannot create Telegram client: %s", e, extra={"account_id": account_id})
-            account.status = TelegramAccountStatus.error
-            account.last_error = str(e)
+            logger.error(
+                "Cannot create Telegram client: %s", e,
+                extra={"account_id": account_id},
+            )
+            account.status = TelegramAccountStatus.cooldown
+            account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
+            account.last_error = str(e)[:500]
             db.commit()
             return
 
-        owner_user_id = account.owner_user_id
-        actions_done = account.warming_actions_completed
-        target_actions = account.target_warming_actions or 10
-        cooldown_until_iso = account.cooldown_until.isoformat() if account.cooldown_until else None
-        already_joined, profile_updated = _parse_warming_data(account.warming_joined_channels)
+        try:
+            async with client:
+                # --- Execute daily plan ---
+                for step in plan:
+                    action_fn = ACTION_MAP.get(step["action"])
+                    if not action_fn:
+                        logger.warning(
+                            "Unknown action %r in plan for account %s",
+                            step["action"], account_id,
+                        )
+                        continue
 
-        # Load warming channels from DB
-        channel_channels = (
-            db.query(WarmingChannel)
-            .filter_by(is_active=True, channel_type="channel")
-            .all()
-        )
-        channel_groups = (
-            db.query(WarmingChannel)
-            .filter_by(is_active=True, channel_type="group")
-            .all()
-        )
-
-    # Keep local copies of usernames (DB session is closed)
-    available_channels = [c.username for c in channel_channels]
-    available_groups = [c.username for c in channel_groups]
-    all_channels = available_channels + available_groups
-
-    # --- Pre-compute channel selections for the action plan -------------------
-    read_channels = random.sample(
-        available_channels, min(random.randint(1, 2), len(available_channels))
-    ) if available_channels else []
-
-    not_joined = [c for c in all_channels if c not in already_joined]
-    to_join = random.sample(
-        not_joined, min(random.randint(2, 3), len(not_joined))
-    ) if not_joined else []
-
-    # React targets: already-joined + channels we plan to join
-    react_pool = list({*already_joined, *to_join} & set(all_channels))
-    react_channels = random.sample(
-        react_pool, min(random.randint(2, 3), len(react_pool))
-    ) if react_pool else []
-
-    # --- Build flat action plan -----------------------------------------------
-    action_plan: list[tuple[str, object]] = []
-
-    # Phase 1: Basic activity
-    action_plan.append(("view_profile", lambda: _action_view_profile(client)))
-    action_plan.append(("get_dialogs", lambda: _action_get_dialogs(client)))
-    for ch in read_channels:
-        action_plan.append((f"read_channel:{ch}", lambda c=ch: _action_read_channel(client, c)))
-
-    # Phase pause 1 → 2
-    action_plan.append(("phase_pause", None))
-
-    # Phase 2: Join channels + read their history
-    for ch in to_join:
-        action_plan.append((f"join_channel:{ch}", lambda c=ch: _action_join_channel(client, c)))
-    for ch in to_join:
-        action_plan.append((f"read_joined:{ch}", lambda c=ch: _action_read_channel(client, c)))
-
-    # Phase pause 2 → 3
-    action_plan.append(("phase_pause", None))
-
-    # Phase 3: Reactions
-    for ch in react_channels:
-        action_plan.append((f"react:{ch}", lambda c=ch: _action_react_to_message(client, c)))
-
-    # Phase pause 3 → 4
-    action_plan.append(("phase_pause", None))
-
-    # Phase 4: Profile update (skip if already done) + saved messages
-    if not profile_updated:
-        action_plan.append(("update_profile", lambda: _action_update_profile(client)))
-    for _ in range(random.randint(1, 2)):
-        action_plan.append(("send_saved_message", lambda: _action_send_saved_message(client)))
-
-    # --- Broadcast initial status --------------------------------------------
-    _broadcast_warming_update(
-        owner_user_id, account_id,
-        TelegramAccountStatus.warming,
-        actions_done, target_actions, cooldown_until_iso,
-    )
-
-    try:
-        async with client:
-            phase = 1
-            logger.info("event=warming_phase%s account_id=%s", phase, account_id)
-
-            for name, action_fn in action_plan:
-                # ── Target reached — stop early ──
-                if actions_done >= target_actions:
-                    logger.info(
-                        "event=warming_target_reached account_id=%s actions=%s target=%s",
-                        account_id, actions_done, target_actions,
+                    params = step.get("params", {})
+                    success = await _safe_action(
+                        action_fn, client, account, db, **params,
                     )
-                    break
 
-                # ── Phase pause marker ──
-                if name == "phase_pause":
-                    _broadcast_warming_update(
-                        owner_user_id, account_id,
-                        TelegramAccountStatus.warming,
-                        actions_done, target_actions, None,
-                    )
-                    await asyncio.sleep(random.uniform(180, 600))
-                    phase += 1
-                    logger.info("event=warming_phase%s account_id=%s", phase, account_id)
-                    continue
-
-                # ── Execute action ──
-                if await _safe_action(action_fn(), name, account_id):
-                    actions_done += 1
-                    # Track join side effects
-                    if name.startswith("join_channel:"):
-                        ch = name.split(":", 1)[1]
-                        if ch not in already_joined:
-                            already_joined.append(ch)
-                    # Track profile update
-                    if name == "update_profile":
-                        profile_updated = True
-
-                _persist_progress(account_id, actions_done, already_joined, profile_updated)
-                await asyncio.sleep(random.uniform(30, 120))
-
-            # ── Warming complete — mark active ───────────────────────────
-            with SessionLocal() as db:
-                account = db.get(TelegramAccount, account_id)
-                if account:
-                    account.status = TelegramAccountStatus.active
-                    account.warming_actions_completed = actions_done
-                    account.warming_joined_channels = _serialize_warming_data(
-                        already_joined, profile_updated,
-                    )
-                    account.last_error = None
+                    # Persist progress
+                    if success:
+                        account.warming_actions_completed += 1
+                    account.last_activity_at = datetime.now(timezone.utc)
                     db.commit()
 
-    except FloodWait as exc:
-        sentry_sdk.capture_exception(exc)
-        wait_seconds = int(exc.value)
-        logger.info(
-            "FloodWait during TG warming",
-            extra={"account_id": account_id, "wait_seconds": wait_seconds},
-        )
-        with SessionLocal() as db:
-            account = db.get(TelegramAccount, account_id)
-            if account:
-                account.status = TelegramAccountStatus.cooldown
-                account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
-                account.last_error = f"FloodWait: {wait_seconds}s"
-                account.warming_joined_channels = _serialize_warming_data(
-                    already_joined, profile_updated,
-                )
-                db.commit()
+                    # Pause between actions (go_online already has its own sleep)
+                    if step["action"] != "go_online":
+                        await asyncio.sleep(random.uniform(15, 45))
 
-    except Exception as exc:  # noqa: BLE001
-        sentry_sdk.capture_exception(exc)
-        logger.error("TG warming error", extra={"error": str(exc), "account_id": account_id})
-        with SessionLocal() as db:
-            account = db.get(TelegramAccount, account_id)
-            if account:
-                account.status = TelegramAccountStatus.error
-                account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
-                account.last_error = str(exc)[:500]
-                account.warming_joined_channels = _serialize_warming_data(
-                    already_joined, profile_updated,
-                )
-                db.commit()
+                # --- Day completed successfully → increment ---
+                account.warming_day += 1
 
-    # --- Final broadcast with fresh data -------------------------------------
-    with SessionLocal() as db:
-        account = db.get(TelegramAccount, account_id)
-        if account:
-            _broadcast_warming_update(
-                owner_user_id, account_id,
-                account.status,
-                account.warming_actions_completed,
-                account.target_warming_actions,
-                account.cooldown_until.isoformat() if account.cooldown_until else None,
+                # Day 15+ without recent FloodWait → active
+                if account.warming_day >= 15:
+                    last_flood = account.flood_wait_at
+                    if not last_flood or (datetime.now(timezone.utc) - last_flood).days >= 14:
+                        account.status = TelegramAccountStatus.active
+                        account.last_error = None
+                        await _send_notification(
+                            "warming_completed",
+                            f"✅ Прогрев завершён\n"
+                            f"📱 {account.phone_e164} (ID: {account.id})\n"
+                            f"📊 Дней: {account.warming_day}",
+                        )
+
+                db.commit()
+                _broadcast_account_update(account)
+
+        except FloodWait as exc:
+            sentry_sdk.capture_exception(exc)
+            wait_seconds = int(exc.value)
+            logger.info(
+                "FloodWait during TG warming",
+                extra={"account_id": account_id, "wait_seconds": wait_seconds},
+            )
+            account.status = TelegramAccountStatus.cooldown
+            account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
+            account.flood_wait_at = datetime.now(timezone.utc)
+            account.warming_day = max(1, account.warming_day - 3)
+            account.last_error = f"FloodWait: {wait_seconds}s"
+            db.commit()
+            await _send_notification(
+                "flood_wait", format_flood_message(account, wait_seconds),
             )
 
+        except (UserDeactivatedBan, AuthKeyUnregistered) as exc:
+            sentry_sdk.capture_exception(exc)
+            logger.warning(
+                "Account banned/deactivated during warming",
+                extra={"account_id": account_id, "error": str(exc)},
+            )
+            account.status = TelegramAccountStatus.banned
+            account.last_error = str(exc)[:500]
+            db.commit()
+            await _send_notification(
+                "account_banned",
+                format_banned_message(account, str(exc)),
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            sentry_sdk.capture_exception(exc)
+            logger.error(
+                "TG warming error",
+                extra={"error": str(exc), "account_id": account_id},
+            )
+            # Generic error → cooldown 1 hour (NOT error!)
+            account.status = TelegramAccountStatus.cooldown
+            account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
+            account.last_error = str(exc)[:500]
+            db.commit()
+            await _send_notification(
+                "warming_failed",
+                format_error_message(account, str(exc)),
+            )
+
+        # Final broadcast with fresh data
+        _broadcast_account_update(account)
+
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Celery entry-point
+# ---------------------------------------------------------------------------
 
 @celery_app.task(
     bind=True,
@@ -510,8 +648,10 @@ def _get_max_concurrent() -> int:
 def check_tg_cooldowns(self) -> None:
     """Transition TelegramAccounts out of cooldown when cooldown_until expires.
 
-    - warming_actions_completed < target → back to ``warming``
-    - otherwise → ``active``
+    Logic:
+    - warming_day >= 15 AND (flood_wait_at IS NULL OR flood_wait_at > 14 days ago)
+      → status = active
+    - Otherwise → back to warming
     """
     logger.info("event=check_tg_cooldowns_started task_id=%s", self.request.id)
     try:
@@ -522,15 +662,20 @@ def check_tg_cooldowns(self) -> None:
                 .filter(TelegramAccount.cooldown_until.isnot(None))
                 .all()
             )
+            now = datetime.now(timezone.utc)
             for account in accounts:
                 if not is_expired(account.cooldown_until):
                     continue
 
-                target = account.target_warming_actions or 10
-                if account.warming_actions_completed < target:
-                    new_status = TelegramAccountStatus.warming
+                # Determine new status based on warming progress
+                if account.warming_day >= 15:
+                    last_flood = account.flood_wait_at
+                    if not last_flood or (now - last_flood).days >= 14:
+                        new_status = TelegramAccountStatus.active
+                    else:
+                        new_status = TelegramAccountStatus.warming
                 else:
-                    new_status = TelegramAccountStatus.active
+                    new_status = TelegramAccountStatus.warming
 
                 old_status = account.status
                 account.status = new_status
@@ -548,7 +693,7 @@ def check_tg_cooldowns(self) -> None:
                     account.id,
                     new_status,
                     account.warming_actions_completed,
-                    target,
+                    account.target_warming_actions or 10,
                     None,
                 )
             db.commit()
