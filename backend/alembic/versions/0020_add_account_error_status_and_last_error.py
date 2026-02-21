@@ -10,14 +10,22 @@ Revises: 0019_widen_telegram_id_bigint
 Create Date: 2026-02-16 00:00:00.000000
 """
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
-from sqlalchemy import text
+from sqlalchemy import inspect as sa_inspect, text
 
 revision = "0020_add_account_error_status_and_last_error"
 down_revision = "0019_widen_telegram_id_bigint"
 branch_labels = None
 depends_on = None
+
+
+def _column_exists(table: str, column: str) -> bool:
+    if context.is_offline_mode():
+        return False
+    bind = op.get_bind()
+    inspector = sa_inspect(bind)
+    return column in {c["name"] for c in inspector.get_columns(table)}
 
 
 def upgrade() -> None:
@@ -30,7 +38,8 @@ def upgrade() -> None:
     # MySQL ENUMs are redefined inline — handled via column alter below if needed.
 
     # 2. Add the last_error column
-    op.add_column("accounts", sa.Column("last_error", sa.Text(), nullable=True))
+    if not _column_exists("accounts", "last_error"):
+        op.add_column("accounts", sa.Column("last_error", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:

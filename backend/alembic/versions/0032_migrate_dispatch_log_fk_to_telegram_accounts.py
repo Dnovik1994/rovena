@@ -39,10 +39,11 @@ def _get_fk_names_for_referred_table(referred_table: str) -> List[str]:
             "SELECT CONSTRAINT_NAME "
             "FROM information_schema.KEY_COLUMN_USAGE "
             "WHERE TABLE_SCHEMA = DATABASE() "
-            f"AND TABLE_NAME = '{_TABLE}' "
-            f"AND COLUMN_NAME = '{_COLUMN}' "
-            f"AND REFERENCED_TABLE_NAME = '{referred_table}'"
-        )
+            "AND TABLE_NAME = :table "
+            "AND COLUMN_NAME = :column "
+            "AND REFERENCED_TABLE_NAME = :referred"
+        ),
+        {"table": _TABLE, "column": _COLUMN, "referred": referred_table},
     ).fetchall()
     return [row[0] for row in rows]
 

@@ -75,6 +75,10 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            # MySQL issues an implicit COMMIT for every DDL statement,
+            # so per-migration savepoints/transactions are meaningless and
+            # can leave the connection in an unexpected state.  We run the
+            # whole batch in one transaction and commit explicitly below.
             transaction_per_migration=False,
         )
 
