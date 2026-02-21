@@ -6,6 +6,7 @@ activity, day 15+ checks for completion.
 """
 
 import asyncio
+import json
 import logging
 import random
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,7 @@ def _broadcast_warming_update(
     actions_completed: int,
     target_actions: int,
     cooldown_until: str | None,
+    warming_day: int = 0,
 ) -> None:
     manager.broadcast_sync(
         {
@@ -64,6 +66,7 @@ def _broadcast_warming_update(
             "actions_completed": actions_completed,
             "target_actions": target_actions,
             "cooldown_until": cooldown_until,
+            "warming_day": warming_day,
         }
     )
 
@@ -77,6 +80,7 @@ def _broadcast_account_update(account) -> None:
         account.warming_actions_completed,
         account.target_warming_actions or 10,
         account.cooldown_until.isoformat() if account.cooldown_until else None,
+        account.warming_day,
     )
 
 
@@ -440,18 +444,32 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
 
         # --- Rest period check (day 0) ---
         if account.warming_day == 0:
-            settings = get_settings()
-            rest_hours = random.uniform(
-                settings.warming_rest_hours_min,
-                settings.warming_rest_hours_max,
-            )
-            if account.warming_started_at + timedelta(hours=rest_hours) > datetime.now(timezone.utc):
-                logger.info(
-                    "Account %s still in rest period (day 0)", account_id,
-                )
-                return  # still resting
+            rest_until_str = None
+            data = account.warming_joined_channels
+            if isinstance(data, dict):
+                rest_until_str = data.get("rest_until")
+            elif isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                    rest_until_str = parsed.get("rest_until") if isinstance(parsed, dict) else None
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+
+            if rest_until_str:
+                try:
+                    rest_until_dt = datetime.fromisoformat(rest_until_str)
+                    if rest_until_dt > datetime.now(timezone.utc):
+                        logger.info(
+                            "Account %s still in rest period (day 0), rest_until=%s",
+                            account_id, rest_until_str,
+                        )
+                        return  # still resting
+                except (ValueError, TypeError):
+                    pass
+
             account.warming_day = 1
             db.commit()
+            _broadcast_account_update(account)
 
         # --- Build daily plan ---
         plan = _get_daily_plan(account.warming_day, account, db)
@@ -695,6 +713,7 @@ def check_tg_cooldowns(self) -> None:
                     account.warming_actions_completed,
                     account.target_warming_actions or 10,
                     None,
+                    account.warming_day,
                 )
             db.commit()
     except SoftTimeLimitExceeded:
@@ -755,6 +774,41 @@ def resume_tg_warming(self) -> None:
                         account.warming_task_id,
                     )
                     continue
+
+                # Rest period check for day 0 accounts
+                if account.warming_day == 0:
+                    rest_until_str = None
+                    data = account.warming_joined_channels
+                    if isinstance(data, dict):
+                        rest_until_str = data.get("rest_until")
+                    elif isinstance(data, str):
+                        try:
+                            parsed = json.loads(data)
+                            rest_until_str = parsed.get("rest_until") if isinstance(parsed, dict) else None
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+
+                    if rest_until_str:
+                        try:
+                            rest_until_dt = datetime.fromisoformat(rest_until_str)
+                            if rest_until_dt > now:
+                                logger.debug(
+                                    "event=resume_tg_warming_skip account_id=%s reason=rest_period rest_until=%s",
+                                    account.id,
+                                    rest_until_str,
+                                )
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Rest period elapsed → transition to day 1
+                    account.warming_day = 1
+                    db.commit()
+                    _broadcast_account_update(account)
+                    logger.info(
+                        "event=resume_tg_warming_rest_complete account_id=%s warming_day=1",
+                        account.id,
+                    )
 
                 start_tg_warming.delay(account.id)
                 dispatched += 1
