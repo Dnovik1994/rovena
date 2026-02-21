@@ -22,7 +22,9 @@ from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.warming_channel import WarmingChannel
 from app.services.websocket_manager import manager
+from app.core.settings import get_settings
 from app.workers import celery_app
+from app.workers.tg_warming_helpers import is_quiet_hours
 
 logger = logging.getLogger(__name__)
 
@@ -453,6 +455,10 @@ async def _run_tg_warming_cycle(account_id: int) -> None:
 )
 def start_tg_warming(self, account_id: int) -> None:
     """Celery entry-point for TelegramAccount warming."""
+    if is_quiet_hours():
+        logger.info("Quiet hours active, skipping warming")
+        return
+
     task_id = self.request.id
     logger.info("event=start_tg_warming_started account_id=%s task_id=%s", account_id, task_id)
 
@@ -496,7 +502,8 @@ def start_tg_warming(self, account_id: int) -> None:
 # Periodic tasks (celery beat)
 # ---------------------------------------------------------------------------
 
-MAX_CONCURRENT_WARMING_TASKS = 5
+def _get_max_concurrent() -> int:
+    return get_settings().warming_max_concurrent
 
 
 @celery_app.task(bind=True, soft_time_limit=60, time_limit=90)
@@ -560,8 +567,12 @@ def resume_tg_warming(self) -> None:
     - skip accounts whose cooldown_until is still in the future (task recently
       set cooldown but status was reverted before commit — defensive)
     - skip accounts with an active warming lease (task still running)
-    - limit to MAX_CONCURRENT_WARMING_TASKS dispatches per run
+    - limit to warming_max_concurrent dispatches per run
     """
+    if is_quiet_hours():
+        logger.info("Quiet hours active, skipping warming dispatch")
+        return
+
     logger.info("event=resume_tg_warming_started task_id=%s", self.request.id)
     try:
         now = datetime.now(timezone.utc)
@@ -571,7 +582,7 @@ def resume_tg_warming(self) -> None:
             accounts = (
                 db.query(TelegramAccount)
                 .filter(TelegramAccount.status == TelegramAccountStatus.warming)
-                .limit(MAX_CONCURRENT_WARMING_TASKS)
+                .limit(_get_max_concurrent())
                 .all()
             )
 
