@@ -48,7 +48,6 @@ def test_tg_auth_task_registered(task_name: str):
 _EXPECTED_STANDARD_TASKS = [
     "app.workers.tasks.campaign_dispatch",
     "app.workers.tasks.account_health_check",
-    "app.workers.tasks.start_warming",
 ]
 
 

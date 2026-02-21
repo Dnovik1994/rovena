@@ -62,6 +62,13 @@ class Settings(BaseSettings):
 
     ws_broadcast_concurrency: int = 100
 
+    warming_quiet_hours_start: int = 0
+    warming_quiet_hours_end: int = 8
+    warming_timezone: str = "Europe/Kyiv"
+    warming_rest_hours_min: int = 24
+    warming_rest_hours_max: int = 26
+    warming_max_concurrent: int = 5
+
     @field_validator("telegram_api_id", mode="before")
     @classmethod
     def coerce_telegram_api_id(cls, v: object) -> int:
