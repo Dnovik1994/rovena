@@ -81,6 +81,7 @@ celery_app = Celery(
         "app.workers.tg_campaign_tasks",
         "app.workers.tg_sync_tasks",
         "app.workers.tg_invite_tasks",
+        "app.workers.health_tasks",
     ],
 )
 celery_app.conf.update(
@@ -106,6 +107,10 @@ celery_app.conf.update(
         },
         "resume-tg-warming-every-5-min": {
             "task": "app.workers.tg_warming_tasks.resume_tg_warming",
+            "schedule": 300.0,
+        },
+        "check-system-health-every-5-min": {
+            "task": "app.workers.health_tasks.check_system_health",
             "schedule": 300.0,
         },
     },
