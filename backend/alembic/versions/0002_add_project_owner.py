@@ -16,6 +16,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # NOTE: owner_id column (with FK and index) is already created in
+    # 0001_initial.  This migration is effectively a no-op when running
+    # from scratch, but kept for migration chain integrity.
     if context.is_offline_mode():
         columns = set()
     else:

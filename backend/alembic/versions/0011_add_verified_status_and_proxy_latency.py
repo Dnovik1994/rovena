@@ -29,10 +29,16 @@ def upgrade() -> None:
         op.add_column("proxies", sa.Column("latency_ms", sa.Integer(), nullable=True))
 
     if dialect_name == "mysql":
-        op.execute(
-            "ALTER TABLE accounts MODIFY COLUMN status "
-            "ENUM('new','warming','active','cooldown','blocked','verified') NOT NULL"
-        )
+        has_verified = op.get_bind().execute(sa.text(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'accounts' "
+            "AND COLUMN_NAME = 'status' AND COLUMN_TYPE LIKE '%verified%'"
+        )).scalar()
+        if not has_verified:
+            op.execute(
+                "ALTER TABLE accounts MODIFY COLUMN status "
+                "ENUM('new','warming','active','cooldown','blocked','verified') NOT NULL"
+            )
 
 
 def downgrade() -> None:
@@ -49,7 +55,13 @@ def downgrade() -> None:
         op.drop_column("proxies", "latency_ms")
 
     if dialect_name == "mysql":
-        op.execute(
-            "ALTER TABLE accounts MODIFY COLUMN status "
-            "ENUM('new','warming','active','cooldown','blocked') NOT NULL"
-        )
+        has_verified = op.get_bind().execute(sa.text(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'accounts' "
+            "AND COLUMN_NAME = 'status' AND COLUMN_TYPE LIKE '%verified%'"
+        )).scalar()
+        if has_verified:
+            op.execute(
+                "ALTER TABLE accounts MODIFY COLUMN status "
+                "ENUM('new','warming','active','cooldown','blocked') NOT NULL"
+            )

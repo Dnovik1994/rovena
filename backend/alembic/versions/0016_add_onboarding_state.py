@@ -35,4 +35,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("users", "onboarding_completed")
+    conn = op.get_bind()
+    exists = conn.execute(sa.text(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' "
+        "AND COLUMN_NAME = 'onboarding_completed'"
+    )).scalar()
+    if exists:
+        op.drop_column("users", "onboarding_completed")

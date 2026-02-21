@@ -92,20 +92,13 @@ def upgrade() -> None:
             ),
         )
 
-        # Seed data
-        warming_channels = sa.table(
-            "warming_channels",
-            sa.column("username", sa.String),
-            sa.column("channel_type", sa.String),
-            sa.column("language", sa.String),
-        )
-        op.bulk_insert(
-            warming_channels,
-            [
-                {"username": u, "channel_type": ct, "language": lang}
-                for u, ct, lang in SEED_CHANNELS
-            ],
-        )
+        # Seed data — INSERT IGNORE for idempotency on re-run
+        conn = op.get_bind()
+        for u, ct, lang in SEED_CHANNELS:
+            conn.execute(sa.text(
+                "INSERT IGNORE INTO warming_channels (username, channel_type, language) "
+                "VALUES (:username, :channel_type, :language)"
+            ), {"username": u, "channel_type": ct, "language": lang})
 
     # Add warming_joined_channels JSON field to telegram_accounts
     if _table_exists("telegram_accounts") and not _column_exists(

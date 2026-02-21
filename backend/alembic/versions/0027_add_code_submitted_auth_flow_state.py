@@ -28,6 +28,14 @@ _OLD_ENUM = sa.Enum(
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    col_type = conn.execute(sa.text(
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'telegram_auth_flows' "
+        "AND COLUMN_NAME = 'state'"
+    )).scalar()
+    if col_type and "code_submitted" in col_type:
+        return  # already has the new enum value
     op.alter_column(
         "telegram_auth_flows",
         "state",
@@ -39,6 +47,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    conn = op.get_bind()
+    col_type = conn.execute(sa.text(
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'telegram_auth_flows' "
+        "AND COLUMN_NAME = 'state'"
+    )).scalar()
+    if col_type and "code_submitted" not in col_type:
+        return  # already without the value
     op.alter_column(
         "telegram_auth_flows",
         "state",

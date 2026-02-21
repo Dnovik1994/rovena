@@ -27,8 +27,8 @@ def upgrade() -> None:
     version_col = columns.get("version_num")
     current_length = getattr(version_col.get("type"), "length", None) if version_col else None
 
-    if current_length is None or current_length < 64:
-        op.execute("ALTER TABLE alembic_version MODIFY version_num VARCHAR(64) NOT NULL")
+    if current_length is None or current_length < 128:
+        op.execute("ALTER TABLE alembic_version MODIFY version_num VARCHAR(128) NOT NULL")
 
 
 def downgrade() -> None:

@@ -50,11 +50,17 @@ def upgrade() -> None:
 
     # --- fix timestamp nullable ---
     # Backfill NULLs with created_at (both columns always present since 0009)
-    bind.execute(
-        text(
-            f"UPDATE {_TABLE} SET timestamp = created_at WHERE timestamp IS NULL"
+    batch_size = 5000
+    while True:
+        result = bind.execute(
+            text(
+                f"UPDATE {_TABLE} SET timestamp = created_at "
+                f"WHERE timestamp IS NULL LIMIT :batch"
+            ),
+            {"batch": batch_size},
         )
-    )
+        if result.rowcount == 0:
+            break
     op.alter_column(
         _TABLE,
         "timestamp",

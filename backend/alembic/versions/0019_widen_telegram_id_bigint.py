@@ -38,7 +38,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # WARNING: BIGINT→INT downgrade may cause data truncation if any
+    # users.telegram_id value exceeds 2^31-1 (2147483647).
     bind = op.get_bind()
+    max_val = bind.execute(text(
+        "SELECT MAX(telegram_id) FROM users"
+    )).scalar()
+    if max_val is not None and max_val > 2147483647:
+        raise RuntimeError(
+            f"Cannot downgrade users.telegram_id to INT: max value {max_val} "
+            f"exceeds 2^31-1 (2147483647)"
+        )
     if bind.dialect.name == "mysql":
         bind.execute(text(
             "ALTER TABLE users "

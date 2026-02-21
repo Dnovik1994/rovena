@@ -107,11 +107,33 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_auth_flows_expires_at", table_name="telegram_auth_flows")
-    op.drop_index("ix_auth_flows_account_id", table_name="telegram_auth_flows")
-    op.drop_table("telegram_auth_flows")
+    conn = op.get_bind()
 
-    op.drop_index("ix_tg_accounts_status", table_name="telegram_accounts")
-    op.drop_index("ix_tg_accounts_owner_id", table_name="telegram_accounts")
-    op.drop_index("ix_tg_accounts_owner_phone", table_name="telegram_accounts")
-    op.drop_table("telegram_accounts")
+    def _tbl_exists(name: str) -> bool:
+        return conn.execute(sa.text(
+            "SELECT COUNT(*) FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl"
+        ), {"tbl": name}).scalar() > 0
+
+    def _idx_exists(idx: str, tbl: str) -> bool:
+        return conn.execute(sa.text(
+            "SELECT COUNT(*) FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND INDEX_NAME = :idx "
+            "AND TABLE_NAME = :tbl"
+        ), {"idx": idx, "tbl": tbl}).scalar() > 0
+
+    if _idx_exists("ix_auth_flows_expires_at", "telegram_auth_flows"):
+        op.drop_index("ix_auth_flows_expires_at", table_name="telegram_auth_flows")
+    if _idx_exists("ix_auth_flows_account_id", "telegram_auth_flows"):
+        op.drop_index("ix_auth_flows_account_id", table_name="telegram_auth_flows")
+    if _tbl_exists("telegram_auth_flows"):
+        op.drop_table("telegram_auth_flows")
+
+    if _idx_exists("ix_tg_accounts_status", "telegram_accounts"):
+        op.drop_index("ix_tg_accounts_status", table_name="telegram_accounts")
+    if _idx_exists("ix_tg_accounts_owner_id", "telegram_accounts"):
+        op.drop_index("ix_tg_accounts_owner_id", table_name="telegram_accounts")
+    if _idx_exists("ix_tg_accounts_owner_phone", "telegram_accounts"):
+        op.drop_index("ix_tg_accounts_owner_phone", table_name="telegram_accounts")
+    if _tbl_exists("telegram_accounts"):
+        op.drop_table("telegram_accounts")

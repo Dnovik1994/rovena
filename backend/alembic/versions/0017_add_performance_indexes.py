@@ -62,12 +62,26 @@ def upgrade() -> None:
     _create_index_if_missing("ix_contacts_blocked", "contacts", "blocked")
 
 
+def _drop_index_if_exists(index_name: str, table_name: str) -> None:
+    bind = op.get_bind()
+    exists = bind.execute(
+        sa.text(
+            "SELECT COUNT(*) FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND INDEX_NAME = :idx "
+            "AND TABLE_NAME = :tbl"
+        ),
+        {"idx": index_name, "tbl": table_name},
+    ).scalar()
+    if exists:
+        op.drop_index(index_name, table_name=table_name)
+
+
 def downgrade() -> None:
-    op.drop_index("ix_contacts_blocked", table_name="contacts")
-    op.drop_index("ix_proxies_status", table_name="proxies")
-    op.drop_index("ix_campaigns_status_project_id", table_name="campaigns")
-    op.drop_index("ix_campaigns_status", table_name="campaigns")
-    op.drop_index("ix_accounts_status_proxy_id", table_name="accounts")
-    op.drop_index("ix_accounts_status", table_name="accounts")
-    op.drop_index("ix_users_refresh_token", table_name="users")
-    op.drop_index("ix_users_tariff_id", table_name="users")
+    _drop_index_if_exists("ix_contacts_blocked", "contacts")
+    _drop_index_if_exists("ix_proxies_status", "proxies")
+    _drop_index_if_exists("ix_campaigns_status_project_id", "campaigns")
+    _drop_index_if_exists("ix_campaigns_status", "campaigns")
+    _drop_index_if_exists("ix_accounts_status_proxy_id", "accounts")
+    _drop_index_if_exists("ix_accounts_status", "accounts")
+    _drop_index_if_exists("ix_users_refresh_token", "users")
+    _drop_index_if_exists("ix_users_tariff_id", "users")
