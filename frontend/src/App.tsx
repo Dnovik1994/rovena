@@ -15,6 +15,7 @@ import Projects from "./pages/Projects";
 import Sources from "./pages/Sources";
 import Targets from "./pages/Targets";
 import AccountChats from "./pages/AccountChats";
+import AccountDialogs from "./pages/AccountDialogs";
 import InviteCampaigns from "./pages/InviteCampaigns";
 import { apiFetch } from "./shared/api/client";
 import { AuthProvider, useAuth } from "./stores/auth";
@@ -90,6 +91,7 @@ const AppRoutes = (): JSX.Element => {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/accounts/:accountId/chats" element={<AccountChats />} />
+          <Route path="/accounts/:accountId/dialogs" element={<AccountDialogs />} />
           <Route path="/invite-campaigns" element={<InviteCampaigns />} />
           <Route path="/subscription" element={<Subscription />} />
           <Route path="/admin" element={isAdmin ? <Admin /> : <Navigate to="/" replace />} />
