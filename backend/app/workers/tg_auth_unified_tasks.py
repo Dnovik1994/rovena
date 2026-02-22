@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import (
     AuthKeyUnregistered,
+    BadRequest,
     FloodWait,
     PhoneCodeExpired,
     PhoneCodeInvalid,
@@ -53,53 +54,6 @@ from app.workers.tg_auth_helpers import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
-
-async def _export_session(client, flow_id: str, log) -> str:
-    """Export session string, falling back to file-based session read.
-
-    Pyrogram's ``export_session_string()`` works reliably for in-memory
-    sessions.  For file-based sessions it may raise *"required argument is
-    not an integer"*.  The fallback reads the SQLite session file directly
-    and packs the data into the Pyrogram session-string format.
-    """
-    try:
-        return await asyncio.wait_for(client.export_session_string(), timeout=15)
-    except Exception as exc:
-        log.warning("export_session_string failed (%s), reading from file", exc)
-
-    # Fallback: read SQLite session file directly
-    import base64
-    import sqlite3
-    import struct
-    from pathlib import Path
-
-    session_path = Path(f"/data/pyrogram_pre_auth/preauth-{flow_id}.session")
-    if not session_path.exists():
-        raise RuntimeError(f"Session file not found: {session_path}")
-
-    conn = sqlite3.connect(str(session_path))
-    try:
-        row = conn.execute(
-            "SELECT dc_id, api_id, test_mode, auth_key, date, user_id, is_bot "
-            "FROM sessions"
-        ).fetchone()
-        if not row:
-            raise RuntimeError("No session data in SQLite file")
-
-        dc_id, api_id, test_mode, auth_key, date, user_id, is_bot = row
-
-        packed = struct.pack(
-            ">B?256sI?",
-            dc_id,
-            test_mode,
-            auth_key,
-            user_id or 0,
-            is_bot or False,
-        )
-        return base64.urlsafe_b64encode(packed).decode().rstrip("=")
-    finally:
-        conn.close()
 
 
 # ─── unified_auth (single-connection send_code + sign_in) ───────────
@@ -296,7 +250,9 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     )
 
                     # ── Success — save session ──
-                    session_string = await _export_session(client, flow_id, log)
+                    session_string = await asyncio.wait_for(
+                        client.export_session_string(), timeout=15,
+                    )
                     account.session_encrypted = encrypt_session(session_string)
                     account.tg_user_id = signed_in.id
                     account.tg_username = getattr(signed_in, "username", None)
@@ -328,23 +284,9 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     return
 
                 except SessionPasswordNeeded:
-                    # Session export is MANDATORY for confirm_password_task.
-                    # Without it, confirm_password creates a new auth_key → session_revoked.
-                    try:
-                        session_string = await _export_session(client, flow_id, log)
-                        account.session_encrypted = encrypt_session(session_string)
-                        log.info("event=2fa_session_exported %s", ctx)
-                    except Exception as sess_err:
-                        log.error("event=2fa_session_export_failed %s error=%s", ctx, sess_err)
-                        flow.state = AuthFlowState.failed
-                        flow.last_error = f"Failed to export session for 2FA: {sess_err}"
-                        account.status = TelegramAccountStatus.error
-                        account.last_error = "2FA session export failed, please retry"
-                        db.commit()
-                        _broadcast_account_update(account)
-                        _broadcast_flow_update(flow, account_id, owner_user_id)
-                        return
-
+                    # 2FA required — handle INLINE (same connection).
+                    # export_session_string() cannot work here because
+                    # user_id is still None before check_password().
                     account.status = TelegramAccountStatus.password_required
                     account.last_error = None
                     flow.state = AuthFlowState.wait_password
@@ -353,9 +295,124 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                         seconds=settings.auth_flow_ttl_seconds,
                     )
                     db.commit()
-                    log.info("event=unified_auth_2fa_required %s session_saved=True", ctx)
+                    log.info("event=unified_auth_2fa_required %s", ctx)
                     _broadcast_account_update(account)
                     _broadcast_flow_update(flow, account_id, owner_user_id)
+
+                    # ── Phase 5: Poll DB for submitted password ──────
+                    password_start = time.monotonic()
+                    max_password_seconds = 280
+                    password = None
+                    pwd_poll_count = 0
+
+                    while True:
+                        pwd_poll_count += 1
+                        elapsed_pwd = time.monotonic() - password_start
+                        if elapsed_pwd >= max_password_seconds:
+                            flow.state = AuthFlowState.expired
+                            flow.last_error = "No password submitted within timeout"
+                            account.status = TelegramAccountStatus.error
+                            account.last_error = "2FA password timeout"
+                            db.commit()
+                            log.info(
+                                "event=unified_auth_password_timeout %s elapsed=%.0f",
+                                ctx, elapsed_pwd,
+                            )
+                            _broadcast_account_update(account)
+                            _broadcast_flow_update(flow, account_id, owner_user_id)
+                            return
+
+                        db.commit()
+                        row = db.execute(
+                            select(TelegramAuthFlow.state, TelegramAuthFlow.meta_json)
+                            .where(TelegramAuthFlow.id == flow_id)
+                        ).first()
+                        if not row:
+                            log.warning("event=unified_auth_flow_disappeared_pwd %s", ctx)
+                            return
+                        current_state = row.state
+                        current_meta = row.meta_json or {}
+
+                        if pwd_poll_count % 5 == 0:
+                            log.info(
+                                "event=unified_auth_polling_password %s poll=%d elapsed=%d state=%s",
+                                ctx, pwd_poll_count, int(elapsed_pwd), current_state,
+                            )
+
+                        if current_state == AuthFlowState.password_submitted:
+                            password = current_meta.get("submitted_password")
+                            if password:
+                                db.expire(flow)
+                                db.refresh(flow)
+                                log.info("event=unified_auth_password_received %s", ctx)
+                                break
+                        elif current_state in (AuthFlowState.expired, AuthFlowState.failed):
+                            log.info(
+                                "event=unified_auth_flow_terminated_pwd state=%s %s",
+                                current_state, ctx,
+                            )
+                            return
+
+                        await asyncio.sleep(3)
+
+                    # ── Phase 6: check_password (same connection) ────
+                    log.info("event=unified_auth_checking_password %s", ctx)
+                    try:
+                        t_check = time.monotonic()
+                        await asyncio.wait_for(client.check_password(password), timeout=30)
+                        log.info(
+                            "event=check_password_ok %s elapsed_ms=%d",
+                            ctx, int((time.monotonic() - t_check) * 1000),
+                        )
+                    except BadRequest as pwd_exc:
+                        if "PASSWORD_HASH_INVALID" in str(pwd_exc):
+                            flow.last_error = "Invalid 2FA password"
+                            flow.state = AuthFlowState.wait_password
+                            account.last_error = "Invalid 2FA password"
+                            db.commit()
+                            log.warning("event=unified_auth_password_invalid %s", ctx)
+                            _broadcast_flow_update(flow, account_id, owner_user_id)
+                            _broadcast_account_update(account)
+                            return
+                        raise
+
+                    # Password OK — export session (user_id is now set)
+                    session_string = await asyncio.wait_for(
+                        client.export_session_string(), timeout=15,
+                    )
+                    account.session_encrypted = encrypt_session(session_string)
+
+                    me = await asyncio.wait_for(client.get_me(), timeout=15)
+                    account.tg_user_id = me.id
+                    account.tg_username = getattr(me, "username", None)
+                    account.first_name = getattr(me, "first_name", None)
+                    account.last_name = getattr(me, "last_name", None)
+                    account.status = TelegramAccountStatus.verified
+                    account.verified_at = datetime.now(timezone.utc)
+                    account.last_seen_at = datetime.now(timezone.utc)
+                    account.last_error = None
+
+                    flow.state = AuthFlowState.done
+                    flow.last_error = None
+                    db.commit()
+
+                    elapsed_total = int((time.monotonic() - t0) * 1000)
+                    log.info("event=unified_auth_2fa_ok %s elapsed_ms=%d", ctx, elapsed_total)
+
+                    _broadcast_account_update(account)
+                    _broadcast_flow_update(flow, account_id, owner_user_id)
+
+                    # Auto-trigger account sync
+                    try:
+                        from app.workers.tg_sync_tasks import sync_account_data
+                        sync_account_data.delay(account_id)
+                        log.info("event=sync_dispatched_after_2fa account_id=%d", account_id)
+                    except Exception as sync_exc:
+                        log.warning(
+                            "event=sync_dispatch_failed account_id=%d error=%s",
+                            account_id, sync_exc,
+                        )
+
                     return
 
                 except PhoneCodeInvalid:
@@ -521,8 +578,8 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
 @celery_app.task(
     name="app.workers.tg_auth_tasks.unified_auth_task",
     bind=True,
-    soft_time_limit=330,
-    time_limit=360,
+    soft_time_limit=660,
+    time_limit=720,
 )
 def unified_auth_task(self, account_id: int, flow_id: str) -> None:
     """Single-connection auth task: send_code + poll for code + sign_in.
