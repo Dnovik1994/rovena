@@ -235,6 +235,15 @@ def create_invite_campaign(
             .subquery()
         )
 
+    # Subquery: users already in target group (skip re-inviting them)
+    already_members_subq = None
+    if dedup_target_chat_id:
+        already_members_subq = (
+            db.query(TgChatMember.user_id)
+            .filter(TgChatMember.chat_id == dedup_target_chat_id)
+            .subquery()
+        )
+
     # Build members query depending on source_chat_id
     if payload.source_chat_id is not None:
         # Select tg_users from a specific chat
@@ -250,6 +259,10 @@ def create_invite_campaign(
         if already_invited_subq is not None:
             members_query = members_query.filter(
                 ~TgChatMember.user_id.in_(db.query(already_invited_subq.c.tg_user_id))
+            )
+        if already_members_subq is not None:
+            members_query = members_query.filter(
+                ~TgChatMember.user_id.in_(db.query(already_members_subq.c.user_id))
             )
         members_query = members_query.order_by(
                 case((TgUser.last_online_at.is_(None), 1), else_=0),
@@ -278,6 +291,10 @@ def create_invite_campaign(
         if already_invited_subq is not None:
             members_query = members_query.filter(
                 ~TgUser.id.in_(db.query(already_invited_subq.c.tg_user_id))
+            )
+        if already_members_subq is not None:
+            members_query = members_query.filter(
+                ~TgUser.id.in_(db.query(already_members_subq.c.user_id))
             )
         members_query = members_query.group_by(TgUser.id).order_by(
                 case((func.max(TgUser.last_online_at).is_(None), 1), else_=0),
