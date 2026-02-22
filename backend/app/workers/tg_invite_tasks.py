@@ -18,6 +18,7 @@ from pyrogram.errors import (
 from sqlalchemy import update
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
+from app.services.notification_service import send_notification_sync
 from app.core.database import SessionLocal
 from app.models.invite_campaign import InviteCampaign, InviteCampaignStatus
 from app.models.invite_task import InviteTask, InviteTaskStatus
@@ -176,6 +177,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
             return
 
         owner_id = campaign.owner_id
+        campaign_name = campaign.name
         target_link = campaign.target_link
         campaign_target_chat_id = campaign.target_chat_id
         max_accounts = campaign.max_accounts
@@ -234,6 +236,11 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                 if campaign:
                     campaign.status = InviteCampaignStatus.error
                     db.commit()
+                    send_notification_sync("warming_failed",
+                        f"⚠️ Кампания остановлена\n"
+                        f"📋 {campaign.name} (ID: {campaign.id})\n"
+                        f"📝 Нет прогретых аккаунтов\n"
+                        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         return
 
     # --- Phase 3: process each account ---------------------------------------
@@ -508,6 +515,12 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 db.commit()
                         account_broke = True
                         _broadcast_invite_error(campaign_id, owner_id, acct_id, error_name)
+                        send_notification_sync("account_banned",
+                            f"🚫 Аккаунт забанен в чате\n"
+                            f"📱 Account ID: {acct_id}\n"
+                            f"📋 Кампания: {campaign_name}\n"
+                            f"📝 {error_name}\n"
+                            f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 
                     except Exception as exc:  # noqa: BLE001
                         sentry_sdk.capture_exception(exc)
@@ -563,6 +576,12 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
             db.commit()
             logger.info("invite_dispatch: campaign %d completed", campaign_id)
             _broadcast_invite_completed(campaign_id, owner_id, db)
+            send_notification_sync("warming_completed",
+                f"✅ Кампания завершена\n"
+                f"📋 {campaign.name} (ID: {campaign.id})\n"
+                f"👥 Успешно: {campaign.invites_completed}\n"
+                f"❌ Ошибок: {campaign.invites_failed}\n"
+                f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         elif campaign.status == InviteCampaignStatus.active:
             db.commit()
             # Reschedule for next dispatch round using the rate-based
