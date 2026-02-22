@@ -8,6 +8,7 @@ Create Date: 2026-02-21 00:00:00.000000
 
 from __future__ import annotations
 
+import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import Boolean, DateTime, Integer, String, text
 
@@ -86,10 +87,10 @@ def upgrade() -> None:
     if not _table_exists("warming_bios"):
         op.create_table(
             "warming_bios",
-            op.Column("id", Integer, primary_key=True, autoincrement=True),
-            op.Column("text", String(200), nullable=False),
-            op.Column("is_active", Boolean, nullable=False, server_default="1"),
-            op.Column("created_at", DateTime(timezone=True), nullable=False,
+            sa.Column("id", Integer, primary_key=True, autoincrement=True),
+            sa.Column("text", String(200), nullable=False),
+            sa.Column("is_active", Boolean, nullable=False, server_default="1"),
+            sa.Column("created_at", DateTime(timezone=True), nullable=False,
                        server_default=text("CURRENT_TIMESTAMP")),
         )
 
@@ -97,12 +98,12 @@ def upgrade() -> None:
     if not _table_exists("warming_photos"):
         op.create_table(
             "warming_photos",
-            op.Column("id", Integer, primary_key=True, autoincrement=True),
-            op.Column("filename", String(255), nullable=False),
-            op.Column("file_path", String(500), nullable=False),
-            op.Column("is_active", Boolean, nullable=False, server_default="1"),
-            op.Column("assigned_account_id", Integer, nullable=True, unique=True),
-            op.Column("created_at", DateTime(timezone=True), nullable=False,
+            sa.Column("id", Integer, primary_key=True, autoincrement=True),
+            sa.Column("filename", String(255), nullable=False),
+            sa.Column("file_path", String(500), nullable=False),
+            sa.Column("is_active", Boolean, nullable=False, server_default="1"),
+            sa.Column("assigned_account_id", Integer, nullable=True, unique=True),
+            sa.Column("created_at", DateTime(timezone=True), nullable=False,
                        server_default=text("CURRENT_TIMESTAMP")),
         )
         # FK: assigned_account_id → telegram_accounts.id
@@ -118,10 +119,10 @@ def upgrade() -> None:
     if not _table_exists("warming_usernames"):
         op.create_table(
             "warming_usernames",
-            op.Column("id", Integer, primary_key=True, autoincrement=True),
-            op.Column("template", String(100), nullable=False),
-            op.Column("is_active", Boolean, nullable=False, server_default="1"),
-            op.Column("created_at", DateTime(timezone=True), nullable=False,
+            sa.Column("id", Integer, primary_key=True, autoincrement=True),
+            sa.Column("template", String(100), nullable=False),
+            sa.Column("is_active", Boolean, nullable=False, server_default="1"),
+            sa.Column("created_at", DateTime(timezone=True), nullable=False,
                        server_default=text("CURRENT_TIMESTAMP")),
         )
 
@@ -129,11 +130,11 @@ def upgrade() -> None:
     if not _table_exists("warming_names"):
         op.create_table(
             "warming_names",
-            op.Column("id", Integer, primary_key=True, autoincrement=True),
-            op.Column("first_name", String(100), nullable=False),
-            op.Column("last_name", String(100), nullable=True),
-            op.Column("is_active", Boolean, nullable=False, server_default="1"),
-            op.Column("created_at", DateTime(timezone=True), nullable=False,
+            sa.Column("id", Integer, primary_key=True, autoincrement=True),
+            sa.Column("first_name", String(100), nullable=False),
+            sa.Column("last_name", String(100), nullable=True),
+            sa.Column("is_active", Boolean, nullable=False, server_default="1"),
+            sa.Column("created_at", DateTime(timezone=True), nullable=False,
                        server_default=text("CURRENT_TIMESTAMP")),
         )
 
@@ -141,15 +142,15 @@ def upgrade() -> None:
     if not _table_exists("admin_notification_settings"):
         op.create_table(
             "admin_notification_settings",
-            op.Column("id", Integer, primary_key=True, autoincrement=True),
-            op.Column("chat_id", String(50), nullable=False),
-            op.Column("notify_account_banned", Boolean, nullable=False, server_default="1"),
-            op.Column("notify_flood_wait", Boolean, nullable=False, server_default="1"),
-            op.Column("notify_warming_failed", Boolean, nullable=False, server_default="1"),
-            op.Column("notify_system_health", Boolean, nullable=False, server_default="1"),
-            op.Column("notify_flood_rate_threshold", Boolean, nullable=False, server_default="1"),
-            op.Column("is_active", Boolean, nullable=False, server_default="1"),
-            op.Column("created_at", DateTime(timezone=True), nullable=False,
+            sa.Column("id", Integer, primary_key=True, autoincrement=True),
+            sa.Column("chat_id", String(50), nullable=False),
+            sa.Column("notify_account_banned", Boolean, nullable=False, server_default="1"),
+            sa.Column("notify_flood_wait", Boolean, nullable=False, server_default="1"),
+            sa.Column("notify_warming_failed", Boolean, nullable=False, server_default="1"),
+            sa.Column("notify_system_health", Boolean, nullable=False, server_default="1"),
+            sa.Column("notify_flood_rate_threshold", Boolean, nullable=False, server_default="1"),
+            sa.Column("is_active", Boolean, nullable=False, server_default="1"),
+            sa.Column("created_at", DateTime(timezone=True), nullable=False,
                        server_default=text("CURRENT_TIMESTAMP")),
         )
 
@@ -157,19 +158,19 @@ def upgrade() -> None:
     if not _column_exists("telegram_accounts", "is_trusted"):
         op.add_column(
             "telegram_accounts",
-            op.Column("is_trusted", Boolean, nullable=False, server_default="0"),
+            sa.Column("is_trusted", Boolean, nullable=False, server_default="0"),
         )
 
     if not _column_exists("telegram_accounts", "warming_day"):
         op.add_column(
             "telegram_accounts",
-            op.Column("warming_day", Integer, nullable=False, server_default="0"),
+            sa.Column("warming_day", Integer, nullable=False, server_default="0"),
         )
 
     if not _column_exists("telegram_accounts", "warming_photo_id"):
         op.add_column(
             "telegram_accounts",
-            op.Column("warming_photo_id", Integer, nullable=True),
+            sa.Column("warming_photo_id", Integer, nullable=True),
         )
         if not _fk_exists("telegram_accounts", "fk_tg_accounts_warming_photo_id"):
             op.create_foreign_key(
@@ -183,7 +184,7 @@ def upgrade() -> None:
     if not _column_exists("telegram_accounts", "flood_wait_at"):
         op.add_column(
             "telegram_accounts",
-            op.Column("flood_wait_at", DateTime(timezone=True), nullable=True),
+            sa.Column("flood_wait_at", DateTime(timezone=True), nullable=True),
         )
 
 
