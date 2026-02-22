@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.tz import ensure_utc, is_expired
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pyrogram.errors import AuthKeyUnregistered, SessionRevoked, UserDeactivatedBan
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -1025,6 +1026,21 @@ async def get_account_dialogs(
             })
 
         return dialogs
+    except (AuthKeyUnregistered, SessionRevoked) as exc:
+        account.status = TelegramAccountStatus.error
+        account.session_encrypted = None
+        account.last_error = f"Session invalid: {type(exc).__name__}"
+        db.commit()
+        raise HTTPException(401, "Telegram session expired. Please re-authorize account.")
+    except UserDeactivatedBan:
+        account.status = TelegramAccountStatus.banned
+        account.last_error = "Account banned by Telegram"
+        db.commit()
+        raise HTTPException(403, "Account banned by Telegram")
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram connection timeout")
+    except Exception as exc:
+        raise HTTPException(502, f"Telegram error: {str(exc)[:200]}")
     finally:
         try:
             await asyncio.wait_for(client.disconnect(), timeout=10)
@@ -1074,6 +1090,21 @@ async def get_chat_messages(
             })
 
         return messages
+    except (AuthKeyUnregistered, SessionRevoked) as exc:
+        account.status = TelegramAccountStatus.error
+        account.session_encrypted = None
+        account.last_error = f"Session invalid: {type(exc).__name__}"
+        db.commit()
+        raise HTTPException(401, "Telegram session expired. Please re-authorize account.")
+    except UserDeactivatedBan:
+        account.status = TelegramAccountStatus.banned
+        account.last_error = "Account banned by Telegram"
+        db.commit()
+        raise HTTPException(403, "Account banned by Telegram")
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram connection timeout")
+    except Exception as exc:
+        raise HTTPException(502, f"Telegram error: {str(exc)[:200]}")
     finally:
         try:
             await asyncio.wait_for(client.disconnect(), timeout=10)
