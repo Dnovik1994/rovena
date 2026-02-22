@@ -118,6 +118,10 @@ celery_app.conf.update(
             "task": "app.workers.health_tasks.check_system_health",
             "schedule": 300.0,
         },
+        "cleanup-orphan-invites-every-10-min": {
+            "task": "app.workers.tg_invite_tasks.cleanup_orphan_invite_tasks",
+            "schedule": 600.0,
+        },
     },
 )
 logger.info("Task queue ready")
