@@ -282,6 +282,25 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     return
 
                 except SessionPasswordNeeded:
+                    # Session export is MANDATORY for confirm_password_task.
+                    # Without it, confirm_password creates a new auth_key → session_revoked.
+                    try:
+                        session_string = await asyncio.wait_for(
+                            client.export_session_string(), timeout=15,
+                        )
+                        account.session_encrypted = encrypt_session(session_string)
+                        log.info("event=2fa_session_exported %s", ctx)
+                    except Exception as sess_err:
+                        log.error("event=2fa_session_export_failed %s error=%s", ctx, sess_err)
+                        flow.state = AuthFlowState.failed
+                        flow.last_error = f"Failed to export session for 2FA: {sess_err}"
+                        account.status = TelegramAccountStatus.error
+                        account.last_error = "2FA session export failed, please retry"
+                        db.commit()
+                        _broadcast_account_update(account)
+                        _broadcast_flow_update(flow, account_id, owner_user_id)
+                        return
+
                     account.status = TelegramAccountStatus.password_required
                     account.last_error = None
                     flow.state = AuthFlowState.wait_password
@@ -289,14 +308,8 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     flow.expires_at = utcnow() + timedelta(
                         seconds=settings.auth_flow_ttl_seconds,
                     )
-                    if client is not None:
-                        try:
-                            session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
-                            account.session_encrypted = encrypt_session(session_string)
-                        except Exception:
-                            pass
                     db.commit()
-                    log.info("event=unified_auth_2fa_required %s", ctx)
+                    log.info("event=unified_auth_2fa_required %s session_saved=True", ctx)
                     _broadcast_account_update(account)
                     _broadcast_flow_update(flow, account_id, owner_user_id)
                     return
