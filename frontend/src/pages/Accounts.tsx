@@ -22,6 +22,7 @@ import {
 import { connectStatusSocket, StatusMessage } from "../services/websocket";
 import { useAuth } from "../stores/auth";
 import type { TgAccount, TgAccountStatus } from "../types/telegram_account";
+import { apiFetch } from "../shared/api/client";
 import { extractError } from "../utils/extractError";
 
 /* ── Form schemas ────────────────────────────────────────────────── */
@@ -411,6 +412,18 @@ const Accounts = (): JSX.Element => {
     }
   };
 
+  const handleActivate = async (accountId: number) => {
+    if (!token) return;
+    try {
+      setGlobalError(null);
+      await apiFetch(`/tg-accounts/${accountId}/activate`, { method: "POST" }, token);
+      setActionMessage("Аккаунт активирован.");
+      load();
+    } catch (err: any) {
+      setGlobalError(err.message || "Ошибка активации");
+    }
+  };
+
   const handleDelete = async (account: TgAccount) => {
     if (!token) return;
     const confirmed = window.confirm(
@@ -641,6 +654,18 @@ const Accounts = (): JSX.Element => {
                       disabled={account.status === "warming"}
                     >
                       {account.status === "warming" ? "Warming..." : "Start Warmup"}
+                    </button>
+                  )}
+                  {["verified"].includes(account.status) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleActivate(account.id);
+                      }}
+                      className="rounded-lg bg-emerald-500/80 px-3 py-1 text-xs font-semibold text-white"
+                    >
+                      Активировать
                     </button>
                   )}
                   {["verified", "active", "warming", "cooldown"].includes(account.status) && (

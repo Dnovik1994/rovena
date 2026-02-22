@@ -768,6 +768,37 @@ def tg_warmup(
     return TgAccountResponse.model_validate(account)
 
 
+# ─── ACTIVATE (skip warmup) ───────────────────────────────────────────
+
+@router.post("/{account_id}/activate")
+def activate_account(
+    account_id: int,
+    current_user: User = Depends(require_permission("tg_accounts", "update")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Переводит аккаунт в статус active (для вручную прогретых аккаунтов)."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    if account.status not in (TelegramAccountStatus.verified, TelegramAccountStatus.cooldown):
+        raise HTTPException(400, f"Cannot activate account in status {account.status.value}")
+
+    if not account.session_encrypted:
+        raise HTTPException(400, "Account has no session. Please re-authorize first.")
+
+    account.status = TelegramAccountStatus.active
+    account.last_error = None
+    db.commit()
+
+    manager.broadcast_sync({
+        "type": "account_status_changed",
+        "user_id": current_user.id,
+        "account_id": account.id,
+        "status": account.status.value,
+    })
+
+    return {"status": "active", "message": "Account activated"}
+
+
 # ─── REGENERATE DEVICE ───────────────────────────────────────────────
 
 @router.post("/{account_id}/regenerate-device", response_model=TgAccountResponse)
