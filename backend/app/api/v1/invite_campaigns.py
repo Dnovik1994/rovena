@@ -436,6 +436,49 @@ def start_invite_campaign(
 
 
 # ---------------------------------------------------------------------------
+# DELETE /invite-campaigns/{id} — delete campaign + tasks
+# ---------------------------------------------------------------------------
+@router.delete("/invite-campaigns/{campaign_id}")
+def delete_invite_campaign(
+    campaign_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Delete a campaign and all its tasks."""
+    campaign = (
+        db.query(InviteCampaign)
+        .filter(
+            InviteCampaign.id == campaign_id,
+            InviteCampaign.owner_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not campaign:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found",
+        )
+
+    if campaign.status == InviteCampaignStatus.active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete active campaign. Pause it first.",
+        )
+
+    db.query(InviteTask).filter(InviteTask.campaign_id == campaign_id).delete()
+    db.delete(campaign)
+    db.commit()
+
+    logger.info(
+        "InviteCampaign deleted | id=%d owner=%d",
+        campaign_id, current_user.id,
+    )
+
+    return {"message": "Campaign deleted"}
+
+
+# ---------------------------------------------------------------------------
 # POST /invite-campaigns/{id}/pause
 # ---------------------------------------------------------------------------
 @router.post("/invite-campaigns/{campaign_id}/pause", response_model=InviteCampaignResponse)

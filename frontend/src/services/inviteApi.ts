@@ -66,6 +66,9 @@ export const pauseInviteCampaign = (token: string, id: number) =>
 export const resumeInviteCampaign = (token: string, id: number) =>
   apiFetch<InviteCampaign>(`/invite-campaigns/${id}/resume`, { method: "POST" }, token);
 
+export const deleteInviteCampaign = (token: string, id: number) =>
+  apiFetch<{ message: string }>(`/invite-campaigns/${id}`, { method: "DELETE" }, token);
+
 // Account dialogs & messages
 export interface Dialog {
   chat_id: number;

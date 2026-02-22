@@ -9,6 +9,7 @@ import {
   startInviteCampaign,
   pauseInviteCampaign,
   resumeInviteCampaign,
+  deleteInviteCampaign,
   fetchMyAdminChats,
   fetchParsedContactsSummary,
 } from "../services/inviteApi";
@@ -315,6 +316,20 @@ const InviteCampaigns = (): JSX.Element => {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!token) return;
+    if (!confirm("Удалить кампанию?")) return;
+    try {
+      setError(null);
+      await deleteInviteCampaign(token, id);
+      setCampaigns((prev) => prev.filter((c) => c.id !== id));
+      if (detail?.id === id) setDetail(null);
+      setActionMessage("Кампания удалена.");
+    } catch (err) {
+      setError(extractError(err));
+    }
+  };
+
   /* ── View details ─── */
   const handleViewDetail = async (campaign: InviteCampaign) => {
     if (!token) return;
@@ -605,6 +620,18 @@ const InviteCampaigns = (): JSX.Element => {
                       className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors"
                     >
                       Продолжить
+                    </button>
+                  )}
+                  {["draft", "paused", "completed", "error"].includes(campaign.status) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(campaign.id);
+                      }}
+                      className="rounded-lg bg-rose-600/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500/80 transition-colors"
+                    >
+                      Удалить
                     </button>
                   )}
                 </div>
