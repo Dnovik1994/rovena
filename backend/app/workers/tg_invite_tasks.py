@@ -356,8 +356,32 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
         try:
             async with client:
                 # Resolve target: use target_chat_id directly, or resolve target_link
+                target_username_fallback = None
                 if campaign_target_chat_id is not None:
-                    target_chat_id = campaign_target_chat_id
+                    try:
+                        # Try using chat_id directly (may fail for new 13+ digit IDs)
+                        target_peer = await asyncio.wait_for(
+                            client.get_chat(campaign_target_chat_id), timeout=10
+                        )
+                        target_chat_id = target_peer.id
+                    except (ValueError, KeyError):
+                        # Chat ID invalid for Pyrogram — look up username in DB
+                        from app.models.tg_account_chat import TgAccountChat
+                        with SessionLocal() as db_inner:
+                            account_chat = db_inner.query(TgAccountChat).filter(
+                                TgAccountChat.chat_id == campaign_target_chat_id,
+                                TgAccountChat.username.isnot(None),
+                            ).first()
+                        if account_chat and account_chat.username:
+                            target_peer = await asyncio.wait_for(
+                                client.get_chat(account_chat.username), timeout=10
+                            )
+                            target_chat_id = target_peer.id
+                            target_username_fallback = account_chat.username
+                            logger.info("Resolved target via username @%s → %d",
+                                        account_chat.username, target_chat_id)
+                        else:
+                            raise
                 elif target_link:
                     try:
                         target_chat_id = await _resolve_target_chat_id(client, target_link)
@@ -419,10 +443,25 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
 
                     # Perform the invite (no DB session held)
                     try:
-                        await asyncio.wait_for(
-                            client.add_chat_members(target_chat_id, [telegram_id]),
-                            timeout=30,
-                        )
+                        try:
+                            await asyncio.wait_for(
+                                client.add_chat_members(target_chat_id, [telegram_id]),
+                                timeout=30,
+                            )
+                        except ValueError:
+                            # Peer ID invalid — retry with username if available
+                            if target_username_fallback:
+                                logger.info(
+                                    "add_chat_members failed with ValueError for chat_id=%s, "
+                                    "retrying with username @%s",
+                                    target_chat_id, target_username_fallback,
+                                )
+                                await asyncio.wait_for(
+                                    client.add_chat_members(target_username_fallback, [telegram_id]),
+                                    timeout=30,
+                                )
+                            else:
+                                raise
 
                         # Success
                         with SessionLocal() as db:
