@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -639,3 +641,241 @@ class TestWsRouting:
             # Should get a ping within 30s, but we just verify connection works
             data = websocket.receive_json()
             assert data["type"] == "ping"
+
+
+# ─── Helpers for dialog / message mocks ──────────────────────────────
+
+
+def _make_mock_client(dialogs=None, messages=None):
+    """Return a mock Pyrogram Client with async connect/disconnect/iterators."""
+    mock_client = MagicMock()
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+
+    async def _fake_get_dialogs(**kwargs):
+        for d in (dialogs or []):
+            yield d
+
+    async def _fake_get_chat_history(chat_id, **kwargs):
+        for m in (messages or []):
+            yield m
+
+    mock_client.get_dialogs = _fake_get_dialogs
+    mock_client.get_chat_history = _fake_get_chat_history
+    return mock_client
+
+
+def _make_dialog(chat_id=1, title="Test Chat", chat_type="private", unread=0):
+    chat = MagicMock()
+    chat.id = chat_id
+    chat.title = title
+    chat.first_name = title
+    chat.username = f"chat_{chat_id}"
+    chat.type = MagicMock(value=chat_type)
+    chat.members_count = 10
+
+    top_msg = MagicMock()
+    top_msg.text = "Hello"
+    top_msg.caption = None
+    top_msg.date = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    from_user = MagicMock()
+    from_user.first_name = "Sender"
+    top_msg.from_user = from_user
+
+    dialog = MagicMock()
+    dialog.chat = chat
+    dialog.unread_messages_count = unread
+    dialog.top_message = top_msg
+    return dialog
+
+
+def _make_message(msg_id=1, text="Hello world"):
+    msg = MagicMock()
+    msg.id = msg_id
+    msg.text = text
+    msg.caption = None
+    msg.date = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    from_user = MagicMock()
+    from_user.id = 100
+    from_user.first_name = "Alice"
+    from_user.username = "alice"
+    msg.from_user = from_user
+    msg.media = None
+    msg.reply_to_message_id = None
+    return msg
+
+
+def _setup_active_account(db_session, user, account_id):
+    """Set account to active with a fake session."""
+    db = SessionLocal()
+    account = db.get(TelegramAccount, account_id)
+    account.status = TelegramAccountStatus.active
+    account.session_encrypted = "fake-encrypted-session"
+    db.commit()
+    db.close()
+
+
+# ─── GET /tg-accounts/{id}/dialogs ──────────────────────────────────
+
+
+class TestGetAccountDialogs:
+    def test_dialogs_success(self, client, db_session, monkeypatch):
+        user = _create_user(db_session, telegram_id=8001)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380508001001"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+        _setup_active_account(db_session, user, account_id)
+
+        mock_client = _make_mock_client(dialogs=[
+            _make_dialog(chat_id=100, title="My Group", chat_type="supergroup"),
+            _make_dialog(chat_id=200, title="Alice", chat_type="private"),
+        ])
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs",
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["chat_id"] == 100
+        assert data[0]["title"] == "My Group"
+        assert data[0]["type"] == "supergroup"
+        assert data[1]["chat_id"] == 200
+        assert data[1]["type"] == "private"
+        assert data[0]["last_message"]["text"] == "Hello"
+
+    def test_dialogs_rejects_new_account(self, client, db_session):
+        user = _create_user(db_session, telegram_id=8002)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380508002002"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs",
+            headers=headers,
+        )
+        assert resp.status_code == 400
+
+    def test_dialogs_rejects_no_session(self, client, db_session):
+        user = _create_user(db_session, telegram_id=8003)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380508003003"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+
+        # Set to active but no session
+        db = SessionLocal()
+        account = db.get(TelegramAccount, account_id)
+        account.status = TelegramAccountStatus.active
+        db.commit()
+        db.close()
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs",
+            headers=headers,
+        )
+        assert resp.status_code == 400
+
+    def test_dialogs_other_user_404(self, client, db_session, monkeypatch):
+        user1 = _create_user(db_session, telegram_id=8004)
+        user2 = _create_user(db_session, telegram_id=8005)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380508004004"},
+            headers=_auth_headers(user1),
+        )
+        account_id = create_resp.json()["id"]
+        _setup_active_account(db_session, user1, account_id)
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs",
+            headers=_auth_headers(user2),
+        )
+        assert resp.status_code == 404
+
+
+# ─── GET /tg-accounts/{id}/dialogs/{chat_id}/messages ────────────────
+
+
+class TestGetChatMessages:
+    def test_messages_success(self, client, db_session, monkeypatch):
+        user = _create_user(db_session, telegram_id=9001)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380509001001"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+        _setup_active_account(db_session, user, account_id)
+
+        mock_client = _make_mock_client(messages=[
+            _make_message(msg_id=1, text="Hello"),
+            _make_message(msg_id=2, text="World"),
+        ])
+        monkeypatch.setattr(
+            "app.api.v1.tg_accounts.create_tg_account_client",
+            lambda *a, **kw: mock_client,
+        )
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs/12345/messages",
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["id"] == 1
+        assert data[0]["text"] == "Hello"
+        assert data[0]["from_user"]["name"] == "Alice"
+        assert data[1]["id"] == 2
+        assert data[1]["text"] == "World"
+
+    def test_messages_rejects_new_account(self, client, db_session):
+        user = _create_user(db_session, telegram_id=9002)
+        headers = _auth_headers(user)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380509002002"},
+            headers=headers,
+        )
+        account_id = create_resp.json()["id"]
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs/12345/messages",
+            headers=headers,
+        )
+        assert resp.status_code == 400
+
+    def test_messages_other_user_404(self, client, db_session, monkeypatch):
+        user1 = _create_user(db_session, telegram_id=9003)
+        user2 = _create_user(db_session, telegram_id=9004)
+        create_resp = client.post(
+            "/api/v1/tg-accounts",
+            json={"phone": "+380509003003"},
+            headers=_auth_headers(user1),
+        )
+        account_id = create_resp.json()["id"]
+        _setup_active_account(db_session, user1, account_id)
+
+        resp = client.get(
+            f"/api/v1/tg-accounts/{account_id}/dialogs/12345/messages",
+            headers=_auth_headers(user2),
+        )
+        assert resp.status_code == 404
