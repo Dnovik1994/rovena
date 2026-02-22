@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import sentry_sdk
 from celery.exceptions import SoftTimeLimitExceeded
 from pyrogram.errors import (
+    BadRequest,
     ChatWriteForbidden,
     FloodWait,
     PeerFlood,
@@ -306,12 +307,15 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
         if not task_data:
             break  # No more pending tasks
 
-        # Preload telegram_ids for all tasks
-        tg_user_map: dict[int, int] = {}
+        # Preload telegram user data (with access_hash) for all tasks
+        tg_user_map: dict[int, dict] = {}
         with SessionLocal() as db:
             tg_user_ids = [td["tg_user_id"] for td in task_data]
             tg_users = db.query(TgUser).filter(TgUser.id.in_(tg_user_ids)).all()
-            tg_user_map = {u.id: u.telegram_id for u in tg_users}
+            tg_user_map = {
+                u.id: {"telegram_id": u.telegram_id, "access_hash": u.access_hash, "username": u.username}
+                for u in tg_users
+            }
 
         # Build TG client for this account
         with SessionLocal() as db:
@@ -423,9 +427,9 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                         continue
 
                     task_id = td["task_id"]
-                    telegram_id = tg_user_map.get(td["tg_user_id"])
+                    tg_user_info = tg_user_map.get(td["tg_user_id"])
 
-                    if not telegram_id:
+                    if not tg_user_info:
                         with SessionLocal() as db:
                             task = db.get(InviteTask, task_id)
                             if task:
@@ -435,11 +439,29 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 db.commit()
                         continue
 
-                    # Resolve user peer cache before invite
+                    telegram_id = tg_user_info["telegram_id"]
+                    access_hash = tg_user_info["access_hash"]
+                    tg_username = tg_user_info["username"]
+
+                    if not access_hash:
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, task_id)
+                            if task:
+                                task.status = InviteTaskStatus.skipped
+                                task.error_message = "No access_hash"
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                        continue
+
+                    # Warm peer cache; fallback to username if resolve by ID fails
                     try:
-                        await asyncio.wait_for(client.get_users(telegram_id), timeout=5)
+                        await asyncio.wait_for(client.resolve_peer(telegram_id), timeout=5)
                     except Exception:
-                        pass  # If unresolvable — add_chat_members will raise
+                        if tg_username:
+                            try:
+                                await asyncio.wait_for(client.resolve_peer(tg_username), timeout=5)
+                            except Exception:
+                                pass
 
                     # Perform the invite (no DB session held)
                     try:
@@ -563,6 +585,35 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                             f"📋 Кампания: {campaign_name}\n"
                             f"📝 {error_name}\n"
                             f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+
+                    except BadRequest as exc:
+                        if "PEER_ID_INVALID" in str(exc):
+                            logger.info(
+                                "invite_dispatch: PEER_ID_INVALID task=%d — peer unknown to account=%d, skipping",
+                                task_id, acct_id,
+                            )
+                            with SessionLocal() as db:
+                                task = db.get(InviteTask, task_id)
+                                if task:
+                                    task.status = InviteTaskStatus.skipped
+                                    task.error_message = "Peer unknown to this account"
+                                    task.completed_at = datetime.now(timezone.utc)
+                                    db.commit()
+                            continue
+                        # Non-PEER_ID_INVALID BadRequest — treat as generic error
+                        sentry_sdk.capture_exception(exc)
+                        logger.error(
+                            "invite_dispatch: BadRequest task=%d: %s",
+                            task_id, str(exc)[:200],
+                        )
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, task_id)
+                            if task:
+                                task.status = InviteTaskStatus.failed
+                                task.error_message = str(exc)[:500]
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                            _atomic_increment(db, campaign_id, "invites_failed")
 
                     except Exception as exc:  # noqa: BLE001
                         sentry_sdk.capture_exception(exc)
