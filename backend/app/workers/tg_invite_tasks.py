@@ -15,7 +15,7 @@ from pyrogram.errors import (
     UserBannedInChannel,
     UserPrivacyRestricted,
 )
-from sqlalchemy import update
+from sqlalchemy import or_, update
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
 from app.services.notification_service import send_notification_sync
@@ -190,7 +190,10 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
             .filter(
                 TelegramAccount.owner_user_id == owner_id,
                 TelegramAccount.status == TelegramAccountStatus.active,
-                TelegramAccount.warming_day >= 15,  # only fully warmed-up accounts
+                or_(
+                    TelegramAccount.warming_day >= 15,
+                    TelegramAccount.is_trusted == True,  # noqa: E712
+                ),
             )
             .order_by(TelegramAccount.id.asc())
             .limit(max_accounts)
@@ -604,6 +607,13 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
 )
 def invite_campaign_dispatch(self, campaign_id: int) -> None:
     """Celery entry point for invite campaign dispatch."""
+    from app.workers.tg_warming_helpers import is_quiet_hours
+
+    if is_quiet_hours():
+        logger.info("Quiet hours active, rescheduling invite campaign %s", campaign_id)
+        invite_campaign_dispatch.apply_async(args=[campaign_id], countdown=1800)
+        return
+
     logger.info(
         "invite_campaign_dispatch started | task_id=%s campaign_id=%d",
         self.request.id, campaign_id,
