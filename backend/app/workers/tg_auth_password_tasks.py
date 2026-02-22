@@ -90,6 +90,17 @@ async def _run_confirm_password(account_id: int, flow_id: str, password: str) ->
             _broadcast_flow_update(flow, account_id, account.owner_user_id)
             return
 
+        if not account.session_encrypted:
+            log.error("event=confirm_password_no_session %s", ctx)
+            flow.state = AuthFlowState.failed
+            flow.last_error = "No session saved from auth step. Please restart auth flow."
+            account.status = TelegramAccountStatus.error
+            account.last_error = "No session for 2FA. Please resend code."
+            db.commit()
+            _broadcast_account_update(account)
+            _broadcast_flow_update(flow, account_id, account.owner_user_id)
+            return
+
         proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
 
         client = None
