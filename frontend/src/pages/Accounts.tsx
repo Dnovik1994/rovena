@@ -678,6 +678,16 @@ const Accounts = (): JSX.Element => {
                       </button>
                     </Link>
                   )}
+                  {["verified", "active"].includes(account.status) && (
+                    <Link
+                      to={`/accounts/${account.id}/dialogs`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button className="rounded-lg border border-indigo-700 px-3 py-1 text-xs font-semibold text-indigo-300">
+                        Диалоги
+                      </button>
+                    </Link>
+                  )}
                   {canHealthCheck(account.status) && (
                     <button
                       type="button"

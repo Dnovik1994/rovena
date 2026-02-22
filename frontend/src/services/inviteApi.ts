@@ -65,3 +65,49 @@ export const pauseInviteCampaign = (token: string, id: number) =>
 
 export const resumeInviteCampaign = (token: string, id: number) =>
   apiFetch<InviteCampaign>(`/invite-campaigns/${id}/resume`, { method: "POST" }, token);
+
+// Account dialogs & messages
+export interface Dialog {
+  chat_id: number;
+  title: string;
+  username: string | null;
+  type: "private" | "group" | "supergroup" | "channel" | "bot";
+  unread_count: number;
+  last_message: {
+    text: string | null;
+    date: string | null;
+    from: string | null;
+  } | null;
+  members_count: number | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  text: string;
+  date: string | null;
+  from_user: {
+    id: number;
+    name: string;
+    username: string | null;
+  } | null;
+  media_type: string | null;
+  reply_to_message_id: number | null;
+}
+
+export const fetchDialogs = (token: string, accountId: number) =>
+  apiFetch<Dialog[]>(`/tg-accounts/${accountId}/dialogs?limit=200`, {}, token);
+
+export const fetchMessages = (
+  token: string,
+  accountId: number,
+  chatId: number,
+  limit = 50,
+  offsetId = 0,
+) => {
+  const params = `limit=${limit}${offsetId ? `&offset_id=${offsetId}` : ""}`;
+  return apiFetch<ChatMessage[]>(
+    `/tg-accounts/${accountId}/dialogs/${chatId}/messages?${params}`,
+    {},
+    token,
+  );
+};
