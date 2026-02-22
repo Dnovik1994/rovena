@@ -5,13 +5,16 @@ import Toast from "./Toast";
 const navItems = [
   { to: "/", label: "Главная" },
   { to: "/accounts", label: "Аккаунты" },
-  { to: "/projects", label: "Projects" },
-  { to: "/sources", label: "Sources" },
-  { to: "/targets", label: "Targets" },
+  // TODO: временно скрыто, вернуть после доработки
+  // { to: "/projects", label: "Projects" },
+  // { to: "/sources", label: "Sources" },
+  // { to: "/targets", label: "Targets" },
   { to: "/contacts", label: "Контакты" },
-  { to: "/campaigns", label: "Campaigns" },
+  // TODO: временно скрыто, вернуть после доработки
+  // { to: "/campaigns", label: "Campaigns" },
   { to: "/invite-campaigns", label: "Инвайтер" },
-  { to: "/subscription", label: "Подписка" },
+  // TODO: временно скрыто, вернуть после доработки
+  // { to: "/subscription", label: "Подписка" },
 ];
 
 interface AppShellProps {
