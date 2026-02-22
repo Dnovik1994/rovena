@@ -111,7 +111,7 @@ export const stopCampaign = (token: string, id: number): Promise<Campaign> => {
 };
 
 export const fetchAccounts = (token: string): Promise<Account[]> => {
-  return apiFetch<Account[]>("/accounts", {}, token);
+  return apiFetch<Account[]>("/tg-accounts", {}, token);
 };
 
 export const createAccount = (
@@ -126,22 +126,22 @@ export const createAccount = (
   }
 ): Promise<Account> => {
   return apiFetch<Account>(
-    "/accounts",
+    "/tg-accounts",
     { method: "POST", body: JSON.stringify(data) },
     token
   );
 };
 
 export const startAccountWarming = (token: string, id: number): Promise<Account> => {
-  return apiFetch<Account>(`/accounts/${id}/start-warming`, { method: "POST" }, token);
+  return apiFetch<Account>(`/tg-accounts/${id}/start-warming`, { method: "POST" }, token);
 };
 
 export const regenerateDeviceConfig = (token: string, id: number): Promise<Account> => {
-  return apiFetch<Account>(`/accounts/${id}/regenerate-device`, { method: "POST" }, token);
+  return apiFetch<Account>(`/tg-accounts/${id}/regenerate-device`, { method: "POST" }, token);
 };
 
 export const verifyAccount = (token: string, id: number): Promise<AccountVerifyResponse> => {
-  return apiFetch<AccountVerifyResponse>(`/accounts/${id}/verify`, { method: "POST" }, token);
+  return apiFetch<AccountVerifyResponse>(`/tg-accounts/${id}/verify`, { method: "POST" }, token);
 };
 
 // ─── Telegram Accounts (new OTP flow) ───────────────────────────────
