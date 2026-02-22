@@ -4,6 +4,7 @@ All endpoints use synchronous ``def`` so FastAPI runs them in a threadpool,
 keeping the async event loop free for WebSocket / background tasks.
 """
 
+import asyncio
 import logging
 import random
 import threading
@@ -18,10 +19,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_tariff_limits
 from app.clients.device_generator import generate_device_config
+from app.clients.telegram_client import create_tg_account_client
 from app.core.database import get_db
 from app.core.rbac import require_permission
 from app.core.rate_limit import limiter
 from app.core.settings import get_settings
+from app.models.proxy import Proxy
 from app.models.telegram_account import TelegramAccount, TelegramAccountStatus
 from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.models.tg_account_chat import TgAccountChat
@@ -977,3 +980,102 @@ def list_chat_members(
         }
         for user, member in members
     ]
+
+
+# ─── DIALOGS (live from Telegram) ────────────────────────────────────
+
+
+@router.get("/{account_id}/dialogs")
+async def get_account_dialogs(
+    account_id: int,
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: User = Depends(require_permission("tg_accounts", "read")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Загружает ВСЕ диалоги аккаунта напрямую из Telegram API.
+    Включает личные чаты, группы, каналы, ботов."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    if account.status not in (TelegramAccountStatus.active, TelegramAccountStatus.verified):
+        raise HTTPException(400, "Account must be active or verified")
+    if not account.session_encrypted:
+        raise HTTPException(400, "No session")
+
+    proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+    client = create_tg_account_client(account, proxy)
+
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+
+        dialogs: list[dict] = []
+        async for dialog in client.get_dialogs(limit=limit):
+            chat = dialog.chat
+            dialogs.append({
+                "chat_id": chat.id,
+                "title": chat.title or chat.first_name or "Unknown",
+                "username": getattr(chat, "username", None),
+                "type": chat.type.value,
+                "unread_count": dialog.unread_messages_count,
+                "last_message": {
+                    "text": (dialog.top_message.text or dialog.top_message.caption or "")[:200] if dialog.top_message else None,
+                    "date": dialog.top_message.date.isoformat() if dialog.top_message and dialog.top_message.date else None,
+                    "from": dialog.top_message.from_user.first_name if dialog.top_message and dialog.top_message.from_user else None,
+                } if dialog.top_message else None,
+                "members_count": getattr(chat, "members_count", None),
+            })
+
+        return dialogs
+    finally:
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=10)
+        except Exception:
+            pass
+
+
+# ─── CHAT MESSAGES (live from Telegram) ──────────────────────────────
+
+
+@router.get("/{account_id}/dialogs/{chat_id}/messages")
+async def get_chat_messages(
+    account_id: int,
+    chat_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset_id: int = Query(default=0),
+    current_user: User = Depends(require_permission("tg_accounts", "read")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Читает последние сообщения из чата."""
+    account = _get_account_or_404(db, account_id, current_user)
+
+    if account.status not in (TelegramAccountStatus.active, TelegramAccountStatus.verified):
+        raise HTTPException(400, "Account must be active or verified")
+    if not account.session_encrypted:
+        raise HTTPException(400, "No session")
+
+    proxy = db.get(Proxy, account.proxy_id) if account.proxy_id else None
+    client = create_tg_account_client(account, proxy)
+
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+
+        messages: list[dict] = []
+        async for msg in client.get_chat_history(chat_id, limit=limit, offset_id=offset_id):
+            messages.append({
+                "id": msg.id,
+                "text": msg.text or msg.caption or "",
+                "date": msg.date.isoformat() if msg.date else None,
+                "from_user": {
+                    "id": msg.from_user.id,
+                    "name": msg.from_user.first_name or "",
+                    "username": msg.from_user.username,
+                } if msg.from_user else None,
+                "media_type": msg.media.value if msg.media else None,
+                "reply_to_message_id": msg.reply_to_message_id,
+            })
+
+        return messages
+    finally:
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=10)
+        except Exception:
+            pass

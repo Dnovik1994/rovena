@@ -16,6 +16,7 @@ POLICY: dict[str, dict[str, list[str]]] = {
     },
     "tg_accounts": {
         "list": ["user", "admin", "superadmin"],
+        "read": ["user", "admin", "superadmin"],
         "create": ["user", "admin", "superadmin"],
         "update": ["user", "admin", "superadmin"],
         "delete": ["user", "admin", "superadmin"],
