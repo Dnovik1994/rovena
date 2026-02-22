@@ -133,6 +133,7 @@ def create_test_tg_account(
     owner_id: int,
     *,
     status: TelegramAccountStatus = TelegramAccountStatus.active,
+    warming_day: int = 15,
 ) -> TelegramAccount:
     seq = _next_seq()
     account = TelegramAccount(
@@ -140,6 +141,7 @@ def create_test_tg_account(
         tg_user_id=200_000 + seq,
         phone_e164=f"+1{seq:010d}",
         status=status,
+        warming_day=warming_day,
     )
     db.add(account)
     db.commit()
@@ -231,6 +233,10 @@ def patch_dispatch(monkeypatch):
         tg_invite_tasks.invite_campaign_dispatch, "apply_async",
         lambda *args, **kwargs: reschedule_calls.append({"args": args, "kwargs": kwargs}),
     )
+
+    # Stub out WebSocket broadcasts (no Redis in tests)
+    from app.services.websocket_manager import manager
+    monkeypatch.setattr(manager, "broadcast_sync", lambda payload: None)
 
     return types.SimpleNamespace(
         client=dummy_client,

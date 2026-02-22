@@ -41,6 +41,55 @@ def _atomic_increment(db, campaign_id: int, field_name: str) -> None:
     db.commit()
 
 
+def _broadcast_invite_progress(campaign_id: int, owner_id: int, db) -> None:
+    """Send invite campaign progress via WebSocket."""
+    campaign = db.get(InviteCampaign, campaign_id)
+    if not campaign:
+        return
+    total = db.query(InviteTask).filter(InviteTask.campaign_id == campaign_id).count()
+    from app.services.websocket_manager import manager
+
+    manager.broadcast_sync({
+        "type": "invite_campaign_progress",
+        "user_id": owner_id,
+        "campaign_id": campaign_id,
+        "invites_completed": campaign.invites_completed,
+        "invites_failed": campaign.invites_failed,
+        "total_tasks": total,
+        "status": campaign.status.value,
+    })
+
+
+def _broadcast_invite_error(campaign_id: int, owner_id: int, account_id: int, error_type: str) -> None:
+    """Send invite campaign error via WebSocket."""
+    from app.services.websocket_manager import manager
+
+    manager.broadcast_sync({
+        "type": "invite_campaign_error",
+        "user_id": owner_id,
+        "campaign_id": campaign_id,
+        "account_id": account_id,
+        "error_type": error_type,
+    })
+
+
+def _broadcast_invite_completed(campaign_id: int, owner_id: int, db) -> None:
+    """Send invite campaign completed via WebSocket."""
+    campaign = db.get(InviteCampaign, campaign_id)
+    if not campaign:
+        return
+    from app.services.websocket_manager import manager
+
+    manager.broadcast_sync({
+        "type": "invite_campaign_completed",
+        "user_id": owner_id,
+        "campaign_id": campaign_id,
+        "invites_completed": campaign.invites_completed,
+        "invites_failed": campaign.invites_failed,
+        "status": "completed",
+    })
+
+
 async def _resolve_target_chat_id(client, target_link: str) -> int:
     """Resolve target_link to a numeric chat_id.
 
@@ -132,6 +181,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
             .filter(
                 TelegramAccount.owner_user_id == owner_id,
                 TelegramAccount.status == TelegramAccountStatus.active,
+                TelegramAccount.warming_day >= 15,  # only fully warmed-up accounts
             )
             .order_by(TelegramAccount.id.asc())
             .limit(max_accounts)
@@ -168,7 +218,8 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                 )
             else:
                 logger.warning(
-                    "invite_dispatch: no accounts available (active or cooldown) "
+                    "invite_dispatch: No warmed-up accounts available "
+                    "(status=active, warming_day>=15) "
                     "for owner_id=%d campaign=%d — marking as error",
                     owner_id, campaign_id,
                 )
@@ -360,6 +411,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
                             _atomic_increment(db, campaign_id, "invites_completed")
+                            _broadcast_invite_progress(campaign_id, owner_id, db)
 
                     except UserAlreadyParticipant:
                         with SessionLocal() as db:
@@ -390,6 +442,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 account.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=exc.value)
                                 db.commit()
                         account_broke = True
+                        _broadcast_invite_error(campaign_id, owner_id, acct_id, "FloodWait")
 
                     except PeerFlood as exc:
                         sentry_sdk.capture_exception(exc)
@@ -407,6 +460,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 account.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
                                 db.commit()
                         account_broke = True
+                        _broadcast_invite_error(campaign_id, owner_id, acct_id, "PeerFlood")
 
                     except UserPrivacyRestricted as exc:
                         sentry_sdk.capture_exception(exc)
@@ -472,6 +526,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
             campaign.completed_at = datetime.now(timezone.utc)
             db.commit()
             logger.info("invite_dispatch: campaign %d completed", campaign_id)
+            _broadcast_invite_completed(campaign_id, owner_id, db)
         elif campaign.status == InviteCampaignStatus.active:
             db.commit()
             # Reschedule for next dispatch round
@@ -518,3 +573,27 @@ def invite_campaign_dispatch(self, campaign_id: int) -> None:
                     )
                 else:
                     db.commit()
+
+
+@celery_app.task(soft_time_limit=60, time_limit=90)
+def cleanup_orphan_invite_tasks():
+    """Reset stuck in_progress invite tasks back to pending."""
+    with SessionLocal() as db:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+        orphans = (
+            db.query(InviteTask)
+            .filter(
+                InviteTask.status == InviteTaskStatus.in_progress,
+                InviteTask.attempted_at < cutoff,
+            )
+            .all()
+        )
+
+        for task in orphans:
+            task.status = InviteTaskStatus.pending
+            task.account_id = None
+            task.attempted_at = None
+
+        if orphans:
+            db.commit()
+            logger.warning("Cleaned up %d orphan invite tasks", len(orphans))
