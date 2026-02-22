@@ -7,6 +7,7 @@ import type {
   CreateInviteCampaign,
   ParsedContactsSummary,
   AdminChat,
+  LeadsResponse,
 } from "../types/invite";
 
 // Account chats
@@ -38,6 +39,19 @@ export const parseChat = (token: string, accountId: number, chatId: number) =>
 // Parsed contacts
 export const fetchParsedContactsSummary = (token: string) =>
   apiFetch<ParsedContactsSummary>("/parsed-contacts/summary", {}, token);
+
+// Leads
+export const fetchLeads = (
+  token: string,
+  params: { page?: number; per_page?: number; search?: string } = {},
+) => {
+  const qp = new URLSearchParams();
+  if (params.page) qp.set("page", String(params.page));
+  if (params.per_page) qp.set("per_page", String(params.per_page));
+  if (params.search) qp.set("search", params.search);
+  const qs = qp.toString();
+  return apiFetch<LeadsResponse>(`/leads${qs ? `?${qs}` : ""}`, {}, token);
+};
 
 // Admin chats (where user is admin)
 export const fetchMyAdminChats = (token: string) =>

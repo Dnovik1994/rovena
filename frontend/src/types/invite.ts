@@ -75,3 +75,21 @@ export interface AdminChat {
   chat_type: string;
   members_count: number;
 }
+
+export interface LeadItem {
+  id: number;
+  telegram_id: number;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  last_online_at: string | null;
+  is_premium: boolean;
+}
+
+export interface LeadsResponse {
+  total: number;
+  page: number;
+  per_page: number;
+  items: LeadItem[];
+}

@@ -4,10 +4,11 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, func
+from sqlalchemy import String, case, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
+from app.core.rbac import require_permission
 from app.core.database import get_db
 from app.models.invite_campaign import InviteCampaign, InviteCampaignStatus
 from app.models.invite_task import InviteTask, InviteTaskStatus
@@ -28,6 +29,60 @@ from app.schemas.invite_campaign import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["invite-campaigns"])
+
+
+# ---------------------------------------------------------------------------
+# GET /leads — list all parsed users (leads)
+# ---------------------------------------------------------------------------
+@router.get("/leads")
+def get_leads(
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=200),
+    search: str = Query(default=""),
+    current_user: User = Depends(require_permission("tg_accounts", "read")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Список всех спарсенных пользователей (лидов)."""
+    query = db.query(TgUser).filter(
+        TgUser.is_bot.is_(False),
+        TgUser.is_deleted.is_(False),
+    )
+
+    if search:
+        query = query.filter(
+            or_(
+                TgUser.username.ilike(f"%{search}%"),
+                TgUser.first_name.ilike(f"%{search}%"),
+                cast(TgUser.telegram_id, String).ilike(f"%{search}%"),
+            )
+        )
+
+    total = query.count()
+    users = (
+        query.order_by(TgUser.last_online_at.desc().nullslast())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "items": [
+            {
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "phone": u.phone,
+                "last_online_at": u.last_online_at.isoformat() if u.last_online_at else None,
+                "is_premium": u.is_premium,
+            }
+            for u in users
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
