@@ -210,6 +210,31 @@ def create_invite_campaign(
         .filter(TelegramAccount.owner_user_id == current_user.id)
         .filter(TelegramAccount.tg_user_id.isnot(None)).all()]
 
+    # --- Cross-campaign deduplication ---
+    # Determine target_chat_id to use for dedup (may differ from payload value)
+    dedup_target_chat_id = payload.target_chat_id
+    if payload.target_link and not dedup_target_chat_id:
+        # Try to find target_chat_id from a previous campaign with the same link
+        prev_campaign = db.query(InviteCampaign).filter(
+            InviteCampaign.target_link == payload.target_link,
+            InviteCampaign.target_chat_id.isnot(None),
+        ).first()
+        if prev_campaign:
+            dedup_target_chat_id = prev_campaign.target_chat_id
+
+    # Subquery: tg_user_ids already successfully invited to the same target
+    already_invited_subq = None
+    if dedup_target_chat_id:
+        already_invited_subq = (
+            db.query(InviteTask.tg_user_id)
+            .join(InviteCampaign, InviteTask.campaign_id == InviteCampaign.id)
+            .filter(
+                InviteCampaign.target_chat_id == dedup_target_chat_id,
+                InviteTask.status == InviteTaskStatus.success,
+            )
+            .subquery()
+        )
+
     # Build members query depending on source_chat_id
     if payload.source_chat_id is not None:
         # Select tg_users from a specific chat
@@ -222,6 +247,10 @@ def create_invite_campaign(
         )
         if own_tg_ids:
             members_query = members_query.filter(~TgUser.telegram_id.in_(own_tg_ids))
+        if already_invited_subq is not None:
+            members_query = members_query.filter(
+                ~TgChatMember.user_id.in_(db.query(already_invited_subq.c.tg_user_id))
+            )
         members_query = members_query.order_by(
                 case((TgUser.last_online_at.is_(None), 1), else_=0),
                 TgUser.last_online_at.desc(),
@@ -246,6 +275,10 @@ def create_invite_campaign(
         )
         if own_tg_ids:
             members_query = members_query.filter(~TgUser.telegram_id.in_(own_tg_ids))
+        if already_invited_subq is not None:
+            members_query = members_query.filter(
+                ~TgUser.id.in_(db.query(already_invited_subq.c.tg_user_id))
+            )
         members_query = members_query.group_by(TgUser.id).order_by(
                 case((func.max(TgUser.last_online_at).is_(None), 1), else_=0),
                 func.max(TgUser.last_online_at).desc(),
