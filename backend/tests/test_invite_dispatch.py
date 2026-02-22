@@ -286,7 +286,7 @@ def test_smoke_single_task_completed(patch_dispatch):
 
 
 def test_multiple_tasks_all_completed(patch_dispatch):
-    """5 pending tasks → all succeed → campaign completed, invites_completed=5."""
+    """3 pending tasks (within batch_size) → all succeed → campaign completed, invites_completed=3."""
     with SessionLocal() as db:
         user = create_test_user(db)
         account = create_test_tg_account(db, user.id)
@@ -294,7 +294,7 @@ def test_multiple_tasks_all_completed(patch_dispatch):
         campaign_id = campaign.id
 
         task_ids = []
-        for i in range(5):
+        for i in range(3):
             tg_user = create_test_tg_user(db, telegram_id=400_001 + i)
             task = create_test_invite_task(db, campaign.id, tg_user.id)
             task_ids.append(task.id)
@@ -302,7 +302,7 @@ def test_multiple_tasks_all_completed(patch_dispatch):
     asyncio.run(_run_invite_campaign_dispatch(campaign_id))
 
     with SessionLocal() as db:
-        # All 5 tasks should be success
+        # All 3 tasks should be success
         for tid in task_ids:
             task = db.get(InviteTask, tid)
             assert task.status == InviteTaskStatus.success, f"task {tid} status={task.status}"
@@ -310,10 +310,10 @@ def test_multiple_tasks_all_completed(patch_dispatch):
 
         campaign = db.get(InviteCampaign, campaign_id)
         assert campaign.status == InviteCampaignStatus.completed
-        assert campaign.invites_completed == 5
+        assert campaign.invites_completed == 3
         assert campaign.completed_at is not None
 
-    assert patch_dispatch.client.add_chat_members_calls == 5
+    assert patch_dispatch.client.add_chat_members_calls == 3
     assert len(patch_dispatch.reschedule_calls) == 0
 
 
@@ -350,7 +350,8 @@ def test_flood_wait_sets_cooldown_and_reschedules(patch_dispatch):
 
     # Reschedule must have been called
     assert len(patch_dispatch.reschedule_calls) == 1
-    assert patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"] == 60
+    # countdown = max(int(3600 / invites_per_hour), 60) = max(120, 60) = 120
+    assert patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"] == 120
     # Sentry should capture the exception
     assert len(patch_dispatch.sentry_calls) == 1
 
@@ -549,7 +550,8 @@ def test_partial_progress_reschedule(patch_dispatch):
 
     # Reschedule called
     assert len(patch_dispatch.reschedule_calls) == 1
-    assert patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"] == 60
+    # countdown = max(int(3600 / invites_per_hour), 60) = max(120, 60) = 120
+    assert patch_dispatch.reschedule_calls[0]["kwargs"]["countdown"] == 120
     # Sentry captured FloodWait
     assert len(patch_dispatch.sentry_calls) == 1
 

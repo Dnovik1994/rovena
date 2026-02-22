@@ -7,7 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 import sentry_sdk
 from celery.exceptions import SoftTimeLimitExceeded
-from pyrogram.errors import FloodWait, PeerFlood, UserAlreadyParticipant, UserPrivacyRestricted
+from pyrogram.errors import (
+    ChatWriteForbidden,
+    FloodWait,
+    PeerFlood,
+    UserAlreadyParticipant,
+    UserBannedInChannel,
+    UserPrivacyRestricted,
+)
 from sqlalchemy import update
 
 from app.clients.telegram_client import TelegramClientDisabledError, create_tg_account_client
@@ -259,6 +266,10 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
 
         available_slots = invites_per_hour - invites_this_hour
 
+        # Limit batch to 1-3 contacts per dispatch so that the task
+        # finishes well within the soft_time_limit even at slow rates.
+        batch_size = min(3, available_slots)
+
         # Fetch pending tasks atomically with SELECT FOR UPDATE SKIP LOCKED
         with SessionLocal() as db:
             pending_tasks = (
@@ -268,7 +279,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                     InviteTask.status == InviteTaskStatus.pending,
                 )
                 .order_by(InviteTask.id.asc())
-                .limit(available_slots)
+                .limit(batch_size)
                 .with_for_update(skip_locked=True)
                 .all()
             )
@@ -473,6 +484,31 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 db.commit()
                             _atomic_increment(db, campaign_id, "invites_failed")
 
+                    except (UserBannedInChannel, ChatWriteForbidden) as exc:
+                        sentry_sdk.capture_exception(exc)
+                        error_name = type(exc).__name__
+                        logger.warning(
+                            "invite_dispatch: %s account_id=%d campaign=%d",
+                            error_name, acct_id, campaign_id,
+                        )
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, task_id)
+                            if task:
+                                task.status = InviteTaskStatus.failed
+                                task.error_message = error_name
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                            _atomic_increment(db, campaign_id, "invites_failed")
+                            # Mark account as cooldown — banned in target chat
+                            account = db.get(TelegramAccount, acct_id)
+                            if account:
+                                account.status = TelegramAccountStatus.cooldown
+                                account.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=24)
+                                account.last_error = f"Banned in target: {error_name}"
+                                db.commit()
+                        account_broke = True
+                        _broadcast_invite_error(campaign_id, owner_id, acct_id, error_name)
+
                     except Exception as exc:  # noqa: BLE001
                         sentry_sdk.capture_exception(exc)
                         logger.error(
@@ -529,14 +565,16 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
             _broadcast_invite_completed(campaign_id, owner_id, db)
         elif campaign.status == InviteCampaignStatus.active:
             db.commit()
-            # Reschedule for next dispatch round
+            # Reschedule for next dispatch round using the rate-based
+            # interval so we don't re-enter faster than the invite rate.
+            reschedule_countdown = max(int(3600 / invites_per_hour), 60)
             invite_campaign_dispatch.apply_async(
                 args=[campaign_id],
-                countdown=60,
+                countdown=reschedule_countdown,
             )
             logger.info(
-                "invite_dispatch: campaign %d rescheduled, %d pending / %d in_progress tasks remain",
-                campaign_id, pending_count, in_progress_count,
+                "invite_dispatch: campaign %d rescheduled in %ds, %d pending / %d in_progress tasks remain",
+                campaign_id, reschedule_countdown, pending_count, in_progress_count,
             )
 
 
