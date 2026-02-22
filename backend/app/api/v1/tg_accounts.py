@@ -44,7 +44,6 @@ from app.schemas.telegram_account import (
 from app.services.auto_assign import NoAvailableApiAppError, assign_api_app
 from app.services.websocket_manager import manager
 from app.workers.tg_auth_tasks import (
-    confirm_password_task,
     unified_auth_task,
     verify_account_task,
 )
@@ -392,7 +391,7 @@ def send_code(
         TelegramAuthFlow.state.in_([
             AuthFlowState.init, AuthFlowState.code_sent,
             AuthFlowState.wait_code, AuthFlowState.code_submitted,
-            AuthFlowState.wait_password,
+            AuthFlowState.wait_password, AuthFlowState.password_submitted,
         ]),
     ).update({"state": AuthFlowState.expired}, synchronize_session="fetch")
 
@@ -577,15 +576,19 @@ def confirm_password(
             detail="Too many attempts. Please start over.",
         )
 
-    # Dispatch to worker — fail fast if Redis is down
-    _safe_dispatch(confirm_password_task, account.id, flow.id, payload.password)
+    # Write password to flow for the running unified_auth_task to pick up
+    # (same pattern as confirm-code — no separate Celery task needed).
+    meta = flow.meta_json or {}
+    flow.meta_json = {**meta, "submitted_password": payload.password}
+    flow.state = AuthFlowState.password_submitted
+    db.commit()
 
     return ConfirmPasswordResponse(
         status=TgAccountResponse.model_validate(account).status,
         flow_id=payload.flow_id,
-        state="processing",
+        state="password_submitted",
         next_step="poll",
-        message="Verifying 2FA password...",
+        message="Password submitted, verifying...",
     )
 
 

@@ -14,6 +14,7 @@ class AuthFlowState(str, Enum):
     wait_code = "wait_code"
     code_submitted = "code_submitted"
     wait_password = "wait_password"
+    password_submitted = "password_submitted"
     done = "done"
     expired = "expired"
     failed = "failed"
