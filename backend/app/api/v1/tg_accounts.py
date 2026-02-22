@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.tz import ensure_utc, is_expired
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_tariff_limits
@@ -825,7 +826,10 @@ def trigger_parse_single_chat(
         db.query(TgAccountChat)
         .filter(
             TgAccountChat.account_id == account.id,
-            TgAccountChat.chat_id == chat_id,
+            or_(
+                TgAccountChat.id == chat_id,
+                TgAccountChat.chat_id == chat_id,
+            ),
         )
         .first()
     )
@@ -835,9 +839,9 @@ def trigger_parse_single_chat(
             detail="Chat not found for this account",
         )
 
-    _safe_dispatch(parse_single_chat, account.id, chat_id)
+    _safe_dispatch(parse_single_chat, account.id, account_chat.chat_id)
 
-    return {"status": "parsing_started", "chat_id": chat_id}
+    return {"status": "parsing_started", "chat_id": account_chat.chat_id}
 
 
 # ─── ACCOUNT CHATS ───────────────────────────────────────────────────
@@ -896,7 +900,10 @@ def list_chat_members(
         db.query(TgAccountChat)
         .filter(
             TgAccountChat.account_id == account.id,
-            TgAccountChat.chat_id == chat_id,
+            or_(
+                TgAccountChat.id == chat_id,
+                TgAccountChat.chat_id == chat_id,
+            ),
         )
         .first()
     )
@@ -918,7 +925,7 @@ def list_chat_members(
     members = (
         db.query(TgUser, TgChatMember)
         .join(TgChatMember, TgChatMember.user_id == TgUser.id)
-        .filter(TgChatMember.chat_id == chat_id)
+        .filter(TgChatMember.chat_id == account_chat.chat_id)
         .order_by(sort_col.desc())
         .offset(offset)
         .limit(limit)
