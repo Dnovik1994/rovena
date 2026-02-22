@@ -36,11 +36,9 @@ from app.models.telegram_auth_flow import AuthFlowState, TelegramAuthFlow
 from app.services.session_crypto import encrypt_session
 from app.workers import celery_app
 from app.workers.tg_auth_helpers import (
-    _PRE_AUTH_DIR,
     _broadcast_account_update,
     _broadcast_flow_update,
     _cleanup_pre_auth_session,
-    _ensure_pre_auth_dir,
     _extract_migrate_dc,
     _get_dc_id,
     _handle_floodwait,
@@ -49,13 +47,59 @@ from app.workers.tg_auth_helpers import (
     _log_client_fingerprint,
     _mark_proxy_unhealthy,
     _mask_phone,
-    _pre_auth_session_name,
     _sanitize_error,
     _set_dc_id,
 )
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+async def _export_session(client, flow_id: str, log) -> str:
+    """Export session string, falling back to file-based session read.
+
+    Pyrogram's ``export_session_string()`` works reliably for in-memory
+    sessions.  For file-based sessions it may raise *"required argument is
+    not an integer"*.  The fallback reads the SQLite session file directly
+    and packs the data into the Pyrogram session-string format.
+    """
+    try:
+        return await asyncio.wait_for(client.export_session_string(), timeout=15)
+    except Exception as exc:
+        log.warning("export_session_string failed (%s), reading from file", exc)
+
+    # Fallback: read SQLite session file directly
+    import base64
+    import sqlite3
+    import struct
+    from pathlib import Path
+
+    session_path = Path(f"/data/pyrogram_pre_auth/preauth-{flow_id}.session")
+    if not session_path.exists():
+        raise RuntimeError(f"Session file not found: {session_path}")
+
+    conn = sqlite3.connect(str(session_path))
+    try:
+        row = conn.execute(
+            "SELECT dc_id, api_id, test_mode, auth_key, date, user_id, is_bot "
+            "FROM sessions"
+        ).fetchone()
+        if not row:
+            raise RuntimeError("No session data in SQLite file")
+
+        dc_id, api_id, test_mode, auth_key, date, user_id, is_bot = row
+
+        packed = struct.pack(
+            ">B?256sI?",
+            dc_id,
+            test_mode,
+            auth_key,
+            user_id or 0,
+            is_bot or False,
+        )
+        return base64.urlsafe_b64encode(packed).decode().rstrip("=")
+    finally:
+        conn.close()
 
 
 # ─── unified_auth (single-connection send_code + sign_in) ───────────
@@ -93,13 +137,15 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
             log.info("event=unified_auth_started %s", ctx)
 
             # ── Phase 1: Create client & connect (ONCE) ──────────────
+            # Use in_memory=True (default) — unified auth keeps the
+            # connection alive in a single task, so file persistence
+            # is unnecessary.  File-based sessions caused
+            # export_session_string() to crash with "required argument
+            # is not an integer" in Pyrogram 2.0.106.
             t_client = time.monotonic()
-            _ensure_pre_auth_dir()
             client = create_tg_account_client(
                 account, proxy,
                 phone=phone_number,
-                workdir=str(_PRE_AUTH_DIR),
-                session_name=_pre_auth_session_name(flow_id),
             )
             log.info(
                 "event=client_created %s elapsed_ms=%d",
@@ -250,7 +296,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     )
 
                     # ── Success — save session ──
-                    session_string = await asyncio.wait_for(client.export_session_string(), timeout=15)
+                    session_string = await _export_session(client, flow_id, log)
                     account.session_encrypted = encrypt_session(session_string)
                     account.tg_user_id = signed_in.id
                     account.tg_username = getattr(signed_in, "username", None)
@@ -285,9 +331,7 @@ async def _run_unified_auth(account_id: int, flow_id: str) -> None:
                     # Session export is MANDATORY for confirm_password_task.
                     # Without it, confirm_password creates a new auth_key → session_revoked.
                     try:
-                        session_string = await asyncio.wait_for(
-                            client.export_session_string(), timeout=15,
-                        )
+                        session_string = await _export_session(client, flow_id, log)
                         account.session_encrypted = encrypt_session(session_string)
                         log.info("event=2fa_session_exported %s", ctx)
                     except Exception as sess_err:
