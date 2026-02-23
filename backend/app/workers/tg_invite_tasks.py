@@ -415,6 +415,18 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                         db.commit()
                     continue
 
+                # Fetch existing members of target chat
+                existing_member_ids: set[int] = set()
+                existing_member_usernames: set[str] = set()
+                try:
+                    async for member in client.get_chat_members(target_chat_id):
+                        existing_member_ids.add(member.user.id)
+                        if member.user.username:
+                            existing_member_usernames.add(member.user.username.lower())
+                    logger.info("invite_dispatch: target chat has %d existing members", len(existing_member_ids))
+                except Exception as exc:
+                    logger.warning("invite_dispatch: cannot fetch target members: %s", exc)
+
                 for td in task_data:
                     if account_broke:
                         # Revert remaining tasks to pending
@@ -442,6 +454,28 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                     telegram_id = tg_user_info["telegram_id"]
                     access_hash = tg_user_info["access_hash"]
                     tg_username = tg_user_info["username"]
+
+                    # Check if user is already in target chat (by telegram_id)
+                    if telegram_id and telegram_id in existing_member_ids:
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, task_id)
+                            if task:
+                                task.status = InviteTaskStatus.skipped
+                                task.error_message = "Already in target chat"
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                        continue
+
+                    # Check by username if telegram_id wasn't found among members
+                    if tg_username and tg_username.lower() in existing_member_usernames:
+                        with SessionLocal() as db:
+                            task = db.get(InviteTask, task_id)
+                            if task:
+                                task.status = InviteTaskStatus.skipped
+                                task.error_message = "Already in target chat (by username)"
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                        continue
 
                     if not access_hash:
                         with SessionLocal() as db:
