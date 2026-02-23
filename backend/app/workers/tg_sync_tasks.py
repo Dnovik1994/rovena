@@ -185,7 +185,9 @@ async def _run_sync_account(account_id: int) -> None:
         try:
             async with client:
                 dialogs = await collect_async_gen(client.get_dialogs(), timeout=120)
+                # Collect non-private chats from dialogs
                 chat_count = 0
+                synced_chats: list[tuple[int, str]] = []  # (chat_id, chat_type)
                 for dialog in dialogs:
                     chat = dialog.chat
                     if not chat:
@@ -207,19 +209,7 @@ async def _run_sync_account(account_id: int) -> None:
                     else:
                         continue
 
-                    # Determine admin/creator status
-                    is_creator = False
-                    is_admin = False
-                    if hasattr(dialog, "top_message") and hasattr(chat, "permissions"):
-                        pass  # defaults
-                    # Use chat attributes if available
-                    if getattr(chat, "is_creator", False):
-                        is_creator = True
-                        is_admin = True
-                    elif getattr(chat, "is_admin", False):
-                        is_admin = True
-
-                    # Upsert tg_account_chats
+                    # Upsert tg_account_chats (admin status will be updated below)
                     try:
                         existing_chat = db.query(TgAccountChat).filter(
                             TgAccountChat.account_id == account_id,
@@ -230,7 +220,6 @@ async def _run_sync_account(account_id: int) -> None:
                             existing_chat.title = chat.title
                             existing_chat.username = chat.username
                             existing_chat.members_count = getattr(chat, "members_count", None)
-                            existing_chat.is_admin = is_admin
                             existing_chat.updated_at = datetime.now(timezone.utc)
                         else:
                             new_chat = TgAccountChat(
@@ -240,8 +229,8 @@ async def _run_sync_account(account_id: int) -> None:
                                 username=chat.username,
                                 chat_type=chat_type,
                                 members_count=getattr(chat, "members_count", None),
-                                is_creator=is_creator,
-                                is_admin=is_admin,
+                                is_creator=False,
+                                is_admin=False,
                             )
                             db.add(new_chat)
 
@@ -252,11 +241,51 @@ async def _run_sync_account(account_id: int) -> None:
                             "event=sync_chat_duplicate account_id=%d chat_id=%d",
                             account_id, chat.id,
                         )
+
+                    synced_chats.append((chat.id, chat_type))
                     chat_count += 1
 
                 log.info(
                     "event=sync_chats_done account_id=%d synced=%d",
                     account_id, chat_count,
+                )
+
+                # ── Determine admin status via get_chat_member ────────
+                for chat_id, chat_type in synced_chats:
+                    is_admin = False
+                    is_creator = False
+                    try:
+                        me = await asyncio.wait_for(
+                            client.get_chat_member(chat_id, "me"),
+                            timeout=5,
+                        )
+                        is_admin = me.status in (
+                            ChatMemberStatus.ADMINISTRATOR,
+                            ChatMemberStatus.OWNER,
+                        )
+                        is_creator = me.status == ChatMemberStatus.OWNER
+                    except Exception:
+                        is_admin = False
+                        is_creator = False
+
+                    try:
+                        ac = db.query(TgAccountChat).filter(
+                            TgAccountChat.account_id == account_id,
+                            TgAccountChat.chat_id == chat_id,
+                        ).first()
+                        if ac:
+                            ac.is_admin = is_admin
+                            ac.is_creator = is_creator
+                            db.commit()
+                    except Exception:
+                        db.rollback()
+
+                    # Rate limiting to avoid FloodWait
+                    await asyncio.sleep(0.3)
+
+                log.info(
+                    "event=sync_admin_status_done account_id=%d chats_checked=%d",
+                    account_id, len(synced_chats),
                 )
 
                 # ── PHASE 2: Parse group members ─────────────────────────
