@@ -59,7 +59,7 @@ def get_leads(
 
     total = query.count()
     users = (
-        query.order_by(TgUser.last_online_at.desc().nullslast())
+        query.order_by(TgUser.last_online_at.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all()
