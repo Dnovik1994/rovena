@@ -277,9 +277,9 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
 
         available_slots = invites_per_hour - invites_this_hour
 
-        # Limit batch to 1-3 contacts per dispatch so that the task
-        # finishes well within the soft_time_limit even at slow rates.
-        batch_size = min(3, available_slots)
+        # Fetch more tasks than available_slots to compensate for skips
+        # (No access_hash, Already in target chat, etc.)
+        batch_size = min(10, available_slots + 5)
 
         # Fetch pending tasks atomically with SELECT FOR UPDATE SKIP LOCKED
         with SessionLocal() as db:
@@ -415,16 +415,18 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                         db.commit()
                     continue
 
-                for td in task_data:
-                    if account_broke:
+                actual_invites = 0
+                for idx, td in enumerate(task_data):
+                    if account_broke or actual_invites >= available_slots:
                         # Revert remaining tasks to pending
-                        with SessionLocal() as db:
-                            task = db.get(InviteTask, td["task_id"])
-                            if task and task.status == InviteTaskStatus.in_progress:
-                                task.status = InviteTaskStatus.pending
-                                task.account_id = None
-                            db.commit()
-                        continue
+                        for remaining_td in task_data[idx:]:
+                            with SessionLocal() as db:
+                                task = db.get(InviteTask, remaining_td["task_id"])
+                                if task and task.status == InviteTaskStatus.in_progress:
+                                    task.status = InviteTaskStatus.pending
+                                    task.account_id = None
+                                db.commit()
+                        break
 
                     task_id = td["task_id"]
                     tg_user_info = tg_user_map.get(td["tg_user_id"])
@@ -506,6 +508,10 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 db.commit()
                             _atomic_increment(db, campaign_id, "invites_completed")
                             _broadcast_invite_progress(campaign_id, owner_id, db)
+                        actual_invites += 1
+                        # Sleep only after a real successful invite
+                        jitter = random.uniform(0.9, 1.3)
+                        await asyncio.sleep(sleep_interval * jitter)
 
                     except UserAlreadyParticipant:
                         with SessionLocal() as db:
@@ -621,6 +627,9 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                         db.commit()
                                     _atomic_increment(db, campaign_id, "invites_completed")
                                     _broadcast_invite_progress(campaign_id, owner_id, db)
+                                actual_invites += 1
+                                jitter = random.uniform(0.9, 1.3)
+                                await asyncio.sleep(sleep_interval * jitter)
                                 continue
                             except Exception as retry_err:
                                 logger.warning(
@@ -669,11 +678,6 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 task.completed_at = datetime.now(timezone.utc)
                                 db.commit()
                             _atomic_increment(db, campaign_id, "invites_failed")
-
-                    # Sleep between invites with jitter
-                    if not account_broke:
-                        jitter = random.uniform(0.9, 1.3)
-                        await asyncio.sleep(sleep_interval * jitter)
 
         except Exception as exc:  # noqa: BLE001
             sentry_sdk.capture_exception(exc)
