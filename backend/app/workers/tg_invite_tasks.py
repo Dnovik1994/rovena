@@ -464,14 +464,15 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                 pass
 
                     # Perform the invite (no DB session held)
+                    invite_target = telegram_id  # кого инвайтим
                     try:
                         try:
                             await asyncio.wait_for(
-                                client.add_chat_members(target_chat_id, [telegram_id]),
+                                client.add_chat_members(target_chat_id, [invite_target]),
                                 timeout=30,
                             )
                         except ValueError:
-                            # Peer ID invalid — retry with username if available
+                            # Peer ID invalid — retry with chat username or user username
                             if target_username_fallback:
                                 logger.info(
                                     "add_chat_members failed with ValueError for chat_id=%s, "
@@ -479,7 +480,18 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                                     target_chat_id, target_username_fallback,
                                 )
                                 await asyncio.wait_for(
-                                    client.add_chat_members(target_username_fallback, [telegram_id]),
+                                    client.add_chat_members(target_username_fallback, [invite_target]),
+                                    timeout=30,
+                                )
+                            elif tg_username:
+                                logger.info(
+                                    "add_chat_members failed with ValueError for user %s, "
+                                    "retrying with user username @%s",
+                                    telegram_id, tg_username,
+                                )
+                                invite_target = tg_username
+                                await asyncio.wait_for(
+                                    client.add_chat_members(target_chat_id, [invite_target]),
                                     timeout=30,
                                 )
                             else:
@@ -587,6 +599,34 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                             f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 
                     except BadRequest as exc:
+                        if "PEER_ID_INVALID" in str(exc) and tg_username:
+                            logger.info(
+                                "invite_dispatch: PEER_ID_INVALID task=%d, retrying with @%s",
+                                task_id, tg_username,
+                            )
+                            try:
+                                await asyncio.wait_for(
+                                    client.add_chat_members(
+                                        target_username_fallback or target_chat_id,
+                                        [tg_username],
+                                    ),
+                                    timeout=30,
+                                )
+                                # Retry succeeded
+                                with SessionLocal() as db:
+                                    task = db.get(InviteTask, task_id)
+                                    if task:
+                                        task.status = InviteTaskStatus.success
+                                        task.completed_at = datetime.now(timezone.utc)
+                                        db.commit()
+                                    _atomic_increment(db, campaign_id, "invites_completed")
+                                    _broadcast_invite_progress(campaign_id, owner_id, db)
+                                continue
+                            except Exception as retry_err:
+                                logger.warning(
+                                    "invite_dispatch: username retry also failed task=%d: %s",
+                                    task_id, retry_err,
+                                )
                         if "PEER_ID_INVALID" in str(exc):
                             logger.info(
                                 "invite_dispatch: PEER_ID_INVALID task=%d — peer unknown to account=%d, skipping",
