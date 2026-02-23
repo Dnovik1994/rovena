@@ -94,13 +94,27 @@ const InviteCampaigns = (): JSX.Element => {
   const [accounts, setAccounts] = useState<TgAccount[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
 
-  // Target chat (admin chats dropdown)
+  // Target chat (searchable dropdown)
   const [adminChats, setAdminChats] = useState<AdminChat[]>([]);
   const [selectedTargetChatId, setSelectedTargetChatId] = useState<number | null>(null);
   const [loadingAdminChats, setLoadingAdminChats] = useState(false);
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatDropdownOpen, setChatDropdownOpen] = useState(false);
+  const chatDropdownRef = useRef<HTMLDivElement>(null);
 
   // Available contacts
   const [availableContacts, setAvailableContacts] = useState<number>(0);
+
+  /* ── Close chat dropdown on outside click ─── */
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (chatDropdownRef.current && !chatDropdownRef.current.contains(e.target as Node)) {
+        setChatDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   /* ── Load campaigns ─── */
   const loadCampaigns = useCallback(async () => {
@@ -274,6 +288,8 @@ const InviteCampaigns = (): JSX.Element => {
     setFormInvitesPerHour(10);
     setSelectedAccountIds(new Set());
     setSelectedTargetChatId(null);
+    setChatSearch("");
+    setChatDropdownOpen(false);
     setAdminChats([]);
     setAccounts([]);
     setAvailableContacts(0);
@@ -440,26 +456,82 @@ const InviteCampaigns = (): JSX.Element => {
                 )}
               </div>
 
-              {/* Target chat (admin chats dropdown) */}
+              {/* Target chat (searchable dropdown) */}
               <div>
                 <label className="label">Целевая группа</label>
                 {loadingAdminChats ? (
                   <p className="text-xs text-slate-500">Загрузка...</p>
                 ) : (
-                  <select
-                    className="input"
-                    value={selectedTargetChatId ?? ""}
-                    onChange={(e) =>
-                      setSelectedTargetChatId(e.target.value ? Number(e.target.value) : null)
-                    }
-                  >
-                    <option value="">Выберите группу...</option>
-                    {adminChats.map((c) => (
-                      <option key={c.id} value={c.chat_id}>
-                        {c.title} ({c.members_count})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative" ref={chatDropdownRef}>
+                    {selectedTargetChatId && !chatDropdownOpen ? (
+                      <div
+                        className="input flex items-center justify-between cursor-pointer"
+                        onClick={() => setChatDropdownOpen(true)}
+                      >
+                        <span className="text-sm text-slate-200 truncate">
+                          {adminChats.find((c) => c.chat_id === selectedTargetChatId)?.title ?? "Группа"}
+                        </span>
+                        <button
+                          type="button"
+                          className="ml-2 text-slate-500 hover:text-slate-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTargetChatId(null);
+                            setChatSearch("");
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        className="input"
+                        value={chatSearch}
+                        onChange={(e) => {
+                          setChatSearch(e.target.value);
+                          setChatDropdownOpen(true);
+                        }}
+                        onFocus={() => setChatDropdownOpen(true)}
+                        placeholder="Поиск группы..."
+                      />
+                    )}
+                    {chatDropdownOpen && (
+                      <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 shadow-lg">
+                        {adminChats
+                          .filter((c) =>
+                            c.title.toLowerCase().includes(chatSearch.toLowerCase())
+                          )
+                          .map((c) => (
+                            <div
+                              key={c.id}
+                              className={[
+                                "px-3 py-2 text-sm cursor-pointer hover:bg-slate-700",
+                                c.chat_id === selectedTargetChatId
+                                  ? "bg-indigo-900/40 text-indigo-300"
+                                  : "text-slate-200",
+                              ].join(" ")}
+                              onClick={() => {
+                                setSelectedTargetChatId(c.chat_id);
+                                setChatSearch("");
+                                setChatDropdownOpen(false);
+                              }}
+                            >
+                              {c.title}{" "}
+                              <span className="text-xs text-slate-500">
+                                ({c.members_count})
+                              </span>
+                            </div>
+                          ))}
+                        {adminChats.filter((c) =>
+                          c.title.toLowerCase().includes(chatSearch.toLowerCase())
+                        ).length === 0 && (
+                          <div className="px-3 py-2 text-xs text-slate-500">
+                            Ничего не найдено
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
