@@ -140,7 +140,7 @@ async def _run_invite_campaign_dispatch(campaign_id: int, task_id: str | None = 
             campaign.dispatch_task_id
             and campaign.dispatch_task_id != task_id
             and campaign.dispatch_started_at
-            and (now - campaign.dispatch_started_at).total_seconds() < _DISPATCH_LEASE_TTL_SECONDS
+            and (now - (campaign.dispatch_started_at.replace(tzinfo=timezone.utc) if campaign.dispatch_started_at.tzinfo is None else campaign.dispatch_started_at)).total_seconds() < _DISPATCH_LEASE_TTL_SECONDS
         ):
             logger.info(
                 "invite_dispatch: another dispatch running for campaign %d (task_id=%s)",
@@ -445,7 +445,7 @@ async def _run_invite_campaign_dispatch_inner(campaign_id: int) -> None:
                     access_hash = tg_user_info["access_hash"]
                     tg_username = tg_user_info["username"]
 
-                    if not access_hash:
+                    if not access_hash and not tg_username:
                         with SessionLocal() as db:
                             task = db.get(InviteTask, task_id)
                             if task:
