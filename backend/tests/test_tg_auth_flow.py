@@ -526,13 +526,13 @@ class TestTelegramApiIdCoercion:
     """Settings.telegram_api_id must be int even when the env var is a string."""
 
     def test_string_env_coerced_to_int(self, monkeypatch):
-        """TELEGRAM_API_ID='38685950' → settings.telegram_api_id == 38685950 (int)."""
+        """TELEGRAM_API_ID='12345' → settings.telegram_api_id == 12345 (int)."""
         from app.core.settings import Settings
 
-        monkeypatch.setenv("TELEGRAM_API_ID", "38685950")
+        monkeypatch.setenv("TELEGRAM_API_ID", "12345")
         s = Settings()
         assert isinstance(s.telegram_api_id, int)
-        assert s.telegram_api_id == 38685950
+        assert s.telegram_api_id == 12345
 
     def test_empty_string_env_coerced_to_zero(self, monkeypatch):
         """TELEGRAM_API_ID='' → settings.telegram_api_id == 0."""
@@ -547,7 +547,7 @@ class TestTelegramApiIdCoercion:
         """create_tg_account_client passes api_id as int to Client()."""
         from app.core.settings import Settings
 
-        monkeypatch.setenv("TELEGRAM_API_ID", "38685950")
+        monkeypatch.setenv("TELEGRAM_API_ID", "12345")
         monkeypatch.setenv("TELEGRAM_API_HASH", "testhash")
 
         captured = {}
@@ -579,7 +579,7 @@ class TestTelegramApiIdCoercion:
 
         tcmod.create_tg_account_client(account, None, phone="+1234567890")
         assert isinstance(captured["api_id"], int)
-        assert captured["api_id"] == 38685950
+        assert captured["api_id"] == 12345
 
 
 # ─── _resolve_api_credentials validation ──────────────────────────────
